@@ -1219,14 +1219,23 @@ function drawScene(c, W, H, freqData, time) {
 }
 
 let renderInProgress = false;
-function renderFrame() {
+function renderOneFrame() {
   if (!renderInProgress) {
     if (state.analyser && state.freqData) state.analyser.getByteFrequencyData(state.freqData);
     const t = state.audioEl?.currentTime || 0;
     drawScene(ctx, canvas.width, canvas.height, state.freqData, t);
     updateTimeline();
   }
-  requestAnimationFrame(renderFrame);
+}
+function renderFrame() {
+  renderOneFrame();
+  // Use rAF when tab is visible, fallback to setTimeout when hidden
+  // (hidden tab throttles rAF to 0fps which freezes canvas; setTimeout ~15fps works regardless)
+  if (document.visibilityState === 'visible') {
+    requestAnimationFrame(renderFrame);
+  } else {
+    setTimeout(renderFrame, 70);
+  }
 }
 
 // ====================================================================
