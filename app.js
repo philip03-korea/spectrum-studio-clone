@@ -1177,25 +1177,35 @@ function drawStickers(c, W, H, time) {
 const _vfx = { hueOff: 0, lastBeat: 0, beatBoost: 1, cycleIdx: 0, glowAlpha: 0 };
 function updateVfxState(time, data) {
   const v = state.vfx || {};
-  // 그라디언트 스윕: 시간에 따라 hue 회전
-  _vfx.hueOff = v['gradient-sweep'] ? (time * 30) % 360 : 0;
-  // 컬러 사이클: 0.5초마다 팔레트 시프트
-  _vfx.cycleIdx = v['color-cycle'] ? Math.floor(time * 2) : 0;
-  // 비트 펀치: 저주파 평균이 임계 넘으면 1.0 → 1.6 boost
-  if (v['beat-punch'] && data) {
-    let s = 0; for (let i = 0; i < 8; i++) s += data[i] || 0;
-    const bass = s / 8 / 255;
-    if (bass > 0.55 && time - _vfx.lastBeat > 0.18) {
-      _vfx.lastBeat = time; _vfx.beatBoost = 1.6;
+  // 그라디언트 스윕: 시간에 따라 hue 회전 (모든 색상 모드에서 작동)
+  _vfx.hueOff = v['gradient-sweep'] ? (time * 60) % 360 : 0;
+  // 컬러 사이클: 0.4초마다 팔레트 시프트
+  _vfx.cycleIdx = v['color-cycle'] ? Math.floor(time * 2.5) : 0;
+  // 비트 펀치: 저주파 임계 넘으면 부스트, 오디오 없을 땐 passive 시간 펄스
+  if (v['beat-punch']) {
+    if (data) {
+      let s = 0; for (let i = 0; i < 8; i++) s += data[i] || 0;
+      const bass = s / 8 / 255;
+      if (bass > 0.45 && time - _vfx.lastBeat > 0.18) {
+        _vfx.lastBeat = time; _vfx.beatBoost = 1.6;
+      }
+      _vfx.beatBoost = Math.max(1, _vfx.beatBoost * 0.88);
+    } else {
+      // passive: 시간 기반 사인파 펄스 (audio 없어도 가시)
+      _vfx.beatBoost = 1 + Math.abs(Math.sin(time * 3)) * 0.25;
     }
-    _vfx.beatBoost = Math.max(1, _vfx.beatBoost * 0.88);
   } else {
     _vfx.beatBoost = 1;
   }
-  // 글로우 펄스: bass에 따라 spectrum 주변 광원
-  if (v['glow-pulse'] && data) {
-    let s = 0; for (let i = 0; i < 16; i++) s += data[i] || 0;
-    _vfx.glowAlpha = (s / 16 / 255) * 0.6;
+  // 글로우 펄스: bass에 따라 spectrum 주변 광원, 오디오 없을 땐 passive
+  if (v['glow-pulse']) {
+    if (data) {
+      let s = 0; for (let i = 0; i < 16; i++) s += data[i] || 0;
+      const bass = s / 16 / 255;
+      _vfx.glowAlpha = Math.max(0.15, bass * 0.6);  // 최소 0.15는 항상 보이게
+    } else {
+      _vfx.glowAlpha = 0.25 + Math.sin(time * 1.5) * 0.15;  // passive 펄스
+    }
   } else { _vfx.glowAlpha = 0; }
 }
 function applyVfxOverlay(c, W, H) {
@@ -1222,20 +1232,58 @@ function hexToRgba(c, a) {
   return c;
 }
 
+// HEX → HSL 변환 (gradient-sweep용)
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1,3), 16) / 255;
+  const g = parseInt(hex.slice(3,5), 16) / 255;
+  const b = parseInt(hex.slice(5,7), 16) / 255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  let h, s, l = (max + min) / 2;
+  if (max === min) { h = 0; s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) * 60; break;
+      case g: h = ((b - r) / d + 2) * 60; break;
+      case b: h = ((r - g) / d + 4) * 60; break;
+    }
+  }
+  return [h, Math.round(s * 100), Math.round(l * 100)];
+}
+function shiftHue(color, deg) {
+  if (!deg) return color;
+  if (typeof color !== 'string') return color;
+  if (color.startsWith('hsl')) {
+    return color.replace(/hsla?\(([^,]+)/, (m, h) => {
+      const newH = ((parseFloat(h) + deg) % 360 + 360) % 360;
+      return color.startsWith('hsla') ? `hsla(${newH}` : `hsl(${newH}`;
+    });
+  }
+  if (color.startsWith('#') && color.length === 7) {
+    const [h, s, l] = hexToHsl(color);
+    return `hsl(${((h + deg) % 360 + 360) % 360}, ${s}%, ${l}%)`;
+  }
+  return color;
+}
 function getColorFor(i, total) {
   const m = state.spectrum.colorMode;
-  if (m === 'single') return state.spectrum.color;
-  const p = PRESETS[state.genre];
-  const palette = (p?.colors?.length ? p.colors : [state.spectrum.color, '#4dd0ff', '#ffb547']);
-  if (m === 'rainbow') {
-    const hue = ((i / Math.max(1, total)) * 360 + _vfx.hueOff) % 360;
-    return `hsl(${hue}, 90%, 62%)`;
+  let base;
+  if (m === 'single') {
+    base = state.spectrum.color;
+  } else if (m === 'rainbow') {
+    const hue = ((i / Math.max(1, total)) * 360) % 360;
+    base = `hsl(${hue}, 90%, 62%)`;
+  } else {
+    // multi
+    const p = PRESETS[state.genre];
+    const palette = (p?.colors?.length ? p.colors : [state.spectrum.color, '#4dd0ff', '#ffb547']);
+    const idx = (i + (_vfx.cycleIdx || 0)) % palette.length;
+    base = palette[idx];
   }
-  // color-cycle: rotate palette over time
-  if (_vfx.cycleIdx) {
-    return palette[(i + _vfx.cycleIdx) % palette.length];
-  }
-  return palette[i % palette.length];
+  // gradient-sweep: 모든 모드에서 시간에 따라 hue 회전
+  if (_vfx.hueOff) base = shiftHue(base, _vfx.hueOff);
+  return base;
 }
 // Returns same color but with alpha (RGBA hex or hsla form) — works for both hex and hsl
 function getColorForAlpha(i, total, alpha) {
