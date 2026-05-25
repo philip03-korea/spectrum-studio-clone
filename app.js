@@ -24,7 +24,7 @@ const DEFAULT_STATE = () => ({
   tool: 'bg',
   bg: { brightness: 100, saturation: 100, blur: 0, dim: 20 },
   spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80 },
-  title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'bold', deco: 'none', position: 'bottom-center', yFine: 0 },
+  title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'bold', deco: 'none', position: 'bottom-center', xFine: 0, yFine: 0 },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
   lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: '', display: 'ko' },
@@ -533,29 +533,97 @@ async function handleBackgrounds(files, opts = {}) {
 }
 function renderBgThumbs() {
   const wrap = $('bg-thumbs');
+  const meta = $('bg-meta');
   const count = state.backgrounds.length;
   $('bg-count').textContent = count;
+  if (meta) meta.classList.toggle('hidden', !count);
   if (!count) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
   wrap.classList.remove('hidden');
   wrap.innerHTML = '';
   state.backgrounds.forEach((bg, i) => {
     const t = document.createElement('div');
     t.className = 'bg-thumb' + (i === state.bgActiveIdx ? ' active' : '');
-    t.title = bg.name;
+    t.title = bg.name + ' (드래그로 순서 변경)';
+    t.draggable = true;
+    t.dataset.idx = String(i);
     if (bg.kind === 'video') {
       const v = document.createElement('video');
       v.src = bg.url; v.muted = true; v.loop = true; v.playsInline = true;
       v.addEventListener('loadedmetadata', () => v.play().catch(()=>{}));
       t.appendChild(v);
     } else {
-      const im = document.createElement('img'); im.src = bg.url; t.appendChild(im);
+      const im = document.createElement('img'); im.src = bg.url; im.draggable = false; t.appendChild(im);
     }
     const x = document.createElement('button');
     x.className = 'bg-thumb-x'; x.textContent = '×';
     x.addEventListener('click', async (e) => { e.stopPropagation(); await removeBackground(i); });
     t.appendChild(x);
     t.addEventListener('click', () => { state.bgActiveIdx = i; renderBgThumbs(); debouncedSave(); });
+    // Drag-and-drop reorder
+    t.addEventListener('dragstart', e => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(i));
+      t.classList.add('dragging');
+    });
+    t.addEventListener('dragend', () => t.classList.remove('dragging'));
+    t.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; t.classList.add('drop-target'); });
+    t.addEventListener('dragleave', () => t.classList.remove('drop-target'));
+    t.addEventListener('drop', async e => {
+      e.preventDefault();
+      t.classList.remove('drop-target');
+      const from = Number(e.dataTransfer.getData('text/plain'));
+      const to = i;
+      if (from === to || isNaN(from)) return;
+      await reorderBackgrounds(from, to);
+    });
     wrap.appendChild(t);
+  });
+}
+async function reorderBackgrounds(from, to) {
+  if (from < 0 || to < 0 || from >= state.backgrounds.length || to >= state.backgrounds.length) return;
+  const [moved] = state.backgrounds.splice(from, 1);
+  state.backgrounds.splice(to, 0, moved);
+  // Keep active idx pointing at moved item
+  if (state.bgActiveIdx === from) state.bgActiveIdx = to;
+  else if (from < state.bgActiveIdx && to >= state.bgActiveIdx) state.bgActiveIdx -= 1;
+  else if (from > state.bgActiveIdx && to <= state.bgActiveIdx) state.bgActiveIdx += 1;
+  renderBgThumbs();
+  // Persist new order to IDB
+  const stored = await dbGet('backgrounds') || [];
+  if (stored.length === state.backgrounds.length) {
+    const [m] = stored.splice(from, 1);
+    stored.splice(to, 0, m);
+    await dbSet('backgrounds', stored);
+  }
+  debouncedSave();
+}
+function bindBgSort() {
+  const btn = $('btn-bg-sort'); if (!btn) return;
+  btn.addEventListener('click', async () => {
+    // Cycle: null → asc → desc → null
+    const cur = state.bgSortDir || null;
+    const next = cur === null ? 'asc' : cur === 'asc' ? 'desc' : null;
+    state.bgSortDir = next;
+    $('bg-sort-icon').textContent = next === 'asc' ? 'A→Z' : next === 'desc' ? 'Z→A' : 'A↔Z';
+    if (next) {
+      const active = state.backgrounds[state.bgActiveIdx];
+      state.backgrounds.sort((a, b) => {
+        const cmp = String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+        return next === 'asc' ? cmp : -cmp;
+      });
+      // Restore active idx pointing to same item
+      state.bgActiveIdx = Math.max(0, state.backgrounds.indexOf(active));
+      // Resync IDB
+      const stored = await dbGet('backgrounds') || [];
+      // Same order: sort by name
+      stored.sort((a, b) => {
+        const cmp = String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+        return next === 'asc' ? cmp : -cmp;
+      });
+      await dbSet('backgrounds', stored);
+    }
+    renderBgThumbs();
+    debouncedSave();
   });
 }
 async function removeBackground(idx) {
@@ -727,6 +795,7 @@ function bindAllSliders() {
   bindSlider('title-size',     v => state.title.size = v,    v => v + 'px');
   bindSlider('title-y',        v => state.title.y = v,       v => v + '%');  // legacy
   bindSlider('title-y-fine',   v => state.title.yFine = v,   v => v + '%');
+  bindSlider('title-x-fine',   v => state.title.xFine = v,   v => v + '%');
   bindSlider('logo-x',         v => state.logoPos.x = v,        v => v + '%');
   bindSlider('logo-y',         v => state.logoPos.y = v,        v => v + '%');
   bindSlider('logo-size',      v => state.logoPos.size = v,     v => v + 'px');
@@ -754,6 +823,7 @@ function bindAllSliders() {
   onE('lyrics-shadow','change',e => { state.lyrics.shadow = e.target.value; debouncedSave(); });
   onE('lyrics-mode',  'change',e => { state.lyrics.mode = e.target.value; debouncedSave(); });
   onE('lyrics-highlight','change',e => { state.lyrics.highlight = e.target.checked; debouncedSave(); });
+  onE('logo-shadow', 'change', e => { state.logoPos.shadow = e.target.checked; debouncedSave(); });
   onE('lyrics-lang',  'change',e => { state.lyrics.lang = e.target.value; debouncedSave(); });
   onE('lyrics-display','change',e => { state.lyrics.display = e.target.value; debouncedSave(); });
   onE('lyrics-translate','click', translateAllLyrics);
@@ -1480,8 +1550,9 @@ function drawTitle(c, W, H, data) {
   if (!state.title.show || !state.title.text) return;
   const text = state.title.text;
   const pos = TITLE_POSITIONS[state.title.position || 'bottom-center'] || TITLE_POSITIONS['bottom-center'];
+  const xFine = (state.title.xFine || 0);
   const yFine = (state.title.yFine || 0);
-  const x = W * (pos.x / 100);
+  const x = W * ((pos.x + xFine) / 100);
   const y = H * ((pos.y + yFine) / 100);
   const scale = state.title.pulse ? getPulseScale(data) : 1;
   const size = state.title.size * scale;
@@ -1580,66 +1651,70 @@ function drawTitle(c, W, H, data) {
       break;
   }
   c.restore();
-  if (pos.align === 'center') drawTitleDeco(c, W, H, y, size, text, deco, color, fam);
-  // badge UI was removed in v1.2 — keep function but it stays disabled by default
+  drawTitleDeco(c, W, H, x, y, size, text, deco, color, fam, pos.align);
   drawBadge(c, W, H, y, size);
 }
 
-function drawTitleDeco(c, W, H, y, size, text, deco, color, fam) {
+function drawTitleDeco(c, W, H, x, y, size, text, deco, color, fam, align) {
   if (!deco || deco === 'none') return;
   c.save();
-  c.textAlign = 'center'; c.textBaseline = 'middle';
   c.font = `700 ${size}px ${fam}`;
   const m = c.measureText(text);
+  // Compute text bounding box [L..R] in canvas coords based on align
+  const L = align === 'left' ? x : (align === 'right' ? x - m.width : x - m.width/2);
+  const R = align === 'left' ? x + m.width : (align === 'right' ? x : x + m.width/2);
+  const C = (L + R) / 2;
   switch (deco) {
     case 'caption':
+      c.textAlign = 'center'; c.textBaseline = 'middle';
       c.font = `500 ${size * 0.3}px ${fam}`;
-      c.fillStyle = 'rgba(255,255,255,0.7)';
-      c.fillText('— TRACK 01 —', W/2, y - size * 0.85);
+      c.fillStyle = 'rgba(255,255,255,0.78)';
+      c.fillText('— TRACK 01 —', C, y - size * 0.85);
       break;
     case 'barLeft':
       c.fillStyle = color;
-      c.fillRect(W/2 - m.width/2 - size * 0.35, y - size * 0.45, size * 0.08, size * 0.9);
+      c.fillRect(L - size * 0.35, y - size * 0.45, size * 0.08, size * 0.9);
       break;
     case 'frame': {
       const pad = size * 0.4;
       c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.04);
-      c.strokeRect(W/2 - m.width/2 - pad, y - size * 0.75, m.width + pad * 2, size * 1.5);
+      c.strokeRect(L - pad, y - size * 0.75, (R - L) + pad * 2, size * 1.5);
       break;
     }
     case 'divider':
       c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.04);
       c.beginPath();
-      c.moveTo(W/2 - m.width/2 - 20, y + size * 0.8);
-      c.lineTo(W/2 + m.width/2 + 20, y + size * 0.8);
+      c.moveTo(L - 20, y + size * 0.8);
+      c.lineTo(R + 20, y + size * 0.8);
       c.stroke();
       break;
     case 'bgWord':
+      c.textAlign = align; c.textBaseline = 'middle';
       c.font = `900 ${size * 2.6}px ${fam}`;
       c.fillStyle = 'rgba(255,255,255,0.06)';
-      c.fillText(text, W/2, y);
+      c.fillText(text, x, y);
       break;
     case 'corner': {
       c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.04);
       const cs = size * 0.32;
-      const L = W/2 - m.width/2 - size * 0.35, R = W/2 + m.width/2 + size * 0.35;
+      const L2 = L - size * 0.35, R2 = R + size * 0.35;
       const T = y - size * 0.75, B = y + size * 0.75;
       c.beginPath();
-      c.moveTo(L, T + cs); c.lineTo(L, T); c.lineTo(L + cs, T);
-      c.moveTo(R - cs, T); c.lineTo(R, T); c.lineTo(R, T + cs);
-      c.moveTo(L, B - cs); c.lineTo(L, B); c.lineTo(L + cs, B);
-      c.moveTo(R - cs, B); c.lineTo(R, B); c.lineTo(R, B - cs);
+      c.moveTo(L2, T + cs); c.lineTo(L2, T); c.lineTo(L2 + cs, T);
+      c.moveTo(R2 - cs, T); c.lineTo(R2, T); c.lineTo(R2, T + cs);
+      c.moveTo(L2, B - cs); c.lineTo(L2, B); c.lineTo(L2 + cs, B);
+      c.moveTo(R2 - cs, B); c.lineTo(R2, B); c.lineTo(R2, B - cs);
       c.stroke();
       break;
     }
     case 'wave': {
       c.strokeStyle = color; c.lineWidth = 2;
-      const len = Math.max(160, m.width + 40);
+      const len = Math.max(160, (R - L) + 40);
       c.beginPath();
       for (let i = 0; i <= 40; i++) {
-        const x = W/2 - len/2 + (i / 40) * len;
+        const wx = C - len/2 + (i / 40) * len;
         const wy = y + size * 0.85 + Math.sin(i * 0.5) * 5;
-        if (i === 0) c.moveTo(x, wy); else c.lineTo(x, wy);
+        if (i === 0) c.moveTo(wx, wy); else c.lineTo(wx, wy);
       }
       c.stroke();
       break;
@@ -1803,9 +1878,17 @@ function drawLogo(c, W, H) {
   const ratio = state.logo.height / state.logo.width;
   const w = size, h = size * ratio;
   const x = (W - w) * (state.logoPos.x / 100), y = (H - h) * (state.logoPos.y / 100);
+  c.save();
   c.globalAlpha = state.logoPos.opacity / 100;
+  if (state.logoPos.shadow) {
+    // 입체 그림자 효과: drop shadow + 살짝 어두운 듀얼 패스
+    c.shadowColor = 'rgba(0,0,0,0.75)';
+    c.shadowBlur = Math.max(4, size * 0.08);
+    c.shadowOffsetX = Math.max(2, size * 0.03);
+    c.shadowOffsetY = Math.max(3, size * 0.05);
+  }
   c.drawImage(state.logo.el, x, y, w, h);
-  c.globalAlpha = 1;
+  c.restore();
 }
 
 function drawFrame(c, W, H) {
@@ -2971,6 +3054,7 @@ async function init() {
   bindEffectChips();
   bindTitleStyleChips();
   bindTitlePosChips();
+  bindBgSort();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);

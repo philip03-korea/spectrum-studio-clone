@@ -161,7 +161,10 @@ body {
 .bg-tab.active { background: var(--accent); color: #fff; border-color: var(--accent-hover); }
 .bg-tab-content { display: block; }
 .bg-tab-content.hidden { display: none; }
-.bg-meta { font-size: 11px; color: var(--text-2); margin-top: 6px; text-align: right; }
+.bg-meta { font-size: 11px; color: var(--text-2); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
+.bg-thumb { cursor: grab; }
+.bg-thumb.dragging { opacity: 0.4; cursor: grabbing; }
+.bg-thumb.drop-target { border-color: var(--accent) !important; transform: scale(1.05); }
 
 .drop-tiny { min-height: 80px; }
 .drop-tiny .drop-label { padding: 12px 6px; }
