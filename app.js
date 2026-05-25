@@ -1473,7 +1473,13 @@ function ensureStage2Started() {
   if (stage2Started) return;
   stage2Started = true;
   applyCanvasSize();
-  requestAnimationFrame(renderFrame);
+  // Kick the loop. Use both rAF (visible) and setTimeout (fallback for hidden tab).
+  // renderFrame itself decides which to use for subsequent frames.
+  if (document.visibilityState === 'visible') {
+    requestAnimationFrame(renderFrame);
+  } else {
+    setTimeout(renderFrame, 0);
+  }
 }
 
 // ====================================================================
