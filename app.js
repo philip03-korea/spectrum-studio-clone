@@ -982,7 +982,7 @@ function getColorForAlpha(i, total, alpha) {
   return c;
 }
 function drawSpectrum(c, W, H, data) {
-  if (!data) return;
+  // Don't early-return on missing data — still draw baseline so user sees layout
   const sizePct = state.spectrum.size / 100;
   const cy = H * (state.spectrum.y / 100);
   switch (state.viz) {
@@ -1039,9 +1039,10 @@ function drawRing(c, data, W, H, sizePct, cy) {
 }
 function drawRising(c, data, W, H, sizePct, cy) {
   const N = 96, barW = (W / N) * 0.75, gap = (W / N) * 0.25, maxH = H * 0.5 * sizePct;
-  const step = Math.floor(data.length / N / 2);
+  const step = Math.floor((data?.length || 1024) / N / 2);
   for (let i = 0; i < N; i++) {
-    const v = data[i * step] / 255, h = Math.max(1, v * maxH), x = i * (barW + gap);
+    const raw = data ? data[i * step] / 255 : 0;
+    const v = Math.max(0.03, raw), h = Math.max(2, v * maxH), x = i * (barW + gap);
     const g = c.createLinearGradient(0, cy, 0, cy - h);
     g.addColorStop(0, getColorForAlpha(i, N, 1));
     g.addColorStop(1, getColorForAlpha(i, N, 0));
