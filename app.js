@@ -703,7 +703,9 @@ function renderPalette(extra) {
   });
 }
 function bindSlider(id, setter, fmt) {
-  const el = $(id), valEl = $(id + '-v');
+  const el = $(id);
+  if (!el) return;  // element may not exist in current layout
+  const valEl = $(id + '-v');
   el.addEventListener('input', () => {
     const v = Number(el.value); setter(v);
     if (valEl) valEl.textContent = fmt(v); debouncedSave();
@@ -730,19 +732,21 @@ function bindAllSliders() {
   // Frame
   bindSlider('frame-intensity', v => state.frame.intensity = v, v => v + '%');
 
-  $('title-text').addEventListener('input', e => { state.title.text = e.target.value; debouncedSave(); });
-  $('title-show').addEventListener('change', e => { state.title.show = e.target.checked; debouncedSave(); });
-  $('title-font').addEventListener('change', e => { state.title.font = e.target.value; debouncedSave(); });
-  $('title-color').addEventListener('input', e => { state.title.color = e.target.value; debouncedSave(); });
-  $('title-pulse').addEventListener('change', e => { state.title.pulse = e.target.checked; debouncedSave(); });
-  $('badge-show').addEventListener('change', e => { state.title.badge = e.target.checked; debouncedSave(); });
-  $('badge-pos').addEventListener('change', e => { state.title.badgePos = e.target.value; debouncedSave(); });
-  $('lyrics-show').addEventListener('change', e => { state.lyrics.show = e.target.checked; debouncedSave(); });
-  $('lyrics-color').addEventListener('input', e => { state.lyrics.color = e.target.value; debouncedSave(); });
-  $('lyrics-shadow').addEventListener('change', e => { state.lyrics.shadow = e.target.value; debouncedSave(); });
-  $('slideshow-enabled').addEventListener('change', e => { state.slideshow.enabled = e.target.checked; debouncedSave(); });
-  $('slideshow-crossfade').addEventListener('change', e => { state.slideshow.crossfade = e.target.checked; debouncedSave(); });
-  $('frame-style').addEventListener('change', e => { state.frame.style = e.target.value; debouncedSave(); });
+  // Defensive bindings — element might not exist in current layout
+  const onE = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  onE('title-text',  'input',  e => { state.title.text = e.target.value; debouncedSave(); });
+  onE('title-show',  'change', e => { state.title.show = e.target.checked; debouncedSave(); });
+  onE('title-font',  'change', e => { state.title.font = e.target.value; debouncedSave(); });  // legacy
+  onE('title-color', 'input',  e => { state.title.color = e.target.value; debouncedSave(); });
+  onE('title-pulse', 'change', e => { state.title.pulse = e.target.checked; debouncedSave(); });
+  onE('badge-show',  'change', e => { state.title.badge = e.target.checked; debouncedSave(); });
+  onE('badge-pos',   'change', e => { state.title.badgePos = e.target.value; debouncedSave(); });
+  onE('lyrics-show', 'change', e => { state.lyrics.show = e.target.checked; debouncedSave(); });
+  onE('lyrics-color','input',  e => { state.lyrics.color = e.target.value; debouncedSave(); });
+  onE('lyrics-shadow','change',e => { state.lyrics.shadow = e.target.value; debouncedSave(); });
+  onE('slideshow-enabled', 'change', e => { state.slideshow.enabled = e.target.checked; debouncedSave(); });
+  onE('slideshow-crossfade','change', e => { state.slideshow.crossfade = e.target.checked; debouncedSave(); });
+  onE('frame-style', 'change', e => { state.frame.style = e.target.value; debouncedSave(); });
 
   qsa('[data-cm]').forEach(b => b.addEventListener('click', () => {
     qsa('[data-cm]').forEach(x => x.classList.remove('active')); b.classList.add('active');
