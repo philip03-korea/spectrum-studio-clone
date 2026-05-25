@@ -235,11 +235,11 @@
         </div>
       </section>
 
-      <!-- ===== STAGE 2 ===== -->
+      <!-- ===== STAGE 2 (재작업: 원본 충실 재현) ===== -->
       <section class="step-panel" data-panel="2">
-        <!-- 장르 탭 -->
+        <!-- 장르 프리셋 탭 (상단) -->
         <div class="genre-tabs">
-          <button class="genre-tab active" data-genre="project">📁 프로젝트</button>
+          <button class="genre-tab active" data-genre="project">🎵 프리셋</button>
           <button class="genre-tab" data-genre="edm">⚡ EDM</button>
           <button class="genre-tab" data-genre="lofi">☕ LO-FI</button>
           <button class="genre-tab" data-genre="pop">🎵 POP</button>
@@ -251,34 +251,103 @@
         </div>
 
         <div class="studio-grid">
-          <!-- 좌측 도구 패널 -->
+          <!-- 좌측 도구 패널: 3 메인 탭 -->
           <aside class="tool-panel">
-            <div class="tool-section">
-              <div class="tool-title">배경 필터 &amp; 프레임</div>
-              <div class="tool-grid">
-                <button class="tool-btn active" data-tool="bg">🖼️<br>배경</button>
-                <button class="tool-btn" data-tool="frame">▣<br>프레임</button>
-                <button class="tool-btn" data-tool="filter">✨<br>필터</button>
+            <div class="left-tabs">
+              <button class="left-tab active" data-left-tab="spectrum">📊<br>스펙트럼</button>
+              <button class="left-tab" data-left-tab="bg">🖼️<br>배경</button>
+              <button class="left-tab" data-left-tab="effect">✨<br>이펙트</button>
+            </div>
+
+            <!-- 스펙트럼 탭 -->
+            <div class="left-tab-content" data-left-content="spectrum">
+              <div class="sub-hdr">1단계: 효과 선택 <span class="sub-hint">우측 조정 →</span></div>
+              <label class="rainbow-toggle">
+                <span>🌈 무지개 모드</span>
+                <input type="checkbox" id="rainbow-mode" />
+              </label>
+              <div class="sub-title">📊 비주얼라이저 종류</div>
+              <div class="viz-grid">
+                <button class="viz-btn" data-viz="none">🚫<br>미적용</button>
+                <button class="viz-btn active" data-viz="bars">▮▮▮<br>막대형</button>
+                <button class="viz-btn" data-viz="sym-bars">▮▼▮<br>대칭막대</button>
+                <button class="viz-btn" data-viz="double-bar">▮▮▮<br>더블바</button>
+                <button class="viz-btn" data-viz="mini-slim">|||<br>미니슬림</button>
+                <button class="viz-btn" data-viz="mini-cap">▮▮▮<br>미니캡슐</button>
+                <button class="viz-btn" data-viz="mini-split">⫶ ⫶<br>미니분할</button>
+                <button class="viz-btn" data-viz="ring">○<br>원형</button>
+                <button class="viz-btn" data-viz="ring-inner">◎<br>원형(내부)</button>
+                <button class="viz-btn" data-viz="freq-ring">⊕<br>주파수링</button>
+                <button class="viz-btn" data-viz="line">∼<br>선형</button>
+                <button class="viz-btn" data-viz="wave3">≋<br>파형(3중)</button>
+                <button class="viz-btn" data-viz="field">≈≈≈<br>필드웨이브</button>
+                <button class="viz-btn" data-viz="ribbon">∾<br>리본웨이브</button>
+                <button class="viz-btn" data-viz="particle">⋮⁛⋮<br>입자스펙트럼</button>
+              </div>
+              <div class="sub-title">✨ 비주얼라이저 효과</div>
+              <div class="viz-grid">
+                <button class="vfx-btn" data-vfx="glow-pulse">✦<br>글로우펄스</button>
+                <button class="vfx-btn" data-vfx="beat-punch">⚡<br>비트펀치</button>
+                <button class="vfx-btn" data-vfx="gradient-sweep">🌊<br>그라디언트스윕</button>
+                <button class="vfx-btn" data-vfx="color-cycle">🎨<br>컬러사이클</button>
               </div>
             </div>
-            <div class="tool-section">
-              <div class="tool-title">비주얼라이저</div>
-              <div class="tool-grid">
-                <button class="tool-btn" data-tool="viz-bars">▮▮▮<br>바</button>
-                <button class="tool-btn" data-tool="viz-ring">○<br>링</button>
-                <button class="tool-btn" data-tool="viz-wave">∿<br>파형</button>
-                <button class="tool-btn" data-tool="viz-dot">●●●<br>닷</button>
-                <button class="tool-btn" data-tool="viz-rising">↑↑↑<br>라이즈</button>
+
+            <!-- 배경 탭 -->
+            <div class="left-tab-content hidden" data-left-content="bg">
+              <div class="sub-hdr">배경 필터 &amp; 트랜지션</div>
+              <div class="sub-title">🎨 컬러 필터</div>
+              <div class="viz-grid grid2">
+                <button class="filter-chip active" data-filter="none">원본</button>
+                <button class="filter-chip" data-filter="dark">어둡게</button>
+                <button class="filter-chip" data-filter="calm">차분</button>
+                <button class="filter-chip" data-filter="warm">따뜻한</button>
+                <button class="filter-chip" data-filter="cool">시원한</button>
+                <button class="filter-chip" data-filter="vivid">선명</button>
+                <button class="filter-chip" data-filter="bw">흑백</button>
+                <button class="filter-chip" data-filter="fade">페이드</button>
+              </div>
+              <div class="sub-title">⚡ 배경 효과</div>
+              <div class="viz-grid grid2">
+                <button class="bgfx-chip" data-bgfx="blur">🌫️<br>배경블러</button>
+                <button class="bgfx-chip" data-bgfx="zoom-light">💡<br>줌렌조명</button>
+              </div>
+              <div class="sub-title">🔀 트랜지션 (다중 배경 시)</div>
+              <div class="viz-grid grid3">
+                <button class="trans-chip active" data-trans="fade">💧<br>페이드</button>
+                <button class="trans-chip" data-trans="dissolve">▦<br>디졸브</button>
+                <button class="trans-chip" data-trans="slide">↔️<br>슬라이드</button>
+                <button class="trans-chip" data-trans="zoom">🔍<br>줌</button>
+                <button class="trans-chip" data-trans="pan">📷<br>팬덤</button>
               </div>
             </div>
-            <div class="tool-section">
-              <div class="tool-title">스타일 메이크업</div>
-              <div class="tool-grid">
-                <button class="tool-btn" data-tool="color">🎨<br>색상</button>
-                <button class="tool-btn" data-tool="title">A<br>타이틀</button>
-                <button class="tool-btn" data-tool="logo">◆<br>로고</button>
-                <button class="tool-btn" data-tool="sticker">🏷️<br>스티커</button>
-                <button class="tool-btn" data-tool="lyrics">🎤<br>가사</button>
+
+            <!-- 이펙트 탭 -->
+            <div class="left-tab-content hidden" data-left-content="effect">
+              <div class="sub-hdr">파티클·핀터·오버레이 효과</div>
+              <div class="sub-title">🎬 포스트 프로세싱</div>
+              <div class="viz-grid grid2">
+                <button class="pp-chip" data-pp="beat-pulse">⚡<br>비트펄스</button>
+                <button class="pp-chip" data-pp="zoom-pulse">🔍<br>줌펄스</button>
+                <button class="pp-chip" data-pp="film-grain">🎞️<br>필름그레인</button>
+                <button class="pp-chip" data-pp="light-leak">☀️<br>라이트릭</button>
+                <button class="pp-chip" data-pp="chromatic">🔮<br>색수차</button>
+                <button class="pp-chip" data-pp="bass-wave">🌊<br>베이스파동</button>
+              </div>
+              <div class="sub-title">✨ 스타일 파티클</div>
+              <div class="viz-grid grid2">
+                <button class="ptc-chip" data-ptc="fire">🔥<br>사실적불꽃</button>
+                <button class="ptc-chip" data-ptc="water">💧<br>사실적물티</button>
+                <button class="ptc-chip" data-ptc="sparkle">✨<br>반짝임</button>
+                <button class="ptc-chip" data-ptc="glitter">💫<br>글리터</button>
+                <button class="ptc-chip" data-ptc="light-rays">☀️<br>빛줄기</button>
+                <button class="ptc-chip" data-ptc="fireflies">🌟<br>반딧불</button>
+                <button class="ptc-chip" data-ptc="stars">⭐<br>별모양</button>
+                <button class="ptc-chip" data-ptc="sound-rings">🎵<br>음파링</button>
+                <button class="ptc-chip" data-ptc="smoke">💨<br>연기</button>
+                <button class="ptc-chip" data-ptc="dust">🌫️<br>빛먼지</button>
+                <button class="ptc-chip" data-ptc="petals">🌸<br>꽃잎</button>
+                <button class="ptc-chip" data-ptc="snow">❄️<br>눈내림</button>
               </div>
             </div>
           </aside>
@@ -301,11 +370,103 @@
             </div>
           </div>
 
-          <!-- 우측 조정 패널 -->
+          <!-- 우측 조정 패널: 5 메인 탭 -->
           <aside class="adjust-panel" id="adjust-panel">
-            <!-- bg 도구 (기본) -->
-            <div class="adjust-section" data-adjust="bg">
-              <div class="adjust-title">배경 영상 조정</div>
+            <div class="right-tabs">
+              <button class="right-tab active" data-right-tab="spectrum">📊<br>스펙트럼</button>
+              <button class="right-tab" data-right-tab="bg">🖼️<br>배경</button>
+              <button class="right-tab" data-right-tab="effect">✨<br>이펙트</button>
+              <button class="right-tab" data-right-tab="title">𝐀<br>타이틀</button>
+              <button class="right-tab" data-right-tab="logo">◆<br>로고설정</button>
+            </div>
+
+            <!-- 스펙트럼 조정 -->
+            <div class="right-tab-content" data-right-content="spectrum">
+              <div class="adjust-section-hdr">
+                <span class="hdr-step">2단계: 스펙트럼 조정</span>
+                <span class="hdr-sub" id="hdr-viz-sub">BARS · 위치/크기/감도/컬러</span>
+              </div>
+              <div class="adjust-section-title">📊 스펙트럼 조정</div>
+              <label class="check-row">
+                <input type="checkbox" id="spec-center" checked /> 정중앙 정렬
+              </label>
+              <label class="slider-row">
+                <span>전체 폭(WIDTH)</span>
+                <input type="range" min="20" max="100" value="100" id="spec-width" />
+                <span class="slider-val" id="spec-width-v">100%</span>
+              </label>
+              <label class="slider-row">
+                <span>반응 속도</span>
+                <input type="range" min="0" max="100" value="70" id="spec-speed" />
+                <span class="slider-val" id="spec-speed-v">70%</span>
+              </label>
+              <div class="sub-title">렌더 스타일</div>
+              <div class="seg-row3">
+                <button class="seg-mini active" data-render-style="line">📈 라인</button>
+                <button class="seg-mini" data-render-style="dot">⚫ 원형점</button>
+                <button class="seg-mini" data-render-style="square">▪ 네모점</button>
+              </div>
+              <label class="slider-row">
+                <span>반응 민감도</span>
+                <input type="range" min="0" max="200" value="85" id="spec-sens" />
+                <span class="slider-val" id="spec-sens-v">85</span>
+              </label>
+              <label class="slider-row">
+                <span>주파수 대역</span>
+                <input type="range" min="16" max="128" value="64" id="spec-bands" />
+                <span class="slider-val" id="spec-bands-v">64</span>
+              </label>
+              <label class="slider-row">
+                <span>최대 높이</span>
+                <input type="range" min="20" max="200" value="100" id="spec-maxh" />
+                <span class="slider-val" id="spec-maxh-v">100</span>
+              </label>
+              <label class="slider-row">
+                <span>선 두께</span>
+                <input type="range" min="1" max="20" value="4" id="spec-line" />
+                <span class="slider-val" id="spec-line-v">4</span>
+              </label>
+              <label class="slider-row">
+                <span>막대 폭</span>
+                <input type="range" min="1" max="30" value="8" id="spec-barw" />
+                <span class="slider-val" id="spec-barw-v">8</span>
+              </label>
+              <label class="slider-row">
+                <span>대역 간격</span>
+                <input type="range" min="0" max="30" value="0" id="spec-gap" />
+                <span class="slider-val" id="spec-gap-v">0</span>
+              </label>
+              <div class="adjust-divider">색상 모드</div>
+              <div class="color-mode-row">
+                <button class="seg-btn active" data-cm="single">단색</button>
+                <button class="seg-btn" data-cm="multi">멀티</button>
+                <button class="seg-btn" data-cm="rainbow">레인보우</button>
+              </div>
+              <div class="palette" id="palette"></div>
+              <label class="slider-row">
+                <span>크기</span>
+                <input type="range" min="20" max="100" value="60" id="adj-size" />
+                <span class="slider-val" id="adj-size-v">60%</span>
+              </label>
+              <label class="slider-row">
+                <span>위치(Y)</span>
+                <input type="range" min="0" max="100" value="80" id="adj-y" />
+                <span class="slider-val" id="adj-y-v">80%</span>
+              </label>
+            </div>
+
+            <!-- 배경 조정 -->
+            <div class="right-tab-content hidden" data-right-content="bg">
+              <div class="adjust-section-hdr">
+                <span class="hdr-step">2단계: 배경 조정</span>
+                <span class="hdr-sub">필터 · 강도/밝기/비네팅</span>
+              </div>
+              <div class="adjust-section-title">🖼️ 배경 강도 조정</div>
+              <label class="slider-row">
+                <span>필터 강도</span>
+                <input type="range" min="0" max="100" value="50" id="bg-filter-str" />
+                <span class="slider-val" id="bg-filter-str-v">50%</span>
+              </label>
               <label class="slider-row">
                 <span>밝기</span>
                 <input type="range" min="0" max="200" value="100" id="adj-brightness" />
@@ -326,6 +487,16 @@
                 <input type="range" min="0" max="80" value="20" id="adj-dim" />
                 <span class="slider-val" id="adj-dim-v">20%</span>
               </label>
+              <label class="slider-row">
+                <span>비네팅 세기</span>
+                <input type="range" min="0" max="100" value="0" id="bg-vignette" />
+                <span class="slider-val" id="bg-vignette-v">0%</span>
+              </label>
+              <label class="slider-row">
+                <span>트랜지션 길이</span>
+                <input type="range" min="0" max="40" value="12" id="bg-trans-len" />
+                <span class="slider-val" id="bg-trans-len-v">1.2초</span>
+              </label>
               <div class="adjust-divider">슬라이드쇼 (여러 배경)</div>
               <label class="check-row">
                 <input type="checkbox" id="slideshow-enabled" /> 배경 자동 전환
@@ -336,18 +507,15 @@
                 <span class="slider-val" id="slideshow-interval-v">5초</span>
               </label>
               <label class="check-row">
-                <input type="checkbox" id="slideshow-crossfade" checked /> 부드러운 전환 (크로스페이드)
+                <input type="checkbox" id="slideshow-crossfade" checked /> 크로스페이드
               </label>
-            </div>
-            <!-- frame 도구 -->
-            <div class="adjust-section hidden" data-adjust="frame">
-              <div class="adjust-title">프레임</div>
-              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
+              <div class="adjust-divider">프레임</div>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
                 <span>스타일</span>
                 <select class="text-input" id="frame-style">
                   <option value="none">없음</option>
-                  <option value="cinemascope">시네마스코프 (2.35:1 레터박스)</option>
-                  <option value="vignette">비네팅 (가장자리 어둡게)</option>
+                  <option value="cinemascope">시네마스코프</option>
+                  <option value="vignette">비네팅</option>
                   <option value="rounded">둥근 모서리</option>
                 </select>
               </label>
@@ -357,56 +525,78 @@
                 <span class="slider-val" id="frame-intensity-v">50%</span>
               </label>
             </div>
-            <!-- filter 도구 -->
-            <div class="adjust-section hidden" data-adjust="filter">
-              <div class="adjust-title">필터 프리셋</div>
-              <div class="filter-grid">
-                <button class="filter-btn active" data-filter="none">기본</button>
-                <button class="filter-btn" data-filter="vintage">빈티지</button>
-                <button class="filter-btn" data-filter="bw">흑백</button>
-                <button class="filter-btn" data-filter="warm">웜톤</button>
-                <button class="filter-btn" data-filter="cool">쿨톤</button>
-                <button class="filter-btn" data-filter="dream">드림</button>
+
+            <!-- 이펙트 조정 -->
+            <div class="right-tab-content hidden" data-right-content="effect">
+              <div class="adjust-section-hdr">
+                <span class="hdr-step">2단계: 이펙트 조정</span>
+                <span class="hdr-sub" id="effect-count-sub">활성 0개 · 강도/파티클 옵션</span>
               </div>
-            </div>
-            <!-- color 도구 -->
-            <div class="adjust-section hidden" data-adjust="color">
-              <div class="adjust-title">스펙트럼 색상</div>
-              <div class="color-mode-row">
-                <button class="seg-btn active" data-cm="single">단색</button>
-                <button class="seg-btn" data-cm="multi">멀티</button>
-                <button class="seg-btn" data-cm="rainbow">레인보우</button>
+              <div class="adjust-section-title">🎚️ 성능 모드</div>
+              <div class="seg-row3">
+                <button class="seg-mini" data-perf="quality">🌟 풀질</button>
+                <button class="seg-mini active" data-perf="auto">⚖️ 자동</button>
+                <button class="seg-mini" data-perf="performance">⚡ 성능</button>
               </div>
-              <div class="palette" id="palette"></div>
-              <label class="slider-row">
-                <span>크기</span>
-                <input type="range" min="20" max="100" value="60" id="adj-size" />
-                <span class="slider-val" id="adj-size-v">60%</span>
+              <div class="hint-text">
+                ⚡ 표시는 GPU/CPU 부담이 큰 효과 — 자동에서는 동시에 3개 이상 켜면
+                그림자/세그먼트/입자 수를 자동으로 줄입니다.
+              </div>
+              <div class="adjust-divider">활성 이펙트</div>
+              <div class="active-effects" id="active-effects">
+                <div class="hint-text">좌측에서 효과를 먼저 선택하세요</div>
+              </div>
+              <div class="adjust-divider">파티클 컬러</div>
+              <label class="check-row">
+                <input type="checkbox" id="ptc-rainbow" checked /> 무지개 모드
               </label>
-              <label class="slider-row">
-                <span>위치(Y)</span>
-                <input type="range" min="0" max="100" value="80" id="adj-y" />
-                <span class="slider-val" id="adj-y-v">80%</span>
+              <label class="check-row">
+                <input type="checkbox" id="ptc-random" /> 매 생성마다 랜덤
               </label>
+              <div class="palette" id="ptc-palette"></div>
             </div>
-            <!-- title 도구 -->
-            <div class="adjust-section hidden" data-adjust="title">
-              <div class="adjust-title">타이틀</div>
+
+            <!-- 타이틀 조정 -->
+            <div class="right-tab-content hidden" data-right-content="title">
+              <div class="adjust-section-hdr">
+                <span class="hdr-step">2단계: 곡 제목 표시</span>
+                <span class="hdr-sub" id="title-style-sub">bold · ON</span>
+              </div>
+              <label class="check-row">
+                <input type="checkbox" id="title-show" checked /> 𝐓 곡 제목 표시
+              </label>
               <input type="text" class="text-input" id="title-text" placeholder="01. 나의 가는 이 길은" />
-              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
-                <span>폰트</span>
-                <select class="text-input" id="title-font">
-                  <option value="">기본 (시스템)</option>
-                  <option value="'Noto Serif KR', serif">Noto Serif (명조)</option>
-                  <option value="'Black Han Sans', sans-serif">Black Han Sans (강한 고딕)</option>
-                  <option value="'Gowun Batang', serif">Gowun Batang (필기체)</option>
-                  <option value="'Nanum Pen Script', cursive">Nanum Pen (펜글씨)</option>
-                  <option value="'Single Day', cursive">Single Day (캘리)</option>
-                </select>
-              </label>
+              <div class="sub-title">기본 스타일</div>
+              <div class="viz-grid grid3">
+                <button class="title-style-chip" data-tstyle="minimal">미니멀</button>
+                <button class="title-style-chip" data-tstyle="modern">모던</button>
+                <button class="title-style-chip active" data-tstyle="bold">볼드</button>
+                <button class="title-style-chip" data-tstyle="underline">언더라인</button>
+                <button class="title-style-chip" data-tstyle="card">카드</button>
+                <button class="title-style-chip" data-tstyle="neon">네온</button>
+                <button class="title-style-chip" data-tstyle="glitch">글리치</button>
+                <button class="title-style-chip" data-tstyle="outline">아웃라인</button>
+                <button class="title-style-chip" data-tstyle="vintage">빈티지</button>
+              </div>
+              <div class="sub-title">데코 스타일</div>
+              <div class="viz-grid grid3">
+                <button class="title-deco-chip active" data-tdeco="none">없음</button>
+                <button class="title-deco-chip" data-tdeco="caption">캡션</button>
+                <button class="title-deco-chip" data-tdeco="barLeft">바좌측</button>
+                <button class="title-deco-chip" data-tdeco="frame">프레임</button>
+                <button class="title-deco-chip" data-tdeco="divider">디바이더</button>
+                <button class="title-deco-chip" data-tdeco="bgWord">BG워드</button>
+                <button class="title-deco-chip" data-tdeco="corner">코너</button>
+                <button class="title-deco-chip" data-tdeco="wave">웨이브</button>
+              </div>
+              <div class="sub-title">폰트</div>
+              <div class="viz-grid grid2" id="title-font-grid">
+                <!-- Generated by JS -->
+              </div>
+              <div class="adjust-divider">디테일</div>
               <label class="slider-row">
                 <span>크기</span>
-                <input type="range" min="20" max="120" value="48" id="title-size" />
+                <input type="range" min="20" max="160" value="48" id="title-size" />
                 <span class="slider-val" id="title-size-v">48px</span>
               </label>
               <label class="slider-row">
@@ -414,12 +604,9 @@
                 <input type="range" min="0" max="100" value="85" id="title-y" />
                 <span class="slider-val" id="title-y-v">85%</span>
               </label>
-              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
                 <span>색상</span>
                 <input type="color" value="#ffffff" id="title-color" class="color-picker" />
-              </label>
-              <label class="check-row">
-                <input type="checkbox" id="title-show" checked /> 타이틀 표시
               </label>
               <label class="check-row">
                 <input type="checkbox" id="title-pulse" /> 비트에 맞춰 펄스
@@ -428,7 +615,7 @@
               <label class="check-row">
                 <input type="checkbox" id="badge-show" /> 배지 표시
               </label>
-              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
                 <span>위치</span>
                 <select class="text-input" id="badge-pos">
                   <option value="below">타이틀 아래</option>
@@ -437,10 +624,76 @@
                   <option value="top-left">좌상단</option>
                 </select>
               </label>
+              <div class="adjust-divider">🎤 가사 / 자막</div>
+              <label class="check-row">
+                <input type="checkbox" id="lyrics-show" checked /> 가사 표시
+              </label>
+              <div class="lyrics-mode">
+                <label class="file-btn">
+                  <input type="file" id="file-lrc" accept=".lrc,.txt,.srt" hidden />
+                  📂 LRC/TXT 파일 열기
+                </label>
+                <button class="btn-mini" id="lyrics-clear">비우기</button>
+              </div>
+              <textarea class="text-area" id="lyrics-text" rows="4"
+                placeholder="[mm:ss.xx]가사  또는 일반 텍스트 한 줄씩"></textarea>
+              <div class="lyrics-stats" id="lyrics-stats">0줄</div>
+              <label class="slider-row">
+                <span>크기</span>
+                <input type="range" min="20" max="120" value="42" id="lyrics-size" />
+                <span class="slider-val" id="lyrics-size-v">42px</span>
+              </label>
+              <label class="slider-row">
+                <span>위치(Y)</span>
+                <input type="range" min="0" max="100" value="72" id="lyrics-y" />
+                <span class="slider-val" id="lyrics-y-v">72%</span>
+              </label>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>색상</span>
+                <input type="color" value="#ffffff" id="lyrics-color" class="color-picker" />
+              </label>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>그림자</span>
+                <select class="text-input" id="lyrics-shadow">
+                  <option value="strong">진하게</option>
+                  <option value="medium" selected>보통</option>
+                  <option value="soft">은은하게</option>
+                  <option value="box">박스 배경</option>
+                </select>
+              </label>
             </div>
-            <!-- sticker 도구 -->
-            <div class="adjust-section hidden" data-adjust="sticker">
-              <div class="adjust-title">스티커 (개별 조정)</div>
+
+            <!-- 로고 설정 -->
+            <div class="right-tab-content hidden" data-right-content="logo">
+              <div class="adjust-section-hdr">
+                <span class="hdr-step">2단계: 로고 설정</span>
+                <span class="hdr-sub">채널 로고 · GIF 스티커 위치/크기</span>
+              </div>
+              <div class="adjust-section-title">📌 채널 로고</div>
+              <label class="slider-row">
+                <span>X 위치</span>
+                <input type="range" min="0" max="100" value="5" id="logo-x" />
+                <span class="slider-val" id="logo-x-v">5%</span>
+              </label>
+              <label class="slider-row">
+                <span>Y 위치</span>
+                <input type="range" min="0" max="100" value="5" id="logo-y" />
+                <span class="slider-val" id="logo-y-v">5%</span>
+              </label>
+              <label class="slider-row">
+                <span>로고 크기</span>
+                <input type="range" min="20" max="300" value="100" id="logo-size" />
+                <span class="slider-val" id="logo-size-v">100PX</span>
+              </label>
+              <label class="slider-row">
+                <span>투명도</span>
+                <input type="range" min="0" max="100" value="100" id="logo-opacity" />
+                <span class="slider-val" id="logo-opacity-v">100%</span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="logo-shadow" /> 입체 그림자 효과
+              </label>
+              <div class="adjust-divider">🏷️ 스티커 (개별 조정)</div>
               <div class="sticker-list" id="sticker-list">
                 <div class="sticker-empty">미디어 준비 단계에서 스티커를 먼저 추가하세요.</div>
               </div>
@@ -467,74 +720,7 @@
                 </label>
               </div>
             </div>
-            <!-- logo 도구 -->
-            <div class="adjust-section hidden" data-adjust="logo">
-              <div class="adjust-title">로고</div>
-              <label class="slider-row">
-                <span>X</span>
-                <input type="range" min="0" max="100" value="5" id="logo-x" />
-                <span class="slider-val" id="logo-x-v">5%</span>
-              </label>
-              <label class="slider-row">
-                <span>Y</span>
-                <input type="range" min="0" max="100" value="5" id="logo-y" />
-                <span class="slider-val" id="logo-y-v">5%</span>
-              </label>
-              <label class="slider-row">
-                <span>크기</span>
-                <input type="range" min="20" max="300" value="100" id="logo-size" />
-                <span class="slider-val" id="logo-size-v">100px</span>
-              </label>
-              <label class="slider-row">
-                <span>투명도</span>
-                <input type="range" min="0" max="100" value="100" id="logo-opacity" />
-                <span class="slider-val" id="logo-opacity-v">100%</span>
-              </label>
-            </div>
-            <!-- lyrics 도구 -->
-            <div class="adjust-section hidden" data-adjust="lyrics">
-              <div class="adjust-title">가사 / 자막</div>
-              <label class="check-row">
-                <input type="checkbox" id="lyrics-show" checked /> 가사 표시
-              </label>
 
-              <div class="lyrics-mode">
-                <label class="file-btn">
-                  <input type="file" id="file-lrc" accept=".lrc,.txt,.srt" hidden />
-                  📂 LRC/TXT 파일 열기
-                </label>
-                <button class="btn-mini" id="lyrics-clear">비우기</button>
-              </div>
-
-              <textarea class="text-area" id="lyrics-text" rows="6"
-                placeholder="여기에 가사 붙여넣기&#10;&#10;LRC 형식 (시간 동기):&#10;[00:12.34]가사 첫 줄&#10;[00:15.20]가사 둘째 줄&#10;&#10;또는 일반 텍스트 한 줄씩 입력하면 자동 균등 분배"></textarea>
-
-              <div class="lyrics-stats" id="lyrics-stats">0줄 / 0초</div>
-
-              <label class="slider-row">
-                <span>크기</span>
-                <input type="range" min="20" max="120" value="42" id="lyrics-size" />
-                <span class="slider-val" id="lyrics-size-v">42px</span>
-              </label>
-              <label class="slider-row">
-                <span>위치(Y)</span>
-                <input type="range" min="0" max="100" value="72" id="lyrics-y" />
-                <span class="slider-val" id="lyrics-y-v">72%</span>
-              </label>
-              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
-                <span>색상</span>
-                <input type="color" value="#ffffff" id="lyrics-color" class="color-picker" />
-              </label>
-              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
-                <span>그림자</span>
-                <select class="text-input" id="lyrics-shadow">
-                  <option value="strong">진하게</option>
-                  <option value="medium" selected>보통</option>
-                  <option value="soft">은은하게</option>
-                  <option value="box">박스 배경</option>
-                </select>
-              </label>
-            </div>
           </aside>
         </div>
 

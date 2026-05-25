@@ -821,6 +821,159 @@ body {
   grid-column: 1 / -1;
 }
 
+/* ===== Stage 2 새 탭 구조 ===== */
+.tool-panel, .adjust-panel { padding: 8px; }
+
+.left-tabs, .right-tabs {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 4px;
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+}
+.left-tabs { grid-template-columns: 1fr 1fr 1fr; }
+.right-tabs { grid-template-columns: repeat(5, 1fr); }
+.left-tab, .right-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  padding: 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+  text-align: center;
+}
+.left-tab:hover, .right-tab:hover { background: var(--bg-3); color: var(--text-0); }
+.left-tab.active, .right-tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(124,92,255,0.3); }
+.left-tab-content, .right-tab-content { display: block; }
+.left-tab-content.hidden, .right-tab-content.hidden { display: none; }
+
+.sub-hdr {
+  background: var(--accent-dim);
+  color: var(--accent-hover);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.sub-hint { color: var(--text-2); font-weight: 400; font-size: 10px; }
+.sub-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-2);
+  letter-spacing: 0.5px;
+  margin: 14px 0 6px;
+  text-transform: uppercase;
+}
+
+.rainbow-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.rainbow-toggle input { accent-color: var(--accent); }
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.viz-grid.grid3 { grid-template-columns: 1fr 1fr 1fr; }
+.viz-grid.grid2 { grid-template-columns: 1fr 1fr; }
+
+.viz-btn, .vfx-btn, .filter-chip, .bgfx-chip, .trans-chip, .pp-chip, .ptc-chip, .title-style-chip, .title-deco-chip {
+  background: var(--bg-2);
+  border: 1.5px solid transparent;
+  color: var(--text-0);
+  padding: 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+  text-align: center;
+  transition: all 0.12s;
+}
+.viz-btn:hover, .vfx-btn:hover, .filter-chip:hover, .bgfx-chip:hover,
+.trans-chip:hover, .pp-chip:hover, .ptc-chip:hover,
+.title-style-chip:hover, .title-deco-chip:hover { background: var(--bg-3); }
+
+.viz-btn.active, .vfx-btn.active, .filter-chip.active, .bgfx-chip.active,
+.trans-chip.active, .pp-chip.active, .ptc-chip.active,
+.title-style-chip.active, .title-deco-chip.active {
+  background: var(--accent-dim); border-color: var(--accent); color: var(--text-0);
+}
+
+.adjust-section-hdr {
+  background: var(--accent-dim);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+}
+.hdr-step { display: block; font-size: 12px; font-weight: 700; color: var(--accent-hover); }
+.hdr-sub { display: block; font-size: 10px; color: var(--text-2); margin-top: 2px; }
+.adjust-section-title { font-size: 13px; font-weight: 700; color: var(--text-0); margin: 4px 0 8px; }
+
+.seg-row3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.seg-mini {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  padding: 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+}
+.seg-mini:hover { background: var(--bg-3); color: var(--text-0); }
+.seg-mini.active { background: var(--accent); color: #fff; border-color: var(--accent-hover); }
+
+.hint-text { font-size: 10px; color: var(--text-2); padding: 6px 4px; line-height: 1.5; }
+.active-effects {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  min-height: 40px;
+}
+.active-effect-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  color: var(--text-0);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  margin: 2px;
+}
+.active-effect-pill .x { cursor: pointer; opacity: 0.7; }
+.active-effect-pill .x:hover { opacity: 1; color: var(--danger); }
+
 .stage-nav {
   display: flex; justify-content: space-between;
   padding-top: 14px;

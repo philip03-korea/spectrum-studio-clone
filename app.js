@@ -305,7 +305,45 @@ const FILTER_PRESETS = {
   warm:    { hueRotate: -15, sepia: 10, grayscale: 0,  contrast: 105, brightnessMul: 1.05, saturationMul: 1.10 },
   cool:    { hueRotate: 20, sepia: 0,  grayscale: 0,  contrast: 105, brightnessMul: 1.00, saturationMul: 0.95 },
   dream:   { hueRotate: 0,  sepia: 20, grayscale: 0,  contrast: 95,  brightnessMul: 1.10, saturationMul: 1.15 },
+  // 원본 추가
+  dark:    { hueRotate: 0,  sepia: 0,  grayscale: 0,  contrast: 110, brightnessMul: 0.65, saturationMul: 0.90 },
+  calm:    { hueRotate: 5,  sepia: 5,  grayscale: 15, contrast: 95,  brightnessMul: 0.90, saturationMul: 0.75 },
+  vivid:   { hueRotate: 0,  sepia: 0,  grayscale: 0,  contrast: 120, brightnessMul: 1.05, saturationMul: 1.35 },
+  fade:    { hueRotate: 0,  sepia: 10, grayscale: 25, contrast: 85,  brightnessMul: 1.05, saturationMul: 0.70 },
 };
+
+// ===== Title style presets =====
+const TITLE_STYLES = {
+  minimal:    { shadow: 'soft',  stroke: 0,    decoration: null, bg: null,                 weight: 400 },
+  modern:     { shadow: 'soft',  stroke: 0,    decoration: null, bg: null,                 weight: 600 },
+  bold:       { shadow: 'medium',stroke: 0,    decoration: null, bg: null,                 weight: 800 },
+  underline:  { shadow: 'medium',stroke: 0,    decoration: 'underline', bg: null,          weight: 700 },
+  card:       { shadow: 'soft',  stroke: 0,    decoration: null, bg: 'rgba(0,0,0,0.55)',   weight: 700, padX: 0.6, padY: 0.35 },
+  neon:       { shadow: 'glow',  stroke: 0,    decoration: null, bg: null,                 weight: 800 },
+  glitch:     { shadow: 'glitch',stroke: 0,    decoration: null, bg: null,                 weight: 800 },
+  outline:    { shadow: 'none',  stroke: 0.08, decoration: null, bg: null,                 weight: 800, fillTransparent: true },
+  vintage:    { shadow: 'medium',stroke: 0.04, decoration: 'doubleLine', bg: null,         weight: 700 },
+};
+const TITLE_FONTS = [
+  { key: 'display',     name: 'DISPLAY',     css: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
+  { key: 'clean',       name: 'CLEAN',       css: '"Helvetica Neue", Arial, sans-serif' },
+  { key: 'editorial',   name: 'EDITORIAL',   css: 'Georgia, "Times New Roman", serif' },
+  { key: 'elegant',     name: 'ELEGANT',     css: '"Noto Serif KR", serif' },
+  { key: 'rounded',     name: 'ROUNDED',     css: '"Comic Sans MS", "Apple Casual", sans-serif' },
+  { key: 'condensed',   name: 'CONDENSED',   css: '"Arial Narrow", "Roboto Condensed", sans-serif' },
+  { key: 'futuristic',  name: 'FUTURISTIC',  css: '"Orbitron", "Rajdhani", sans-serif' },
+  { key: 'mono',        name: 'MONO',        css: 'ui-monospace, "SFMono-Regular", "Consolas", monospace' },
+  { key: 'hand',        name: 'HAND',        css: '"Nanum Pen Script", cursive' },
+  { key: 'blackgothic', name: '검은고딕',     css: '"Black Han Sans", sans-serif' },
+  { key: 'jua',         name: '주아체',       css: '"Jua", "Black Han Sans", sans-serif' },
+  { key: 'gamja',       name: '감자꽃',       css: '"Gamja Flower", cursive' },
+  { key: 'nanumgothic', name: '나눔고딕',     css: '"Nanum Gothic", sans-serif' },
+  { key: 'nanumserif',  name: '나눔명조',     css: '"Nanum Myeongjo", "Gowun Batang", serif' },
+  { key: 'dohyeon',     name: '도현',         css: '"Do Hyeon", sans-serif' },
+  { key: 'gowundodum',  name: '고운돋움',     css: '"Gowun Dodum", sans-serif' },
+  { key: 'gowunbatang', name: '고운바탕',     css: '"Gowun Batang", serif' },
+  { key: 'singleday',   name: '하이멜로디',   css: '"Single Day", cursive' },
+];
 
 const $ = id => document.getElementById(id);
 const qsa = sel => document.querySelectorAll(sel);
@@ -986,11 +1024,210 @@ function drawSpectrum(c, W, H, data) {
   const sizePct = state.spectrum.size / 100;
   const cy = H * (state.spectrum.y / 100);
   switch (state.viz) {
-    case 'bars':   return drawBars(c, data, W, H, sizePct, cy);
-    case 'dot':    return drawBars(c, data, W, H, sizePct, cy, true);
-    case 'wave':   return drawWave(c, data, W, H, sizePct, cy);
-    case 'ring':   return drawRing(c, data, W, H, sizePct, cy);
-    case 'rising': return drawRising(c, data, W, H, sizePct, cy);
+    case 'none':       return;
+    case 'bars':       return drawBars(c, data, W, H, sizePct, cy);
+    case 'dot':        return drawBars(c, data, W, H, sizePct, cy, true);
+    case 'wave':
+    case 'line':       return drawWave(c, data, W, H, sizePct, cy);
+    case 'ring':       return drawRing(c, data, W, H, sizePct, cy);
+    case 'rising':     return drawRising(c, data, W, H, sizePct, cy);
+    case 'sym-bars':   return drawSymBars(c, data, W, H, sizePct, cy);
+    case 'double-bar': return drawDoubleBar(c, data, W, H, sizePct, cy);
+    case 'mini-slim':  return drawMiniSlim(c, data, W, H, sizePct, cy);
+    case 'mini-cap':   return drawMiniCap(c, data, W, H, sizePct, cy);
+    case 'mini-split': return drawMiniSplit(c, data, W, H, sizePct, cy);
+    case 'ring-inner': return drawRing(c, data, W, H, sizePct, cy, true);
+    case 'freq-ring':  return drawFreqRing(c, data, W, H, sizePct, cy);
+    case 'wave3':      return drawWave3(c, data, W, H, sizePct, cy);
+    case 'field':      return drawFieldWave(c, data, W, H, sizePct, cy);
+    case 'ribbon':     return drawRibbonWave(c, data, W, H, sizePct, cy);
+    case 'particle':   return drawParticleSpectrum(c, data, W, H, sizePct, cy);
+  }
+}
+
+function drawSymBars(c, data, W, H, sizePct, cy) {
+  // bars rise both up and down from center line
+  const N = 64, barW = (W / N) * 0.7, gap = (W / N) * 0.3, maxH = H * 0.25 * sizePct;
+  const step = Math.floor((data?.length || 1024) / N / 2);
+  for (let i = 0; i < N; i++) {
+    const v = Math.max(0.03, data ? data[i*step]/255 : 0);
+    const h = Math.max(3, v * maxH);
+    const x = i * (barW + gap) + gap / 2;
+    c.fillStyle = getColorFor(i, N);
+    c.fillRect(x, cy - h, barW, h);
+    c.fillRect(x, cy, barW, h);
+  }
+}
+function drawDoubleBar(c, data, W, H, sizePct, cy) {
+  // Two bars per band: one inner thin, one outer thick
+  const N = 48, barW = (W / N) * 0.7, gap = (W / N) * 0.3, maxH = H * 0.4 * sizePct;
+  const step = Math.floor((data?.length || 1024) / N / 2);
+  for (let i = 0; i < N; i++) {
+    const v = Math.max(0.03, data ? data[i*step]/255 : 0);
+    const h = Math.max(3, v * maxH);
+    const x = i * (barW + gap) + gap / 2;
+    c.fillStyle = getColorFor(i, N);
+    c.fillRect(x, cy - h, barW, h);
+    c.globalAlpha = 0.4;
+    c.fillRect(x + barW * 0.2, cy - h * 0.7, barW * 0.6, h * 0.7);
+    c.globalAlpha = 1;
+  }
+}
+function drawMiniSlim(c, data, W, H, sizePct, cy) {
+  const N = 120, barW = Math.max(1, (W / N) * 0.4), gap = (W / N) - barW, maxH = H * 0.18 * sizePct;
+  const step = Math.floor((data?.length || 1024) / N / 2);
+  for (let i = 0; i < N; i++) {
+    const v = Math.max(0.05, data ? data[i*step]/255 : 0);
+    const h = Math.max(2, v * maxH);
+    c.fillStyle = getColorFor(i, N);
+    c.fillRect(i * (barW + gap), cy - h, barW, h);
+  }
+}
+function drawMiniCap(c, data, W, H, sizePct, cy) {
+  // Capsule-shaped bars
+  const N = 80, barW = (W / N) * 0.65, gap = (W / N) - barW, maxH = H * 0.2 * sizePct;
+  const step = Math.floor((data?.length || 1024) / N / 2);
+  for (let i = 0; i < N; i++) {
+    const v = Math.max(0.05, data ? data[i*step]/255 : 0);
+    const h = Math.max(barW, v * maxH);
+    const x = i * (barW + gap), y = cy - h;
+    c.fillStyle = getColorFor(i, N);
+    c.beginPath();
+    c.roundRect ? c.roundRect(x, y, barW, h, barW/2) : c.rect(x, y, barW, h);
+    c.fill();
+  }
+}
+function drawMiniSplit(c, data, W, H, sizePct, cy) {
+  // Two groups split with center gap
+  const N = 32, barW = (W / N / 2) * 0.7, gap = (W / N / 2) * 0.3, maxH = H * 0.25 * sizePct;
+  const step = Math.floor((data?.length || 1024) / N);
+  const centerGap = W * 0.05;
+  for (let i = 0; i < N; i++) {
+    const v = Math.max(0.05, data ? data[i*step]/255 : 0);
+    const h = Math.max(3, v * maxH);
+    c.fillStyle = getColorFor(i, N);
+    // left
+    const xL = W/2 - centerGap - (i + 1) * (barW + gap);
+    c.fillRect(xL, cy - h, barW, h);
+    // right
+    const xR = W/2 + centerGap + i * (barW + gap);
+    c.fillRect(xR, cy - h, barW, h);
+  }
+}
+function drawFreqRing(c, data, W, H, sizePct, cy) {
+  // Like ring but freq mapped logarithmically with outer expansion
+  const N = 128, step = Math.floor((data?.length || 1024) / N);
+  const cx = W/2, r0 = Math.min(W, H) * 0.12 * sizePct, maxR = Math.min(W, H) * 0.18 * sizePct;
+  for (let i = 0; i < N; i++) {
+    const v = Math.max(0.05, data ? data[i*step]/255 : 0);
+    const ang = (i / N) * Math.PI * 2 - Math.PI / 2;
+    const r1 = r0 + v * maxR;
+    const x0 = cx + Math.cos(ang) * r0, y0 = cy + Math.sin(ang) * r0;
+    const x1 = cx + Math.cos(ang) * r1, y1 = cy + Math.sin(ang) * r1;
+    c.strokeStyle = getColorFor(i, N);
+    c.lineWidth = Math.max(2, W / 400); c.lineCap = 'round';
+    c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+    // dots at outer
+    c.fillStyle = getColorFor(i, N);
+    c.beginPath(); c.arc(x1, y1, c.lineWidth, 0, Math.PI*2); c.fill();
+  }
+}
+function drawWave3(c, data, W, H, sizePct, cy) {
+  // 3 stacked sine-like waves with different colors
+  const N = 200, step = Math.floor((data?.length || 1024) / N);
+  const amp = H * 0.15 * sizePct;
+  const offsets = [-amp * 0.6, 0, amp * 0.6];
+  for (let w = 0; w < 3; w++) {
+    c.strokeStyle = getColorFor(w, 3);
+    c.lineWidth = Math.max(2, H / 300);
+    c.beginPath();
+    for (let i = 0; i < N; i++) {
+      const v = data ? (data[i*step]/255 - 0.5) : Math.sin(i * 0.05 + w);
+      const x = (i / (N - 1)) * W;
+      const y = cy + offsets[w] + v * amp;
+      if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+    }
+    c.stroke();
+  }
+}
+function drawFieldWave(c, data, W, H, sizePct, cy) {
+  // Multiple sine layers blended
+  const N = 200, step = Math.floor((data?.length || 1024) / N);
+  const amp = H * 0.18 * sizePct;
+  for (let layer = 0; layer < 5; layer++) {
+    c.beginPath();
+    c.strokeStyle = getColorFor(layer, 5);
+    c.lineWidth = Math.max(1.5, H / 400);
+    c.globalAlpha = 0.7 - layer * 0.1;
+    for (let i = 0; i < N; i++) {
+      const v = data ? (data[i*step]/255 - 0.5) : 0;
+      const phase = layer * 0.3;
+      const x = (i / (N - 1)) * W;
+      const y = cy + (v * amp + Math.sin(i * 0.04 + phase) * amp * 0.25) * (1 - layer * 0.1);
+      if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+    }
+    c.stroke();
+  }
+  c.globalAlpha = 1;
+}
+function drawRibbonWave(c, data, W, H, sizePct, cy) {
+  // Filled ribbon between two wave curves
+  const N = 256, step = Math.floor((data?.length || 1024) / N);
+  const amp = H * 0.18 * sizePct;
+  c.beginPath();
+  for (let i = 0; i < N; i++) {
+    const v = data ? (data[i*step]/255 - 0.5) : 0;
+    const x = (i / (N - 1)) * W;
+    const y = cy + v * amp - amp * 0.1;
+    if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+  }
+  for (let i = N - 1; i >= 0; i--) {
+    const v = data ? (data[i*step]/255 - 0.5) : 0;
+    const x = (i / (N - 1)) * W;
+    const y = cy + v * amp + amp * 0.4;
+    c.lineTo(x, y);
+  }
+  c.closePath();
+  const g = c.createLinearGradient(0, cy - amp, W, cy + amp);
+  for (let i = 0; i <= 5; i++) g.addColorStop(i/5, getColorFor(i, 5));
+  c.fillStyle = g;
+  c.fill();
+}
+function drawParticleSpectrum(c, data, W, H, sizePct, cy) {
+  const N = 60, step = Math.floor((data?.length || 1024) / N);
+  const maxH = H * 0.4 * sizePct;
+  for (let i = 0; i < N; i++) {
+    const v = Math.max(0.05, data ? data[i*step]/255 : 0);
+    const h = v * maxH;
+    const x = (i / (N - 1)) * W;
+    const dots = Math.max(2, Math.floor(h / 12));
+    for (let d = 0; d < dots; d++) {
+      const dy = -d * 12;
+      const r = Math.max(2, 6 * (1 - d / dots));
+      c.fillStyle = getColorFor(i, N);
+      c.globalAlpha = 1 - d / dots;
+      c.beginPath();
+      c.arc(x, cy + dy, r, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+  c.globalAlpha = 1;
+}
+
+// Override drawRing to support inner flag (rays going inward)
+const _drawRingOrig = drawRing;
+function drawRing(c, data, W, H, sizePct, cy, inner) {
+  const N = 96, step = Math.floor((data?.length || 1024) / N / 1.5);
+  const cx = W / 2, r0 = Math.min(W, H) * 0.18 * sizePct, maxR = Math.min(W, H) * 0.12 * sizePct;
+  for (let i = 0; i < N; i++) {
+    const raw = data ? data[i * step] / 255 : 0;
+    const v = Math.max(0.05, raw);
+    const ang = (i / N) * Math.PI * 2 - Math.PI / 2;
+    const r1 = inner ? r0 - v * maxR : r0 + v * maxR;
+    const x0 = cx + Math.cos(ang) * r0, y0 = cy + Math.sin(ang) * r0;
+    const x1 = cx + Math.cos(ang) * r1, y1 = cy + Math.sin(ang) * r1;
+    c.strokeStyle = getColorFor(i, N); c.lineWidth = Math.max(4, W / 320); c.lineCap = 'round';
+    c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
   }
 }
 function drawBars(c, data, W, H, sizePct, cy, dotMode) {
@@ -1280,6 +1517,162 @@ async function doReset() {
   await dbClear();
   localStorage.removeItem(SETTINGS_KEY);
   location.reload();
+}
+
+// ====================================================================
+// 새 Stage 2 탭/버튼 바인딩
+// ====================================================================
+function bindStage2Tabs() {
+  qsa('.left-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      const k = t.dataset.leftTab;
+      qsa('.left-tab').forEach(x => x.classList.toggle('active', x === t));
+      qsa('.left-tab-content').forEach(c => c.classList.toggle('hidden', c.dataset.leftContent !== k));
+    });
+  });
+  qsa('.right-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      const k = t.dataset.rightTab;
+      qsa('.right-tab').forEach(x => x.classList.toggle('active', x === t));
+      qsa('.right-tab-content').forEach(c => c.classList.toggle('hidden', c.dataset.rightContent !== k));
+    });
+  });
+}
+function bindVizButtons() {
+  qsa('.viz-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      state.viz = b.dataset.viz;
+      qsa('.viz-btn').forEach(x => x.classList.toggle('active', x === b));
+      const sub = $('hdr-viz-sub');
+      if (sub) sub.textContent = (b.dataset.viz || '').toUpperCase() + ' · 위치/크기/감도/컬러';
+      debouncedSave();
+    });
+  });
+  qsa('.vfx-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const k = b.dataset.vfx;
+      b.classList.toggle('active');
+      state.vfx = state.vfx || {};
+      state.vfx[k] = b.classList.contains('active');
+      debouncedSave();
+    });
+  });
+}
+function bindFilterChips() {
+  qsa('.filter-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      qsa('.filter-chip').forEach(x => x.classList.toggle('active', x === b));
+      state.filter.preset = b.dataset.filter;
+      debouncedSave();
+    });
+  });
+  qsa('.bgfx-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      b.classList.toggle('active');
+      state.bgfx = state.bgfx || {};
+      state.bgfx[b.dataset.bgfx] = b.classList.contains('active');
+      debouncedSave();
+    });
+  });
+  qsa('.trans-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      qsa('.trans-chip').forEach(x => x.classList.toggle('active', x === b));
+      state.slideshow.transition = b.dataset.trans;
+      debouncedSave();
+    });
+  });
+}
+function bindEffectChips() {
+  qsa('.pp-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      b.classList.toggle('active');
+      state.postProcessing = state.postProcessing || {};
+      state.postProcessing[b.dataset.pp] = b.classList.contains('active');
+      updateActiveEffectsUI(); debouncedSave();
+    });
+  });
+  qsa('.ptc-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      b.classList.toggle('active');
+      state.particles = state.particles || {};
+      state.particles[b.dataset.ptc] = b.classList.contains('active');
+      updateActiveEffectsUI(); debouncedSave();
+    });
+  });
+  qsa('[data-perf]').forEach(b => {
+    b.addEventListener('click', () => {
+      qsa('[data-perf]').forEach(x => x.classList.toggle('active', x === b));
+      state.performanceMode = b.dataset.perf;
+      debouncedSave();
+    });
+  });
+}
+function updateActiveEffectsUI() {
+  const wrap = $('active-effects'); if (!wrap) return;
+  const pp = state.postProcessing || {}, ptc = state.particles || {};
+  const items = [];
+  for (const k of Object.keys(pp)) if (pp[k]) items.push({ kind: 'pp', key: k });
+  for (const k of Object.keys(ptc)) if (ptc[k]) items.push({ kind: 'ptc', key: k });
+  if (!items.length) wrap.innerHTML = '<div class="hint-text">좌측에서 효과를 먼저 선택하세요</div>';
+  else {
+    wrap.innerHTML = items.map(i => `<span class="active-effect-pill">${i.key} <span class="x" data-rm="${i.kind}:${i.key}">×</span></span>`).join('');
+    wrap.querySelectorAll('[data-rm]').forEach(x => {
+      x.addEventListener('click', () => {
+        const [kind, key] = x.dataset.rm.split(':');
+        if (kind === 'pp') state.postProcessing[key] = false; else state.particles[key] = false;
+        const sel = (kind === 'pp' ? '.pp-chip' : '.ptc-chip') + `[data-${kind}="${key}"]`;
+        document.querySelector(sel)?.classList.remove('active');
+        updateActiveEffectsUI(); debouncedSave();
+      });
+    });
+  }
+  const sub = $('effect-count-sub');
+  if (sub) sub.textContent = `활성 ${items.length}개 · 강도/파티클 옵션`;
+}
+function bindTitleStyleChips() {
+  qsa('.title-style-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      qsa('.title-style-chip').forEach(x => x.classList.toggle('active', x === b));
+      state.title.style = b.dataset.tstyle;
+      const sub = $('title-style-sub');
+      if (sub) sub.textContent = (b.dataset.tstyle || 'bold') + (state.title.show ? ' · ON' : ' · OFF');
+      debouncedSave();
+    });
+  });
+  qsa('.title-deco-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      qsa('.title-deco-chip').forEach(x => x.classList.toggle('active', x === b));
+      state.title.deco = b.dataset.tdeco;
+      debouncedSave();
+    });
+  });
+}
+function renderTitleFontGrid() {
+  const el = $('title-font-grid'); if (!el) return;
+  el.innerHTML = '';
+  TITLE_FONTS.forEach(f => {
+    const b = document.createElement('button');
+    b.className = 'title-style-chip';
+    if (state.title.fontKey === f.key) b.classList.add('active');
+    b.style.fontFamily = f.css;
+    b.textContent = f.name;
+    b.addEventListener('click', () => {
+      state.title.fontKey = f.key;
+      state.title.font = f.css;
+      el.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      debouncedSave();
+    });
+    el.appendChild(b);
+  });
+}
+function bindRainbowToggle() {
+  const t = $('rainbow-mode'); if (!t) return;
+  t.addEventListener('change', e => {
+    state.spectrum.colorMode = e.target.checked ? 'rainbow' : 'multi';
+    qsa('[data-cm]').forEach(b => b.classList.toggle('active', b.dataset.cm === state.spectrum.colorMode));
+    debouncedSave();
+  });
 }
 const resetInline = document.getElementById('btn-reset-inline');
 if (resetInline) resetInline.addEventListener('click', doReset);
@@ -1897,6 +2290,13 @@ async function init() {
   renderAnimList();
   bindStickerEdit();
   bindDarkMode();
+  bindStage2Tabs();
+  bindVizButtons();
+  bindFilterChips();
+  bindEffectChips();
+  bindTitleStyleChips();
+  renderTitleFontGrid();
+  bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);
   wireDrop('drop-bg', 'file-bg', files => handleBackgrounds(files));
   wireDrop('drop-logo', 'file-logo', handleLogo);
