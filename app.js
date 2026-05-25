@@ -2281,6 +2281,35 @@ function bindDarkMode() {
   t.addEventListener('change', e => apply(e.target.checked));
 }
 
+// ====================================================================
+// 사이드바 하단 버튼: 사용자 가이드 / 개발자 채널 / 공식 사이트
+// ====================================================================
+function bindSidebarBottomButtons() {
+  // 사용자 가이드 모달
+  const guideBtn = $('btn-user-guide');
+  const guideModal = $('guide-modal');
+  const guideClose = $('guide-close');
+  if (guideBtn && guideModal) {
+    guideBtn.addEventListener('click', () => guideModal.classList.remove('hidden'));
+  }
+  if (guideClose && guideModal) {
+    guideClose.addEventListener('click', () => guideModal.classList.add('hidden'));
+    guideModal.addEventListener('click', e => {
+      if (e.target === guideModal) guideModal.classList.add('hidden');
+    });
+  }
+  // 개발자 채널 → 작자의 GitHub 프로필
+  const devBtn = $('btn-dev-channel');
+  if (devBtn) devBtn.addEventListener('click', () => {
+    window.open('https://github.com/philip03-korea', '_blank', 'noopener');
+  });
+  // 공식 사이트 → 프로젝트 저장소
+  const offBtn = $('btn-official');
+  if (offBtn) offBtn.addEventListener('click', () => {
+    window.open('https://github.com/philip03-korea/spectrum-studio-clone', '_blank', 'noopener');
+  });
+}
+
 async function doReset() {
   if (!confirm('⚠️ 모든 업로드 파일과 설정을 삭제할까요?\n(되돌릴 수 없습니다)')) return;
   await dbClear();
@@ -3075,6 +3104,7 @@ async function init() {
   bindTitleStyleChips();
   bindTitlePosChips();
   bindBgSort();
+  bindSidebarBottomButtons();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);

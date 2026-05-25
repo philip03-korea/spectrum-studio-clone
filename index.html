@@ -56,9 +56,9 @@
           <span>🌙 다크모드</span>
           <input type="checkbox" id="dark-toggle" checked />
         </label>
-        <button class="side-btn side-btn-warn">📖 사용자 가이드</button>
-        <button class="side-btn side-btn-danger">▶ 개발자 채널</button>
-        <button class="side-btn side-btn-purple">🌐 공식 사이트</button>
+        <button class="side-btn side-btn-warn" id="btn-user-guide">📖 사용자 가이드</button>
+        <button class="side-btn side-btn-danger" id="btn-dev-channel">▶ 개발자 채널</button>
+        <button class="side-btn side-btn-purple" id="btn-official">🌐 공식 사이트</button>
       </div>
     </aside>
 
@@ -829,6 +829,48 @@
     </main>
   </div>
 
-  <script type="module" src="app.js?v=v1_4_perfmode"></script>
+  <!-- 사용자 가이드 모달 -->
+  <div class="modal-backdrop hidden" id="guide-modal">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>📖 사용자 가이드</h2>
+        <button class="modal-x" id="guide-close">×</button>
+      </div>
+      <div class="modal-body">
+        <h3>🎬 3단계 워크플로우</h3>
+        <ol>
+          <li><b>미디어 준비</b>: 오디오 + 배경(이미지/단색/그라데이션/애니메이션) + 로고 업로드 + 인코딩 설정</li>
+          <li><b>비주얼 편집</b>: 8장르 프리셋, 15+ 스펙트럼, 18 이펙트, 9 타이틀 스타일, 가사 3줄/롤링</li>
+          <li><b>영상 출력</b>: WebCodecs MP4 직접 렌더링 → 다운로드</li>
+        </ol>
+        <h3>🎵 가사 LRC 자동 정리</h3>
+        <p>"📂 LRC/TXT 파일 열기"로 업로드하면 <b>[Intro] 같은 섹션 태그 제거 + 단어 단위→문장 병합</b>이 자동 적용됩니다. 평문 TXT도 OK.</p>
+        <h3>🎨 가사 표시 모드</h3>
+        <ul>
+          <li><b>단일</b>: 현재 줄만</li>
+          <li><b>3줄</b>: 이전·현재·다음 (노래 따라 읽기 좋음)</li>
+          <li><b>전체</b>: 9줄 롤링 뷰</li>
+        </ul>
+        <h3>📍 타이틀 위치</h3>
+        <p>6-위치 그리드(좌상단/상단중간/우상단/좌아래/중간아래/우아래) + 미세 X/Y로 가사와 겹치지 않게 자유 배치</p>
+        <h3>⚡ 성능 모드</h3>
+        <ul>
+          <li><b>풀질</b>: 모든 효과 최대치</li>
+          <li><b>자동</b>: 효과 많이 켜면 자동 감속</li>
+          <li><b>성능</b>: 무거운 효과(⚡) 자동 OFF + 파티클 1/3</li>
+        </ul>
+        <h3>🖱️ 단축 키 / 팁</h3>
+        <ul>
+          <li>배경 썸네일을 <b>드래그</b>해서 순서 변경</li>
+          <li>배경 카드의 <b>A↔Z</b> 버튼: 이름순 정렬 (1번=오름, 2번=내림, 3번=원래)</li>
+          <li>새로고침해도 모든 설정·파일이 유지됨 (IndexedDB)</li>
+          <li>전체 초기화: 사이드바 하단 <b>↻ 전체 초기화</b> 또는 Stage 1 하단 ↻ 초기화</li>
+        </ul>
+        <h3>🌐 환경 요구</h3>
+        <p>Chrome/Edge 최신 버전 (WebCodecs H.264 지원 필요). 인터넷 연결 필요 (mp4-muxer CDN).</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="app.js?v=v1_5_sidebarbtn"></script>
 </body>
 </html>

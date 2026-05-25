@@ -162,6 +162,55 @@ body {
 .bg-tab-content { display: block; }
 .bg-tab-content.hidden { display: none; }
 .bg-meta { font-size: 11px; color: var(--text-2); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
+/* 모달 (사용자 가이드) */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+.modal-backdrop.hidden { display: none; }
+.modal {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%; max-width: 720px;
+  max-height: 85vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+.modal-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-head h2 { margin: 0; font-size: 18px; }
+.modal-x {
+  background: transparent; border: none;
+  color: var(--text-1); cursor: pointer;
+  font-size: 24px; line-height: 1;
+  padding: 0 4px;
+}
+.modal-x:hover { color: var(--text-0); }
+.modal-body {
+  padding: 18px 24px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-1);
+}
+.modal-body h3 {
+  margin-top: 18px; margin-bottom: 6px;
+  color: var(--accent-hover);
+  font-size: 14px;
+}
+.modal-body h3:first-child { margin-top: 0; }
+.modal-body ol, .modal-body ul { padding-left: 22px; margin: 6px 0; }
+.modal-body li { margin-bottom: 4px; }
+.modal-body p { margin: 6px 0; }
+.modal-body b { color: var(--text-0); }
+
 .bg-thumb { cursor: grab; }
 .bg-thumb.dragging { opacity: 0.4; cursor: grabbing; }
 .bg-thumb.drop-target { border-color: var(--accent) !important; transform: scale(1.05); }
