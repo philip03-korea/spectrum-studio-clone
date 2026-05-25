@@ -950,8 +950,30 @@ function getColorFor(i, total) {
   if (m === 'single') return state.spectrum.color;
   const p = PRESETS[state.genre];
   const palette = (p?.colors?.length ? p.colors : [state.spectrum.color, '#4dd0ff', '#ffb547']);
-  if (m === 'rainbow') return `hsl(${(i / total) * 360}, 80%, 60%)`;
+  if (m === 'rainbow') {
+    const hue = (i / Math.max(1, total)) * 360;
+    return `hsl(${hue}, 90%, 62%)`;
+  }
   return palette[i % palette.length];
+}
+// Returns same color but with alpha (RGBA hex or hsla form) — works for both hex and hsl
+function getColorForAlpha(i, total, alpha) {
+  const m = state.spectrum.colorMode;
+  if (m === 'rainbow') {
+    const hue = (i / Math.max(1, total)) * 360;
+    return `hsla(${hue}, 90%, 62%, ${alpha})`;
+  }
+  const c = getColorFor(i, total);
+  // hex like "#aabbcc" → "#aabbccXX"
+  if (c.startsWith('#') && c.length === 7) {
+    const a = Math.round(alpha * 255).toString(16).padStart(2, '0');
+    return c + a;
+  }
+  // hsl(...) → hsla(...)
+  if (c.startsWith('hsl(')) {
+    return c.replace('hsl(', 'hsla(').replace(')', `, ${alpha})`);
+  }
+  return c;
 }
 function drawSpectrum(c, W, H, data) {
   if (!data) return;
@@ -967,9 +989,12 @@ function drawSpectrum(c, W, H, data) {
 }
 function drawBars(c, data, W, H, sizePct, cy, dotMode) {
   const N = 64, barW = (W / N) * 0.7, gap = (W / N) * 0.3, maxBarH = H * 0.4 * sizePct;
+  const minH = Math.max(3, H * 0.005);
   const step = Math.floor(data.length / N / 2);
   for (let i = 0; i < N; i++) {
-    const v = data[i * step] / 255, h = v * maxBarH;
+    const raw = data ? data[i * step] / 255 : 0;
+    const v = Math.max(0.02, raw);  // small baseline so something is always visible
+    const h = Math.max(minH, v * maxBarH);
     const x = i * (barW + gap) + gap / 2;
     c.fillStyle = getColorFor(i, N);
     if (dotMode) {
@@ -982,11 +1007,11 @@ function drawBars(c, data, W, H, sizePct, cy, dotMode) {
   }
 }
 function drawWave(c, data, W, H, sizePct, cy) {
-  const N = 256, step = Math.floor(data.length / N), amp = H * 0.2 * sizePct;
-  c.strokeStyle = getColorFor(0, 1); c.lineWidth = 3;
+  const N = 256, step = Math.floor((data?.length || 1024) / N), amp = H * 0.2 * sizePct;
+  c.strokeStyle = getColorFor(0, 1); c.lineWidth = Math.max(3, H / 250);
   c.beginPath();
   for (let i = 0; i < N; i++) {
-    const v = (data[i * step] / 255) - 0.5;
+    const v = data ? (data[i * step] / 255) - 0.5 : 0;
     const x = (i / (N - 1)) * W, y = cy + v * amp;
     if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
   }
@@ -994,14 +1019,15 @@ function drawWave(c, data, W, H, sizePct, cy) {
   c.shadowColor = getColorFor(0, 1); c.shadowBlur = 15; c.stroke(); c.shadowBlur = 0;
 }
 function drawRing(c, data, W, H, sizePct, cy) {
-  const N = 96, step = Math.floor(data.length / N / 1.5);
+  const N = 96, step = Math.floor((data?.length || 1024) / N / 1.5);
   const cx = W / 2, r0 = Math.min(W, H) * 0.15 * sizePct, maxR = Math.min(W, H) * 0.12 * sizePct;
   for (let i = 0; i < N; i++) {
-    const v = data[i * step] / 255;
+    const raw = data ? data[i * step] / 255 : 0;
+    const v = Math.max(0.05, raw);
     const ang = (i / N) * Math.PI * 2 - Math.PI / 2, r1 = r0 + v * maxR;
     const x0 = cx + Math.cos(ang) * r0, y0 = cy + Math.sin(ang) * r0;
     const x1 = cx + Math.cos(ang) * r1, y1 = cy + Math.sin(ang) * r1;
-    c.strokeStyle = getColorFor(i, N); c.lineWidth = 4; c.lineCap = 'round';
+    c.strokeStyle = getColorFor(i, N); c.lineWidth = Math.max(4, W / 320); c.lineCap = 'round';
     c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
   }
 }
@@ -1009,10 +1035,10 @@ function drawRising(c, data, W, H, sizePct, cy) {
   const N = 96, barW = (W / N) * 0.75, gap = (W / N) * 0.25, maxH = H * 0.5 * sizePct;
   const step = Math.floor(data.length / N / 2);
   for (let i = 0; i < N; i++) {
-    const v = data[i * step] / 255, h = v * maxH, x = i * (barW + gap);
+    const v = data[i * step] / 255, h = Math.max(1, v * maxH), x = i * (barW + gap);
     const g = c.createLinearGradient(0, cy, 0, cy - h);
-    const col = getColorFor(i, N);
-    g.addColorStop(0, col); g.addColorStop(1, col + '00');
+    g.addColorStop(0, getColorForAlpha(i, N, 1));
+    g.addColorStop(1, getColorForAlpha(i, N, 0));
     c.fillStyle = g; c.fillRect(x, cy - h, barW, h);
   }
 }
