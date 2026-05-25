@@ -23,7 +23,9 @@ const DEFAULT_STATE = () => ({
   viz: 'bars',
   tool: 'bg',
   bg: { brightness: 100, saturation: 100, blur: 0, dim: 20 },
-  spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80 },
+  spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80,
+              renderStyle: 'line', center: true, width: 100, speed: 70, sens: 85,
+              bands: 64, maxH: 100, lineW: 4, barW: 8, gap: 0 },
   title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'bold', deco: 'none', position: 'bottom-center', xFine: 0, yFine: 0 },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
@@ -1032,7 +1034,8 @@ function ensureAudioGraph() {
   state.source = state.audioCtx.createMediaElementSource(state.audioEl);
   state.analyser = state.audioCtx.createAnalyser();
   state.analyser.fftSize = 2048;
-  state.analyser.smoothingTimeConstant = 0.82;
+  const initSpeed = (state.spectrum?.speed || 70) / 100;
+  state.analyser.smoothingTimeConstant = Math.max(0, Math.min(0.95, 1 - initSpeed));
   state.source.connect(state.analyser);
   state.analyser.connect(state.audioCtx.destination);
   state.freqData = new Uint8Array(state.analyser.frequencyBinCount);
@@ -1464,19 +1467,46 @@ function drawRing(c, data, W, H, sizePct, cy, inner) {
   }
 }
 function drawBars(c, data, W, H, sizePct, cy, dotMode) {
-  const N = 64, barW = (W / N) * 0.7, gap = (W / N) * 0.3, maxBarH = H * 0.4 * sizePct;
+  const sp = state.spectrum;
+  const N = Math.max(8, Math.min(256, sp.bands || 64));
+  const widthRatio = (sp.width || 100) / 100;
+  const sens = (sp.sens || 85) / 85;             // 1.0 기본
+  const maxFactor = (sp.maxH || 100) / 100;       // 1.0 기본
+  const totalW = W * widthRatio;
+  const startX = sp.center ? (W - totalW) / 2 : 0;
+  const renderStyle = dotMode ? 'dot' : (sp.renderStyle || 'line');
+  // 막대 폭과 간격은 UI 슬라이더 값을 비율로 사용
+  const cell = totalW / N;
+  const gapRatio = Math.max(0, Math.min(0.9, (sp.gap || 0) / 30 * 0.5));
+  const barW = cell * (1 - gapRatio) * Math.max(0.05, (sp.barW || 8) / 20);
+  const gap = cell - barW;
+  const maxBarH = H * 0.4 * sizePct * maxFactor;
   const minH = Math.max(3, H * 0.005);
   const step = Math.floor((data?.length || 1024) / N / 2);
+  const dotR = Math.max(2, barW / 3);
   for (let i = 0; i < N; i++) {
-    const raw = data ? data[i * step] / 255 : 0;
-    const v = Math.max(0.02, raw) * _vfx.beatBoost;  // beat-punch 적용
+    const raw = data ? Math.min(1, (data[i * step] / 255) * sens) : 0;
+    const v = Math.max(0.02, raw) * _vfx.beatBoost;
     const h = Math.max(minH, v * maxBarH);
-    const x = i * (barW + gap) + gap / 2;
+    const x = startX + i * (barW + gap) + gap / 2;
     c.fillStyle = getColorFor(i, N);
-    if (dotMode) {
-      const dots = Math.max(1, Math.floor(h / 8));
-      for (let d = 0; d < dots; d++) { c.beginPath(); c.arc(x + barW / 2, cy - d * 8, barW / 3, 0, Math.PI * 2); c.fill(); }
+    if (renderStyle === 'dot') {
+      const dotStep = Math.max(6, dotR * 2.2);
+      const dots = Math.max(1, Math.floor(h / dotStep));
+      for (let d = 0; d < dots; d++) {
+        c.beginPath();
+        c.arc(x + barW / 2, cy - d * dotStep, dotR, 0, Math.PI * 2);
+        c.fill();
+      }
+    } else if (renderStyle === 'square') {
+      const sqStep = Math.max(4, barW * 0.9);
+      const squares = Math.max(1, Math.floor(h / sqStep));
+      const sz = sqStep * 0.85;
+      for (let d = 0; d < squares; d++) {
+        c.fillRect(x + (barW - sz) / 2, cy - (d + 1) * sqStep + (sqStep - sz)/2, sz, sz);
+      }
     } else {
+      // line / 실선 바
       c.fillRect(x, cy - h, barW, h);
       c.globalAlpha = 0.3; c.fillRect(x, cy, barW, h * 0.5); c.globalAlpha = 1;
     }
@@ -2473,6 +2503,44 @@ function renderTitleFontGrid() {
     el.appendChild(b);
   });
 }
+function bindSpectrumControls() {
+  // 렌더 스타일 (라인/원형점/네모점)
+  qsa('[data-render-style]').forEach(b => {
+    b.addEventListener('click', () => {
+      qsa('[data-render-style]').forEach(x => x.classList.toggle('active', x === b));
+      state.spectrum.renderStyle = b.dataset.renderStyle;
+      debouncedSave();
+    });
+  });
+  // 정중앙 정렬 + 9 슬라이더
+  const onE = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  onE('spec-center', 'change', e => { state.spectrum.center = e.target.checked; debouncedSave(); });
+  const bind = (id, key, fmt) => {
+    const el = $(id); if (!el) return;
+    el.addEventListener('input', () => {
+      const v = Number(el.value); state.spectrum[key] = v;
+      const ve = $(id + '-v'); if (ve) ve.textContent = fmt(v);
+      debouncedSave();
+    });
+  };
+  bind('spec-width', 'width', v => v + '%');
+  bind('spec-speed', 'speed', v => v + '%');
+  // speed → analyser.smoothingTimeConstant 실시간 적용
+  const speedEl = $('spec-speed');
+  if (speedEl) speedEl.addEventListener('input', () => {
+    if (state.analyser) {
+      const speed = (state.spectrum.speed || 70) / 100;
+      // 빠른 응답 = 낮은 smoothing
+      state.analyser.smoothingTimeConstant = Math.max(0, Math.min(0.95, 1 - speed));
+    }
+  });
+  bind('spec-sens',  'sens',  v => String(v));
+  bind('spec-bands', 'bands', v => String(v));
+  bind('spec-maxh',  'maxH',  v => String(v));
+  bind('spec-line',  'lineW', v => String(v));
+  bind('spec-barw',  'barW',  v => String(v));
+  bind('spec-gap',   'gap',   v => String(v));
+}
 function bindRainbowToggle() {
   const t = $('rainbow-mode'); if (!t) return;
   t.addEventListener('change', e => {
@@ -3105,6 +3173,7 @@ async function init() {
   bindTitlePosChips();
   bindBgSort();
   bindSidebarBottomButtons();
+  bindSpectrumControls();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);
