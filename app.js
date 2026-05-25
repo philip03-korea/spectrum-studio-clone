@@ -1236,7 +1236,7 @@ function drawRing(c, data, W, H, sizePct, cy, inner) {
 function drawBars(c, data, W, H, sizePct, cy, dotMode) {
   const N = 64, barW = (W / N) * 0.7, gap = (W / N) * 0.3, maxBarH = H * 0.4 * sizePct;
   const minH = Math.max(3, H * 0.005);
-  const step = Math.floor(data.length / N / 2);
+  const step = Math.floor((data?.length || 1024) / N / 2);
   for (let i = 0; i < N; i++) {
     const raw = data ? data[i * step] / 255 : 0;
     const v = Math.max(0.02, raw);  // small baseline so something is always visible
