@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Black+Han+Sans&family=Gowun+Batang:wght@400;700&family=Nanum+Pen+Script&family=Single+Day&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=v0_8_hotfix4" />
+<link rel="stylesheet" href="styles.css?v=v0_9_lyrics3line" />
 </head>
 <body>
   <div class="app-shell">
@@ -664,6 +664,22 @@
                   <option value="box">박스 배경</option>
                 </select>
               </label>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>모드</span>
+                <select class="text-input" id="lyrics-mode">
+                  <option value="single">단일 (현재만)</option>
+                  <option value="three" selected>3줄 (이전·현재·다음)</option>
+                  <option value="full">전체 (롤링 뷰)</option>
+                </select>
+              </label>
+              <label class="slider-row">
+                <span>줄 간격</span>
+                <input type="range" min="100" max="220" value="150" id="lyrics-gap" />
+                <span class="slider-val" id="lyrics-gap-v">150%</span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="lyrics-highlight" checked /> 현재 줄 강조 (크게/밝게)
+              </label>
             </div>
 
             <!-- 로고 설정 -->
@@ -785,6 +801,6 @@
     </main>
   </div>
 
-  <script type="module" src="app.js?v=v0_8_hotfix4"></script>
+  <script type="module" src="app.js?v=v0_9_lyrics3line"></script>
 </body>
 </html>

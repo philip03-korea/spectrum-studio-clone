@@ -27,7 +27,7 @@ const DEFAULT_STATE = () => ({
   title: { text: '', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below' },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
-  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium' },
+  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true },
   slideshow: { enabled: false, interval: 5, crossfade: true },
   frame: { style: 'none', intensity: 50 },
   filter: { preset: 'none' },
@@ -727,6 +727,7 @@ function bindAllSliders() {
   // Lyrics
   bindSlider('lyrics-size',    v => state.lyrics.size = v,      v => v + 'px');
   bindSlider('lyrics-y',       v => state.lyrics.y = v,         v => v + '%');
+  bindSlider('lyrics-gap',     v => state.lyrics.gap = v,       v => v + '%');
   // Slideshow
   bindSlider('slideshow-interval', v => state.slideshow.interval = v, v => v + '초');
   // Frame
@@ -744,6 +745,8 @@ function bindAllSliders() {
   onE('lyrics-show', 'change', e => { state.lyrics.show = e.target.checked; debouncedSave(); });
   onE('lyrics-color','input',  e => { state.lyrics.color = e.target.value; debouncedSave(); });
   onE('lyrics-shadow','change',e => { state.lyrics.shadow = e.target.value; debouncedSave(); });
+  onE('lyrics-mode',  'change',e => { state.lyrics.mode = e.target.value; debouncedSave(); });
+  onE('lyrics-highlight','change',e => { state.lyrics.highlight = e.target.checked; debouncedSave(); });
   onE('slideshow-enabled', 'change', e => { state.slideshow.enabled = e.target.checked; debouncedSave(); });
   onE('slideshow-crossfade','change', e => { state.slideshow.crossfade = e.target.checked; debouncedSave(); });
   onE('frame-style', 'change', e => { state.frame.style = e.target.value; debouncedSave(); });
@@ -1310,21 +1313,166 @@ function getPulseScale(data) {
 }
 function drawTitle(c, W, H, data) {
   if (!state.title.show || !state.title.text) return;
+  const text = state.title.text;
   const y = H * (state.title.y / 100);
   const scale = state.title.pulse ? getPulseScale(data) : 1;
   const size = state.title.size * scale;
   const fam = state.title.font || getComputedStyle(document.body).fontFamily;
   const color = state.title.color || '#fff';
+  const styleKey = state.title.style || 'bold';
+  const deco = state.title.deco || 'none';
   c.save();
-  c.font = `bold ${size}px ${fam}`;
   c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 12;
-  c.lineWidth = Math.max(2, size * 0.06); c.strokeStyle = 'rgba(0,0,0,0.6)';
-  c.strokeText(state.title.text, W / 2, y);
-  c.fillStyle = color;
-  c.fillText(state.title.text, W / 2, y);
+  switch (styleKey) {
+    case 'minimal':
+      c.font = `300 ${size}px ${fam}`;
+      c.shadowColor = 'rgba(0,0,0,0.4)'; c.shadowBlur = 6;
+      c.fillStyle = color; c.fillText(text, W/2, y);
+      break;
+    case 'modern':
+      c.font = `600 ${size}px ${fam}`;
+      c.shadowColor = 'rgba(0,0,0,0.55)'; c.shadowBlur = 8;
+      c.fillStyle = color; c.fillText(text, W/2, y);
+      break;
+    case 'underline': {
+      c.font = `700 ${size}px ${fam}`;
+      c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 10;
+      c.lineWidth = Math.max(2, size * 0.04); c.strokeStyle = 'rgba(0,0,0,0.6)';
+      c.strokeText(text, W/2, y);
+      c.fillStyle = color; c.fillText(text, W/2, y);
+      const m = c.measureText(text);
+      c.shadowBlur = 0;
+      c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.06);
+      c.beginPath();
+      c.moveTo(W/2 - m.width/2 - 12, y + size * 0.6);
+      c.lineTo(W/2 + m.width/2 + 12, y + size * 0.6);
+      c.stroke();
+      break;
+    }
+    case 'card': {
+      c.font = `700 ${size}px ${fam}`;
+      const m = c.measureText(text);
+      const cardW = m.width + size * 0.9, cardH = size * 1.5;
+      c.fillStyle = 'rgba(0,0,0,0.7)';
+      if (c.roundRect) {
+        c.beginPath(); c.roundRect(W/2 - cardW/2, y - cardH/2, cardW, cardH, size * 0.2); c.fill();
+      } else c.fillRect(W/2 - cardW/2, y - cardH/2, cardW, cardH);
+      c.fillStyle = color; c.fillText(text, W/2, y);
+      break;
+    }
+    case 'neon': {
+      c.font = `800 ${size}px ${fam}`;
+      for (let i = 4; i > 0; i--) {
+        c.shadowColor = color; c.shadowBlur = size * 0.18 * i;
+        c.fillStyle = color; c.fillText(text, W/2, y);
+      }
+      c.shadowBlur = 0; c.fillStyle = '#fff'; c.fillText(text, W/2, y);
+      break;
+    }
+    case 'glitch':
+      c.font = `800 ${size}px ${fam}`;
+      c.fillStyle = 'rgba(255,40,90,0.85)';  c.fillText(text, W/2 - size * 0.04, y);
+      c.fillStyle = 'rgba(0,210,255,0.85)';  c.fillText(text, W/2 + size * 0.04, y);
+      c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 8;
+      c.fillStyle = color; c.fillText(text, W/2, y);
+      break;
+    case 'outline':
+      c.font = `800 ${size}px ${fam}`;
+      c.lineWidth = Math.max(3, size * 0.07); c.strokeStyle = color;
+      c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 8;
+      c.strokeText(text, W/2, y);
+      break;
+    case 'vintage': {
+      c.font = `700 ${size}px ${fam}`;
+      c.shadowColor = 'rgba(0,0,0,0.6)'; c.shadowBlur = 6;
+      c.fillStyle = color; c.fillText(text, W/2, y);
+      c.shadowBlur = 0;
+      const m = c.measureText(text);
+      c.strokeStyle = color; c.lineWidth = 2;
+      const gp = size * 0.6, lw = m.width * 0.6;
+      for (let off of [-gp, gp]) {
+        c.beginPath();
+        c.moveTo(W/2 - lw/2, y + off);     c.lineTo(W/2 + lw/2, y + off);
+        c.moveTo(W/2 - lw/2, y + off + 5); c.lineTo(W/2 + lw/2, y + off + 5);
+        c.stroke();
+      }
+      break;
+    }
+    case 'bold':
+    default:
+      c.font = `800 ${size}px ${fam}`;
+      c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 12;
+      c.lineWidth = Math.max(2, size * 0.06); c.strokeStyle = 'rgba(0,0,0,0.6)';
+      c.strokeText(text, W/2, y);
+      c.fillStyle = color; c.fillText(text, W/2, y);
+      break;
+  }
   c.restore();
+  drawTitleDeco(c, W, H, y, size, text, deco, color, fam);
   drawBadge(c, W, H, y, size);
+}
+
+function drawTitleDeco(c, W, H, y, size, text, deco, color, fam) {
+  if (!deco || deco === 'none') return;
+  c.save();
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `700 ${size}px ${fam}`;
+  const m = c.measureText(text);
+  switch (deco) {
+    case 'caption':
+      c.font = `500 ${size * 0.3}px ${fam}`;
+      c.fillStyle = 'rgba(255,255,255,0.7)';
+      c.fillText('— TRACK 01 —', W/2, y - size * 0.85);
+      break;
+    case 'barLeft':
+      c.fillStyle = color;
+      c.fillRect(W/2 - m.width/2 - size * 0.35, y - size * 0.45, size * 0.08, size * 0.9);
+      break;
+    case 'frame': {
+      const pad = size * 0.4;
+      c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.04);
+      c.strokeRect(W/2 - m.width/2 - pad, y - size * 0.75, m.width + pad * 2, size * 1.5);
+      break;
+    }
+    case 'divider':
+      c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.04);
+      c.beginPath();
+      c.moveTo(W/2 - m.width/2 - 20, y + size * 0.8);
+      c.lineTo(W/2 + m.width/2 + 20, y + size * 0.8);
+      c.stroke();
+      break;
+    case 'bgWord':
+      c.font = `900 ${size * 2.6}px ${fam}`;
+      c.fillStyle = 'rgba(255,255,255,0.06)';
+      c.fillText(text, W/2, y);
+      break;
+    case 'corner': {
+      c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.04);
+      const cs = size * 0.32;
+      const L = W/2 - m.width/2 - size * 0.35, R = W/2 + m.width/2 + size * 0.35;
+      const T = y - size * 0.75, B = y + size * 0.75;
+      c.beginPath();
+      c.moveTo(L, T + cs); c.lineTo(L, T); c.lineTo(L + cs, T);
+      c.moveTo(R - cs, T); c.lineTo(R, T); c.lineTo(R, T + cs);
+      c.moveTo(L, B - cs); c.lineTo(L, B); c.lineTo(L + cs, B);
+      c.moveTo(R - cs, B); c.lineTo(R, B); c.lineTo(R, B - cs);
+      c.stroke();
+      break;
+    }
+    case 'wave': {
+      c.strokeStyle = color; c.lineWidth = 2;
+      const len = Math.max(160, m.width + 40);
+      c.beginPath();
+      for (let i = 0; i <= 40; i++) {
+        const x = W/2 - len/2 + (i / 40) * len;
+        const wy = y + size * 0.85 + Math.sin(i * 0.5) * 5;
+        if (i === 0) c.moveTo(x, wy); else c.lineTo(x, wy);
+      }
+      c.stroke();
+      break;
+    }
+  }
+  c.restore();
 }
 function drawBadge(c, W, H, titleY, titleSize) {
   if (!state.title.badge) return;
@@ -1363,18 +1511,66 @@ function drawBadge(c, W, H, titleY, titleSize) {
 }
 
 function drawLyrics(c, W, H, time) {
-  if (!state.lyrics.show) return;
-  const text = getLyricAt(time);
-  if (!text) return;
-  const y = H * (state.lyrics.y / 100);
-  // Wrap long lines
-  const lines = wrapText(c, text, W * 0.88, state.lyrics.size);
-  const lineHeight = state.lyrics.size * 1.3;
-  const totalH = lineHeight * lines.length;
-  let cy = y - totalH / 2 + lineHeight / 2;
-  for (const l of lines) {
-    drawTextWithShadow(c, l, W / 2, cy, state.lyrics.size, state.lyrics.color, state.lyrics.shadow);
-    cy += lineHeight;
+  if (!state.lyrics.show || !state.lyrics.lines?.length) return;
+  const arr = state.lyrics.lines;
+  // Find current index (last line whose time <= time)
+  let curIdx = -1;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].time <= time) { curIdx = i; break; }
+  }
+  const mode = state.lyrics.mode || 'three';
+  const cy = H * (state.lyrics.y / 100);
+  const baseSize = state.lyrics.size;
+  const gap = (state.lyrics.gap || 150) / 100;
+  const lh = baseSize * gap;
+  const color = state.lyrics.color || '#ffffff';
+  const fam = state.title.font || getComputedStyle(document.body).fontFamily;
+  const shadow = state.lyrics.shadow || 'medium';
+  const highlight = state.lyrics.highlight !== false;
+
+  const drawLine = (text, x, y, size, col, alpha) => {
+    if (!text) return;
+    // Wrap if too long
+    c.save();
+    c.font = `bold ${size}px ${fam}`;
+    const wrapped = wrapText(c, text, W * 0.88, size);
+    c.restore();
+    const wlh = size * 1.25;
+    const total = wrapped.length * wlh;
+    let yy = y - total/2 + wlh/2;
+    for (const line of wrapped) {
+      c.save();
+      c.globalAlpha = alpha;
+      drawTextWithShadow(c, line, x, yy, size, col, shadow);
+      c.restore();
+      yy += wlh;
+    }
+  };
+
+  if (mode === 'single') {
+    if (curIdx < 0) return;
+    drawLine(arr[curIdx].text, W/2, cy, baseSize, color, 1);
+  } else if (mode === 'three') {
+    const prev = curIdx > 0 ? arr[curIdx-1] : null;
+    const cur  = curIdx >= 0 ? arr[curIdx] : null;
+    const next = curIdx + 1 < arr.length ? arr[curIdx+1] : null;
+    const sidesSize = highlight ? baseSize * 0.7 : baseSize * 0.85;
+    const curSize   = baseSize;
+    if (prev) drawLine(prev.text, W/2, cy - lh,     sidesSize, color, 0.5);
+    if (cur)  drawLine(cur.text,  W/2, cy,          curSize,   color, 1);
+    if (next) drawLine(next.text, W/2, cy + lh,     sidesSize, color, 0.5);
+  } else if (mode === 'full') {
+    const linesToShow = 9;
+    const startIdx = Math.max(0, (curIdx < 0 ? 0 : curIdx) - 4);
+    const endIdx = Math.min(arr.length, startIdx + linesToShow);
+    for (let i = startIdx; i < endIdx; i++) {
+      const dy = (i - (curIdx < 0 ? 0 : curIdx)) * lh * 0.85;
+      const isActive = i === curIdx;
+      const dist = Math.abs(i - (curIdx < 0 ? 0 : curIdx));
+      const alpha = isActive ? 1 : Math.max(0.18, 0.65 - dist * 0.13);
+      const sizeMul = isActive && highlight ? 1 : 0.65;
+      drawLine(arr[i].text, W/2, cy + dy, baseSize * sizeMul, color, alpha);
+    }
   }
 }
 function wrapText(c, text, maxWidth, fontPx) {
