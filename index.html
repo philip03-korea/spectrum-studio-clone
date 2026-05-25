@@ -50,7 +50,6 @@
           <span>🌙 다크모드</span>
           <input type="checkbox" id="dark-toggle" checked />
         </label>
-        <button class="side-btn side-btn-reset" id="btn-reset">↻ 전체 초기화</button>
         <button class="side-btn side-btn-warn">📖 사용자 가이드</button>
         <button class="side-btn side-btn-danger">▶ 개발자 채널</button>
         <button class="side-btn side-btn-purple">🌐 공식 사이트</button>
@@ -98,41 +97,102 @@
           </div>
 
           <div class="stage1-right">
-            <div class="card mini-drop">
+            <!-- 배경 카드 (4탭) -->
+            <div class="card mini-drop bg-card">
               <div class="card-head">
-                <h3>배경</h3>
-                <span class="bg-count" id="bg-count">0</span>
+                <h3>🖼️ 배경</h3>
               </div>
-              <div class="drop-area drop-mini" id="drop-bg">
-                <input type="file" id="file-bg" accept="image/*,video/*" multiple hidden />
-                <label for="file-bg" class="drop-label">
-                  <div class="drop-icon">▣</div>
-                  <div class="drop-text">이미지/영상 (여러 개 가능)</div>
-                  <div class="drop-hint">Shift/Ctrl로 다중 선택</div>
-                </label>
+              <div class="bg-tabs">
+                <button class="bg-tab active" data-bg-tab="media">🖼️<br>미디어</button>
+                <button class="bg-tab" data-bg-tab="solid">🎨<br>단색</button>
+                <button class="bg-tab" data-bg-tab="gradient">🌈<br>그라데이션</button>
+                <button class="bg-tab" data-bg-tab="animation">✨<br>애니메이션</button>
               </div>
-              <div class="bg-thumbs hidden" id="bg-thumbs"></div>
+
+              <!-- 미디어 탭 -->
+              <div class="bg-tab-content" data-bg-content="media">
+                <div class="drop-area drop-mini" id="drop-bg">
+                  <input type="file" id="file-bg" accept="image/*,video/*" multiple hidden />
+                  <label for="file-bg" class="drop-label">
+                    <div class="drop-icon">▣</div>
+                    <div class="drop-text">배경 추가 (다중)</div>
+                    <div class="drop-hint">이미지 / 영상 · Shift+클릭으로 다중 선택</div>
+                  </label>
+                </div>
+                <div class="bg-meta hidden" id="bg-meta"><span class="bg-count" id="bg-count">0</span>개</div>
+                <div class="bg-thumbs hidden" id="bg-thumbs"></div>
+              </div>
+
+              <!-- 단색 탭 -->
+              <div class="bg-tab-content hidden" data-bg-content="solid">
+                <div class="solid-preview" id="solid-preview"></div>
+                <input type="text" class="text-input" id="solid-code" value="#0F172A" />
+                <div class="solid-palette" id="solid-palette"></div>
+              </div>
+
+              <!-- 그라데이션 탭 -->
+              <div class="bg-tab-content hidden" data-bg-content="gradient">
+                <div class="gradient-preview" id="gradient-preview"></div>
+                <div class="gradient-grid" id="gradient-grid"></div>
+              </div>
+
+              <!-- 애니메이션 탭 -->
+              <div class="bg-tab-content hidden" data-bg-content="animation">
+                <canvas class="anim-preview" id="anim-preview" width="280" height="120"></canvas>
+                <div class="anim-section-title">템플릿 선택</div>
+                <div class="animation-grid" id="animation-grid"></div>
+              </div>
             </div>
 
-            <div class="card mini-drop">
-              <div class="card-head"><h3>로고</h3><span class="badge badge-optional">선택</span></div>
-              <div class="drop-area drop-mini" id="drop-logo">
-                <input type="file" id="file-logo" accept="image/*" hidden />
-                <label for="file-logo" class="drop-label">
-                  <div class="drop-icon">◆</div>
-                  <div class="drop-text">PNG 추천</div>
-                </label>
-              </div>
-              <div class="file-info hidden" id="info-logo">
-                <div class="bg-preview-wrap">
-                  <img id="logo-preview-img" class="bg-preview hidden" alt="" />
+            <!-- 로고 + 스티커 (가로 배치) -->
+            <div class="logo-sticker-row">
+              <div class="card mini-drop">
+                <div class="card-head"><h3>📌 채널 로고</h3></div>
+                <div class="drop-area drop-mini drop-tiny" id="drop-logo">
+                  <input type="file" id="file-logo" accept="image/*" hidden />
+                  <label for="file-logo" class="drop-label">
+                    <div class="drop-icon">◆</div>
+                    <div class="drop-text">로고</div>
+                  </label>
+                </div>
+                <div class="file-info hidden" id="info-logo">
+                  <div class="bg-preview-wrap"><img id="logo-preview-img" class="bg-preview hidden" alt="" /></div>
                 </div>
               </div>
+              <div class="card mini-drop">
+                <div class="card-head"><h3>🏷️ 스티커</h3><span class="bg-count" id="sticker-count">0/5</span></div>
+                <div class="drop-area drop-mini drop-tiny" id="drop-sticker">
+                  <input type="file" id="file-sticker" accept="image/*" multiple hidden />
+                  <label for="file-sticker" class="drop-label">
+                    <div class="drop-icon">🏷️</div>
+                    <div class="drop-text">스티커</div>
+                    <div class="drop-hint">GIF · PNG · 최대 5개</div>
+                  </label>
+                </div>
+                <div class="bg-thumbs hidden" id="sticker-thumbs"></div>
+              </div>
             </div>
 
+            <!-- 인코딩 설정 -->
             <div class="card encoding-card">
-              <div class="card-head"><h3>인코딩 설정</h3></div>
+              <div class="card-head"><h3>🎚️ 인코딩 설정</h3></div>
               <div class="enc-grid">
+                <div class="enc-row">
+                  <span class="enc-label">재생 횟수</span>
+                  <div class="seg">
+                    <button class="seg-btn active" data-enc="playCount" data-val="1">1회</button>
+                    <button class="seg-btn" data-enc="playCount" data-val="2">2회</button>
+                    <button class="seg-btn" data-enc="playCount" data-val="3">3회</button>
+                  </div>
+                </div>
+                <div class="enc-row">
+                  <span class="enc-label">오디오 품질</span>
+                  <div class="seg">
+                    <button class="seg-btn" data-enc="audioBitrate" data-val="96">96k</button>
+                    <button class="seg-btn" data-enc="audioBitrate" data-val="128">128k</button>
+                    <button class="seg-btn active" data-enc="audioBitrate" data-val="192">192k</button>
+                  </div>
+                </div>
                 <div class="enc-row">
                   <span class="enc-label">해상도</span>
                   <div class="seg">
@@ -163,7 +223,11 @@
               </div>
             </div>
 
-            <button class="btn btn-enter" id="btn-enter-studio" disabled>스튜디오 입장 →</button>
+            <!-- 스튜디오 입장 + 초기화 (가로) -->
+            <div class="enter-row">
+              <button class="btn btn-enter" id="btn-enter-studio" disabled>스튜디오 입장 →</button>
+              <button class="btn btn-reset-inline" id="btn-reset-inline">↻ 초기화</button>
+            </div>
           </div>
         </div>
       </section>

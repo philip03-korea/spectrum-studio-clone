@@ -12,8 +12,13 @@ const DEFAULT_STATE = () => ({
   audio: null,
   backgrounds: [],
   bgActiveIdx: 0,
+  bgMode: 'media',          // 'media' | 'solid' | 'gradient' | 'animation'
+  bgSolid: '#0F172A',
+  bgGradient: 'sunset',
+  bgAnimation: 'orbs',
   logo: null,
-  encoding: { resolution: '1920x1080', aspect: '16:9', fps: 60 },
+  stickers: [],             // [{name, url, el, width, height, x, y, size, opacity}]
+  encoding: { resolution: '1920x1080', aspect: '16:9', fps: 60, playCount: 1, audioBitrate: 192 },
   genre: 'project',
   viz: 'bars',
   tool: 'bg',
@@ -45,6 +50,253 @@ const PALETTE = [
   '#ffffff','#ff5566','#ff8a3d','#ffb547','#ffe066','#4ade80',
   '#4dd0ff','#7c5cff','#c084fc','#f472b6','#000000','#94a3b8',
 ];
+// ===== 배경 단색 팔레트 (12색) =====
+const SOLID_COLORS = [
+  '#0F172A', '#1E293B', '#334155', '#52525B', '#44403C', '#1C1917',
+  '#7C3AED', '#DB2777', '#DC2626', '#EA580C', '#16A34A', '#2563EB',
+];
+
+// ===== 그라데이션 프리셋 (10개) =====
+const GRADIENT_PRESETS = {
+  sunset:   { name: 'SUNSET',   colors: ['#FF7E5F', '#FEB47B'], angle: 135 },
+  ocean:    { name: 'OCEAN',    colors: ['#2193B0', '#6DD5ED'], angle: 135 },
+  aurora:   { name: 'AURORA',   colors: ['#A1FFCE', '#FAFFD1', '#B6F7FF'], angle: 135 },
+  midnight: { name: 'MIDNIGHT', colors: ['#0F2027', '#203A43', '#2C5364'], angle: 135 },
+  cherry:   { name: 'CHERRY',   colors: ['#EB3349', '#F45C43'], angle: 135 },
+  forest:   { name: 'FOREST',   colors: ['#134E5E', '#71B280'], angle: 135 },
+  cosmic:   { name: 'COSMIC',   colors: ['#7F00FF', '#E100FF'], angle: 135 },
+  mono:     { name: 'MONO',     colors: ['#4B4B4B', '#9E9E9E'], angle: 135 },
+  gold:     { name: 'GOLD',     colors: ['#F2994A', '#F2C94C'], angle: 135 },
+  cyber:    { name: 'CYBER',    colors: ['#FF1CF7', '#00FFE0'], angle: 135 },
+};
+
+// ===== 애니메이션 배경 (12종) =====
+const ANIMATION_LIST = [
+  { key: 'orbs',      name: 'ORBS',      desc: '떠다니는 빛 구체' },
+  { key: 'waves',     name: 'WAVES',     desc: '출렁이는 사인파' },
+  { key: 'triangles', name: 'TRIANGLES', desc: '떠다니는 삼각형' },
+  { key: 'grid',      name: 'GRID',      desc: '꿈틀이는 그리드' },
+  { key: 'stars',     name: 'STARS',     desc: '별이 흐르는 우주' },
+  { key: 'aurora',    name: 'AURORA',    desc: '흐르는 오로라' },
+  { key: 'nebula',    name: 'NEBULA',    desc: '회전하는 성운' },
+  { key: 'circuit',   name: 'CIRCUIT',   desc: '회로 라인' },
+  { key: 'rain',      name: 'RAIN',      desc: '시네마틱 빗줄기' },
+  { key: 'plexus',    name: 'PLEXUS',    desc: '점-선 네트워크' },
+  { key: 'ripple',    name: 'RIPPLE',    desc: '동심원 파동' },
+  { key: 'confetti',  name: 'CONFETTI',  desc: '떠다니는 종이조각' },
+];
+
+const ANIMATIONS = {
+  orbs(c, W, H, t) {
+    c.fillStyle = '#050a1a'; c.fillRect(0, 0, W, H);
+    const cols = ['#7c5cff','#4dd0ff','#4ade80','#ff5566','#ffb547','#c084fc'];
+    for (let i = 0; i < 6; i++) {
+      const x = W/2 + Math.cos(t * 0.3 + i * 1.2) * W * 0.32;
+      const y = H/2 + Math.sin(t * 0.4 + i * 1.7) * H * 0.32;
+      const r = Math.min(W,H) * 0.22;
+      const g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, cols[i] + 'cc');
+      g.addColorStop(0.5, cols[i] + '44');
+      g.addColorStop(1, cols[i] + '00');
+      c.fillStyle = g;
+      c.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+  },
+  waves(c, W, H, t) {
+    c.fillStyle = '#0a0e22'; c.fillRect(0, 0, W, H);
+    const cols = ['#7c5cff','#4dd0ff','#4ade80'];
+    for (let w = 0; w < 3; w++) {
+      c.strokeStyle = cols[w] + 'aa';
+      c.lineWidth = Math.max(2, W / 600);
+      c.beginPath();
+      for (let x = 0; x <= W; x += 6) {
+        const y = H/2 + Math.sin(x * 0.008 + t * (1 + w * 0.3)) * H * 0.22
+                       + Math.sin(x * 0.018 + t * 0.7) * H * 0.08;
+        if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
+      }
+      c.stroke();
+    }
+  },
+  triangles(c, W, H, t) {
+    c.fillStyle = '#0a0e22'; c.fillRect(0, 0, W, H);
+    const cols = ['#7c5cff','#4dd0ff','#ff5566','#ffb547'];
+    for (let i = 0; i < 18; i++) {
+      const seed = i * 37;
+      const x = (((seed * 137) % W) + t * 25 * (1 + (seed % 4) * 0.3)) % (W + 100) - 50;
+      const y = H/2 + Math.sin(t * 0.5 + i) * H * 0.4 + ((seed % 100) - 50);
+      const size = 20 + (seed % 40);
+      const rot = t * 0.4 + i;
+      c.save(); c.translate(x, y); c.rotate(rot);
+      c.fillStyle = cols[i % cols.length] + '99';
+      c.beginPath();
+      c.moveTo(0, -size); c.lineTo(size * 0.866, size * 0.5); c.lineTo(-size * 0.866, size * 0.5); c.closePath();
+      c.fill();
+      c.restore();
+    }
+  },
+  grid(c, W, H, t) {
+    c.fillStyle = '#050a18'; c.fillRect(0, 0, W, H);
+    const cell = Math.max(40, W / 30);
+    const cols = Math.ceil(W / cell) + 1;
+    const rows = Math.ceil(H / cell) + 1;
+    c.strokeStyle = '#7c5cff';
+    c.lineWidth = 1;
+    for (let r = 0; r < rows; r++) for (let col = 0; col < cols; col++) {
+      const pulse = 0.2 + 0.8 * (Math.sin(t * 2 + r * 0.5 + col * 0.5) + 1) / 2;
+      c.globalAlpha = pulse;
+      c.strokeRect(col * cell, r * cell, cell, cell);
+    }
+    c.globalAlpha = 1;
+  },
+  stars(c, W, H, t) {
+    c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 250; i++) {
+      const seed = i * 7919;
+      const x = seed % W;
+      const speed = 30 + (seed % 80);
+      const y = ((seed * 13 + t * speed * 80) % (H + 80)) - 40;
+      const size = 0.5 + ((seed % 30) / 10);
+      c.fillStyle = `rgba(255,255,255,${0.2 + (seed % 8) / 10})`;
+      c.fillRect(x, y, size, size);
+    }
+  },
+  aurora(c, W, H, t) {
+    c.fillStyle = '#020812'; c.fillRect(0, 0, W, H);
+    const cols = ['#4ade80','#4dd0ff','#7c5cff','#c084fc'];
+    for (let i = 0; i < 4; i++) {
+      c.beginPath();
+      const off = t * 0.3 + i * 1.5;
+      for (let x = 0; x <= W; x += 8) {
+        const y = H * 0.32 + Math.sin(x * 0.005 + off) * H * 0.15
+                            + Math.sin(x * 0.015 + off * 1.3) * H * 0.08 + i * H * 0.05;
+        if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
+      }
+      c.lineTo(W, H); c.lineTo(0, H); c.closePath();
+      const g = c.createLinearGradient(0, H * 0.3, 0, H);
+      g.addColorStop(0, cols[i] + 'aa');
+      g.addColorStop(1, cols[i] + '00');
+      c.fillStyle = g;
+      c.fill();
+    }
+  },
+  nebula(c, W, H, t) {
+    c.fillStyle = '#0a0518'; c.fillRect(0, 0, W, H);
+    const cols = ['#7c5cff','#4dd0ff','#ff5566','#ffb547','#c084fc'];
+    for (let i = 0; i < 5; i++) {
+      const cx = W/2 + Math.cos(t * 0.2 + i) * W * 0.18;
+      const cy = H/2 + Math.sin(t * 0.3 + i * 0.7) * H * 0.18;
+      const r = Math.min(W, H) * (0.25 + (i % 3) * 0.12);
+      const g = c.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, cols[i] + '88');
+      g.addColorStop(0.4, cols[i] + '33');
+      g.addColorStop(1, cols[i] + '00');
+      c.fillStyle = g; c.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+  },
+  circuit(c, W, H, t) {
+    c.fillStyle = '#040d18'; c.fillRect(0, 0, W, H);
+    const grid = Math.max(40, W / 30);
+    const seed = (x, y) => ((Math.sin(x * 12.345 + y * 67.89) * 43758.5453) % 1 + 1) % 1;
+    c.strokeStyle = '#4dd0ff';
+    c.lineWidth = 2;
+    c.shadowColor = '#4dd0ff'; c.shadowBlur = 6;
+    for (let y = 0; y < H; y += grid) for (let x = 0; x < W; x += grid) {
+      const s = seed(x, y);
+      if (s < 0.45) {
+        const dir = Math.floor(s * 10) % 4;
+        c.globalAlpha = 0.3 + 0.7 * (Math.sin(t * 3 + s * 20) + 1) / 2;
+        c.beginPath();
+        c.moveTo(x, y);
+        if (dir === 0) c.lineTo(x + grid, y);
+        else if (dir === 1) c.lineTo(x, y + grid);
+        else if (dir === 2) c.lineTo(x + grid, y + grid);
+        else { c.lineTo(x + grid/2, y); c.moveTo(x + grid/2, y); c.lineTo(x + grid/2, y + grid); }
+        c.stroke();
+      }
+    }
+    c.globalAlpha = 1; c.shadowBlur = 0;
+  },
+  rain(c, W, H, t) {
+    c.fillStyle = '#0a0e1a'; c.fillRect(0, 0, W, H);
+    c.strokeStyle = '#7faaff';
+    c.lineWidth = 1.5;
+    for (let i = 0; i < 100; i++) {
+      const seed = i * 1009;
+      const x = (seed * 7) % W;
+      const speed = 600 + (seed % 400);
+      const y = ((seed * 17 + t * speed) % (H + 100)) - 100;
+      const len = 18 + (seed % 22);
+      c.globalAlpha = 0.4 + (seed % 5) / 10;
+      c.beginPath();
+      c.moveTo(x, y); c.lineTo(x - 4, y + len);
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+  },
+  plexus(c, W, H, t) {
+    c.fillStyle = '#0a0e22'; c.fillRect(0, 0, W, H);
+    const N = 30;
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+      const seed = i * 73;
+      pts.push({
+        x: ((seed * 137) % W) + Math.cos(t * 0.3 + i) * 60,
+        y: ((seed * 191) % H) + Math.sin(t * 0.4 + i * 1.3) * 60,
+      });
+    }
+    c.strokeStyle = '#7c5cff';
+    c.lineWidth = 1;
+    const maxD = W * 0.18;
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+      const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < maxD) {
+        c.globalAlpha = 1 - d / maxD;
+        c.beginPath();
+        c.moveTo(pts[i].x, pts[i].y); c.lineTo(pts[j].x, pts[j].y);
+        c.stroke();
+      }
+    }
+    c.globalAlpha = 1;
+    c.fillStyle = '#4dd0ff';
+    for (const p of pts) { c.beginPath(); c.arc(p.x, p.y, 3, 0, Math.PI * 2); c.fill(); }
+  },
+  ripple(c, W, H, t) {
+    c.fillStyle = '#0a0e22'; c.fillRect(0, 0, W, H);
+    const cx = W/2, cy = H/2;
+    const maxR = Math.max(W, H) * 0.75;
+    for (let i = 0; i < 8; i++) {
+      const phase = ((t * 0.5 + i * 0.3) % 1);
+      const r = phase * maxR;
+      c.strokeStyle = `rgba(124, 92, 255, ${1 - phase})`;
+      c.lineWidth = 3;
+      c.beginPath();
+      c.arc(cx, cy, r, 0, Math.PI * 2);
+      c.stroke();
+    }
+  },
+  confetti(c, W, H, t) {
+    c.fillStyle = '#0a0e22'; c.fillRect(0, 0, W, H);
+    const cols = ['#ff5566','#ffb547','#ffe066','#4ade80','#4dd0ff','#7c5cff','#c084fc'];
+    for (let i = 0; i < 70; i++) {
+      const seed = i * 397;
+      const x = (seed * 13) % W;
+      const off = (seed * 7) % H;
+      const fall = 60 + (seed % 90);
+      const y = (off + t * fall) % (H + 60);
+      const wobble = Math.sin(t * 2 + seed) * 30;
+      const size = 8 + (seed % 10);
+      const rot = t * (1 + (seed % 3) * 0.5);
+      c.save();
+      c.translate(x + wobble, y);
+      c.rotate(rot);
+      c.fillStyle = cols[seed % cols.length];
+      c.fillRect(-size/2, -size/4, size, size/2);
+      c.restore();
+    }
+  },
+};
+
 const FILTER_PRESETS = {
   none:    { hueRotate: 0,  sepia: 0,  grayscale: 0,  contrast: 100, brightnessMul: 1.00, saturationMul: 1.00 },
   vintage: { hueRotate: 0,  sepia: 35, grayscale: 0,  contrast: 110, brightnessMul: 0.95, saturationMul: 0.85 },
@@ -100,6 +352,7 @@ function saveSettings() {
     encoding: state.encoding, genre: state.genre, viz: state.viz, tool: state.tool,
     bg: state.bg, spectrum: state.spectrum, title: state.title, logoPos: state.logoPos,
     bgActiveIdx: state.bgActiveIdx,
+    bgMode: state.bgMode, bgSolid: state.bgSolid, bgGradient: state.bgGradient, bgAnimation: state.bgAnimation,
     lyrics: { ...state.lyrics }, slideshow: state.slideshow, frame: state.frame, filter: state.filter,
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { console.warn(e); }
@@ -318,9 +571,13 @@ function bindSegs() {
       const grp = btn.dataset.enc;
       qsa(`[data-enc="${grp}"]`).forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      state.encoding[grp] = btn.dataset.val;
-      if (stage2Started) applyCanvasSize();
+      const raw = btn.dataset.val;
+      // playCount and audioBitrate are numeric, fps too
+      const num = ['playCount', 'audioBitrate', 'fps'].includes(grp) ? Number(raw) : raw;
+      state.encoding[grp] = num;
+      if (stage2Started && (grp === 'resolution' || grp === 'aspect')) applyCanvasSize();
       debouncedSave();
+      updateEta();
     });
   });
 }
@@ -628,18 +885,63 @@ function drawSingleBg(c, W, H, bg, alpha = 1) {
   return true;
 }
 
+function drawSolidBgFill(c, W, H, color) {
+  c.fillStyle = color || '#0F172A';
+  c.fillRect(0, 0, W, H);
+}
+function drawGradientBgFill(c, W, H, key) {
+  const p = GRADIENT_PRESETS[key] || GRADIENT_PRESETS.sunset;
+  const rad = (p.angle - 90) * Math.PI / 180;
+  const dx = Math.cos(rad), dy = Math.sin(rad);
+  const x1 = W/2 - dx * W, y1 = H/2 - dy * H;
+  const x2 = W/2 + dx * W, y2 = H/2 + dy * H;
+  const g = c.createLinearGradient(x1, y1, x2, y2);
+  p.colors.forEach((col, i) => g.addColorStop(i / (p.colors.length - 1), col));
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+}
+function drawAnimationBgFill(c, W, H, key, time) {
+  const fn = ANIMATIONS[key] || ANIMATIONS.orbs;
+  fn(c, W, H, time);
+}
+
 function drawBackgrounds(c, W, H, time) {
-  const { bg, nextBg, fadeAlpha } = getBgForTime(time);
-  let drawn = drawSingleBg(c, W, H, bg, 1);
-  if (nextBg && fadeAlpha > 0) drawn = drawSingleBg(c, W, H, nextBg, fadeAlpha) || drawn;
-  if (!drawn) {
-    const g = c.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, '#1a1f3a'); g.addColorStop(1, '#0a0e22');
-    c.fillStyle = g; c.fillRect(0, 0, W, H);
+  // Mode-based background
+  if (state.bgMode === 'solid') {
+    drawSolidBgFill(c, W, H, state.bgSolid);
+  } else if (state.bgMode === 'gradient') {
+    drawGradientBgFill(c, W, H, state.bgGradient);
+  } else if (state.bgMode === 'animation') {
+    drawAnimationBgFill(c, W, H, state.bgAnimation, time);
+  } else {
+    // media mode
+    const { bg, nextBg, fadeAlpha } = getBgForTime(time);
+    let drawn = drawSingleBg(c, W, H, bg, 1);
+    if (nextBg && fadeAlpha > 0) drawn = drawSingleBg(c, W, H, nextBg, fadeAlpha) || drawn;
+    if (!drawn) {
+      const g = c.createLinearGradient(0, 0, W, H);
+      g.addColorStop(0, '#1a1f3a'); g.addColorStop(1, '#0a0e22');
+      c.fillStyle = g; c.fillRect(0, 0, W, H);
+    }
   }
   if (state.bg.dim > 0) {
     c.fillStyle = `rgba(0,0,0,${state.bg.dim / 100})`;
     c.fillRect(0, 0, W, H);
+  }
+}
+
+// ====== 스티커 ======
+function drawStickers(c, W, H, time) {
+  if (!state.stickers || !state.stickers.length) return;
+  for (const s of state.stickers) {
+    if (!s.el) continue;
+    const size = (s.size ?? 100) * (W / 1280);
+    const ratio = s.height / s.width;
+    const w = size, h = size * ratio;
+    const x = (W - w) * ((s.x ?? 50) / 100);
+    const y = (H - h) * ((s.y ?? 50) / 100);
+    c.globalAlpha = (s.opacity ?? 100) / 100;
+    c.drawImage(s.el, x, y, w, h);
+    c.globalAlpha = 1;
   }
 }
 
@@ -823,6 +1125,7 @@ function drawScene(c, W, H, freqData, time) {
   drawTitle(c, W, H);
   drawLyrics(c, W, H, time);
   drawLogo(c, W, H);
+  drawStickers(c, W, H, time);
   drawFrame(c, W, H);
 }
 
@@ -860,18 +1163,184 @@ function fmtTime(sec) {
 // ====================================================================
 // Reset
 // ====================================================================
-$('btn-reset').addEventListener('click', async () => {
+async function doReset() {
   if (!confirm('⚠️ 모든 업로드 파일과 설정을 삭제할까요?\n(되돌릴 수 없습니다)')) return;
   await dbClear();
   localStorage.removeItem(SETTINGS_KEY);
   location.reload();
-});
+}
+const resetInline = document.getElementById('btn-reset-inline');
+if (resetInline) resetInline.addEventListener('click', doReset);
+
+// ====================================================================
+// 배경 4탭 + 단색 + 그라데이션 + 애니메이션 + 미리보기
+// ====================================================================
+function bindBgTabs() {
+  qsa('.bg-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const k = tab.dataset.bgTab;
+      qsa('.bg-tab').forEach(t => t.classList.toggle('active', t === tab));
+      qsa('.bg-tab-content').forEach(c => c.classList.toggle('hidden', c.dataset.bgContent !== k));
+      state.bgMode = k;
+      debouncedSave();
+    });
+  });
+}
+function renderSolidPalette() {
+  const el = $('solid-palette'); if (!el) return;
+  el.innerHTML = '';
+  SOLID_COLORS.forEach(col => {
+    const sw = document.createElement('button');
+    sw.className = 'solid-swatch' + (col.toUpperCase() === state.bgSolid.toUpperCase() ? ' active' : '');
+    sw.style.background = col;
+    sw.title = col;
+    sw.addEventListener('click', () => {
+      state.bgSolid = col;
+      $('solid-code').value = col;
+      $('solid-preview').style.background = col;
+      qsa('.solid-swatch').forEach(s => s.classList.toggle('active', s === sw));
+      debouncedSave();
+    });
+    el.appendChild(sw);
+  });
+  $('solid-preview').style.background = state.bgSolid;
+  $('solid-code').value = state.bgSolid;
+  $('solid-code').addEventListener('input', e => {
+    const v = e.target.value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      state.bgSolid = v;
+      $('solid-preview').style.background = v;
+      debouncedSave();
+    }
+  });
+}
+function gradientCss(key) {
+  const p = GRADIENT_PRESETS[key];
+  if (!p) return '#222';
+  return `linear-gradient(${p.angle}deg, ${p.colors.join(', ')})`;
+}
+function renderGradients() {
+  const el = $('gradient-grid'); if (!el) return;
+  el.innerHTML = '';
+  Object.keys(GRADIENT_PRESETS).forEach(k => {
+    const p = GRADIENT_PRESETS[k];
+    const b = document.createElement('button');
+    b.className = 'gradient-btn' + (k === state.bgGradient ? ' active' : '');
+    b.style.background = gradientCss(k);
+    b.textContent = p.name;
+    b.addEventListener('click', () => {
+      state.bgGradient = k;
+      $('gradient-preview').style.background = gradientCss(k);
+      qsa('.gradient-btn').forEach(x => x.classList.toggle('active', x === b));
+      debouncedSave();
+    });
+    el.appendChild(b);
+  });
+  $('gradient-preview').style.background = gradientCss(state.bgGradient);
+}
+let animPreviewCtx = null;
+function renderAnimList() {
+  const el = $('animation-grid'); if (!el) return;
+  el.innerHTML = '';
+  ANIMATION_LIST.forEach(a => {
+    const b = document.createElement('button');
+    b.className = 'anim-btn' + (a.key === state.bgAnimation ? ' active' : '');
+    b.innerHTML = `<div class="anim-btn-name">${a.name}</div><div class="anim-btn-desc">${a.desc}</div>`;
+    b.addEventListener('click', () => {
+      state.bgAnimation = a.key;
+      qsa('.anim-btn').forEach(x => x.classList.toggle('active', x === b));
+      debouncedSave();
+    });
+    el.appendChild(b);
+  });
+  const c = $('anim-preview');
+  if (c) {
+    animPreviewCtx = c.getContext('2d');
+    // start preview loop
+    const start = performance.now();
+    const loop = () => {
+      if (!animPreviewCtx) return;
+      const fn = ANIMATIONS[state.bgAnimation] || ANIMATIONS.orbs;
+      const t = (performance.now() - start) / 1000;
+      fn(animPreviewCtx, c.width, c.height, t);
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+}
+
+// ====================================================================
+// 스티커
+// ====================================================================
+async function handleStickers(files, opts = {}) {
+  const accepted = files.filter(f => f.type.startsWith('image/'));
+  if (!accepted.length) return;
+  const remaining = 5 - state.stickers.length;
+  const toAdd = accepted.slice(0, Math.max(0, remaining));
+  for (const f of toAdd) await addSticker(f);
+  renderStickerThumbs();
+  if (!opts.skipPersist) {
+    const stored = await dbGet('stickers') || [];
+    for (const f of toAdd) stored.push(f);
+    await dbSet('stickers', stored);
+  }
+  debouncedSave();
+}
+async function addSticker(file) {
+  const url = URL.createObjectURL(file);
+  return new Promise(res => {
+    const img = new Image(); img.src = url;
+    img.addEventListener('load', () => {
+      state.stickers.push({
+        name: file.name, url, el: img,
+        width: img.naturalWidth, height: img.naturalHeight,
+        x: 70, y: 70, size: 80, opacity: 100,
+      });
+      res();
+    }, { once: true });
+  });
+}
+function renderStickerThumbs() {
+  const wrap = $('sticker-thumbs');
+  if (!wrap) return;
+  const n = state.stickers.length;
+  $('sticker-count').textContent = `${n}/5`;
+  if (!n) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '';
+  state.stickers.forEach((s, i) => {
+    const t = document.createElement('div');
+    t.className = 'bg-thumb';
+    t.title = s.name;
+    const im = document.createElement('img'); im.src = s.url; t.appendChild(im);
+    const x = document.createElement('button');
+    x.className = 'bg-thumb-x'; x.textContent = '×';
+    x.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const removed = state.stickers.splice(i, 1)[0];
+      if (removed) URL.revokeObjectURL(removed.url);
+      renderStickerThumbs();
+      const stored = await dbGet('stickers') || [];
+      stored.splice(i, 1);
+      await dbSet('stickers', stored);
+      debouncedSave();
+    });
+    t.appendChild(x);
+    wrap.appendChild(t);
+  });
+}
 
 // ====================================================================
 // UI restoration
 // ====================================================================
 function restoreUI() {
-  qsa('[data-enc]').forEach(b => b.classList.toggle('active', state.encoding[b.dataset.enc] === b.dataset.val));
+  qsa('[data-enc]').forEach(b => {
+    const v = state.encoding[b.dataset.enc];
+    b.classList.toggle('active', String(v) === b.dataset.val);
+  });
+  // Bg tabs
+  qsa('.bg-tab').forEach(t => t.classList.toggle('active', t.dataset.bgTab === state.bgMode));
+  qsa('.bg-tab-content').forEach(c => c.classList.toggle('hidden', c.dataset.bgContent !== state.bgMode));
   qsa('[data-cm]').forEach(b => b.classList.toggle('active', b.dataset.cm === state.spectrum.colorMode));
   qsa('[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === state.filter.preset));
   qsa('.genre-tab').forEach(t => t.classList.toggle('active', t.dataset.genre === state.genre));
@@ -919,6 +1388,8 @@ async function restoreFiles() {
   if (bgFiles && bgFiles.length) await handleBackgrounds(bgFiles, { skipPersist: true });
   const logoFile = await dbGet('logo');
   if (logoFile) await handleLogo([logoFile], { skipPersist: true });
+  const stickerFiles = await dbGet('stickers');
+  if (stickerFiles && stickerFiles.length) await handleStickers(stickerFiles, { skipPersist: true });
 }
 
 // ====================================================================
@@ -944,7 +1415,7 @@ $('btn-cancel').addEventListener('click', () => { cancelRequested = true; });
 
 function updateEta() {
   if (!state.audio) { $('exp-eta').textContent = '오디오 필요'; return; }
-  const d = state.audio.duration;
+  const d = state.audio.duration * (Number(state.encoding.playCount) || 1);
   const fast = Math.max(1, d / 6);
   const slow = Math.max(1, d / 2);
   $('exp-eta').textContent = `${fmtMin(fast)} ~ ${fmtMin(slow)}`;
@@ -1042,9 +1513,12 @@ async function precomputeFFT(audioBuf, fps, totalFrames, fftSize, onProgress) {
   const scratchR = new Float32Array(fftSize);
   const scratchI = new Float32Array(fftSize);
   const frames = new Array(totalFrames);
+  const baseDur = audioBuf.duration;
   for (let f = 0; f < totalFrames; f++) {
     if (cancelRequested) throw new Error('cancelled');
-    frames[f] = computeFFTAt(audioBuf, f / fps, fftSize, scratchR, scratchI);
+    // Wrap time around base duration so playCount > 1 just repeats FFT
+    const t = (f / fps) % baseDur;
+    frames[f] = computeFFTAt(audioBuf, t, fftSize, scratchR, scratchI);
     if (f % 200 === 0) {
       if (onProgress) onProgress(f / totalFrames);
       await new Promise(r => setTimeout(r));
@@ -1083,11 +1557,14 @@ function seekVideoTo(videoEl, time) {
 
 async function renderToMp4() {
   const audioBuf = state.audio.buffer;
-  const duration = audioBuf.duration;
+  const playCount = Math.max(1, Number(state.encoding.playCount) || 1);
+  const singleDuration = audioBuf.duration;
+  const duration = singleDuration * playCount;
   const fps = Number(state.encoding.fps);
   const [W, H] = getCanvasSize();
   const totalFrames = Math.floor(duration * fps);
   const bitrate = PROFILES[renderProfile].bitrate;
+  const audioBitrate = (Number(state.encoding.audioBitrate) || 192) * 1000;
 
   if (state.audioEl && !state.audioEl.paused) togglePlay();
 
@@ -1174,20 +1651,24 @@ async function renderToMp4() {
   });
   audioEncoder.configure({
     codec: 'mp4a.40.2',
-    sampleRate: 48000, numberOfChannels: 2, bitrate: 192_000,
+    sampleRate: 48000, numberOfChannels: 2, bitrate: audioBitrate,
   });
 
   const chunkSize = 1024;
   const ch0 = aacBuf.getChannelData(0);
   const ch1 = aacBuf.numberOfChannels > 1 ? aacBuf.getChannelData(1) : ch0;
-  const totalSamples = aacBuf.length;
+  const singleSamples = aacBuf.length;
+  const totalSamples = singleSamples * playCount;
   for (let off = 0; off < totalSamples; off += chunkSize) {
     if (cancelRequested) { try { audioEncoder.close(); } catch(_){} throw new Error('cancelled'); }
     if (audioErr) throw audioErr;
     const numFrames = Math.min(chunkSize, totalSamples - off);
     const planar = new Float32Array(numFrames * 2);
-    planar.set(ch0.subarray(off, off + numFrames), 0);
-    planar.set(ch1.subarray(off, off + numFrames), numFrames);
+    for (let i = 0; i < numFrames; i++) {
+      const srcIdx = (off + i) % singleSamples;
+      planar[i] = ch0[srcIdx];
+      planar[numFrames + i] = ch1[srcIdx];
+    }
     const ts = Math.round((off / 48000) * 1_000_000);
     const ad = new AudioData({
       format: 'f32-planar',
@@ -1232,10 +1713,20 @@ async function init() {
   loadSettings();
   bindSegs(); bindTools(); bindGenres(); bindAllSliders(); bindPlayback();
   bindLyrics();
+  bindBgTabs();
+  renderSolidPalette();
+  renderGradients();
+  renderAnimList();
   wireDrop('drop-audio', 'file-audio', handleAudio);
   wireDrop('drop-bg', 'file-bg', files => handleBackgrounds(files));
   wireDrop('drop-logo', 'file-logo', handleLogo);
+  wireDrop('drop-sticker', 'file-sticker', handleStickers);
   $('btn-enter-studio').addEventListener('click', () => goToStep(2));
+  // Activate bg tab from state
+  if (state.bgMode && state.bgMode !== 'media') {
+    qsa('.bg-tab').forEach(t => t.classList.toggle('active', t.dataset.bgTab === state.bgMode));
+    qsa('.bg-tab-content').forEach(c => c.classList.toggle('hidden', c.dataset.bgContent !== state.bgMode));
+  }
   restoreUI();
   await probe();
   await restoreFiles();
