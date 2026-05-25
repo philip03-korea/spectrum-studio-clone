@@ -1214,8 +1214,7 @@ function drawParticleSpectrum(c, data, W, H, sizePct, cy) {
   c.globalAlpha = 1;
 }
 
-// Override drawRing to support inner flag (rays going inward)
-const _drawRingOrig = drawRing;
+// drawRing: supports `inner` flag (rays going inward, used by ring-inner viz)
 function drawRing(c, data, W, H, sizePct, cy, inner) {
   const N = 96, step = Math.floor((data?.length || 1024) / N / 1.5);
   const cx = W / 2, r0 = Math.min(W, H) * 0.18 * sizePct, maxR = Math.min(W, H) * 0.12 * sizePct;
@@ -1260,19 +1259,6 @@ function drawWave(c, data, W, H, sizePct, cy) {
   }
   c.stroke();
   c.shadowColor = getColorFor(0, 1); c.shadowBlur = 15; c.stroke(); c.shadowBlur = 0;
-}
-function drawRing(c, data, W, H, sizePct, cy) {
-  const N = 96, step = Math.floor((data?.length || 1024) / N / 1.5);
-  const cx = W / 2, r0 = Math.min(W, H) * 0.15 * sizePct, maxR = Math.min(W, H) * 0.12 * sizePct;
-  for (let i = 0; i < N; i++) {
-    const raw = data ? data[i * step] / 255 : 0;
-    const v = Math.max(0.05, raw);
-    const ang = (i / N) * Math.PI * 2 - Math.PI / 2, r1 = r0 + v * maxR;
-    const x0 = cx + Math.cos(ang) * r0, y0 = cy + Math.sin(ang) * r0;
-    const x1 = cx + Math.cos(ang) * r1, y1 = cy + Math.sin(ang) * r1;
-    c.strokeStyle = getColorFor(i, N); c.lineWidth = Math.max(4, W / 320); c.lineCap = 'round';
-    c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
-  }
 }
 function drawRising(c, data, W, H, sizePct, cy) {
   const N = 96, barW = (W / N) * 0.75, gap = (W / N) * 0.25, maxH = H * 0.5 * sizePct;
