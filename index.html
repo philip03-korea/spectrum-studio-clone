@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>스펙트럼 스튜디오 PRO V2.1 (Clone)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Black+Han+Sans&family=Gowun+Batang:wght@400;700&family=Nanum+Pen+Script&family=Single+Day&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -274,6 +277,7 @@
                 <button class="tool-btn" data-tool="color">🎨<br>색상</button>
                 <button class="tool-btn" data-tool="title">A<br>타이틀</button>
                 <button class="tool-btn" data-tool="logo">◆<br>로고</button>
+                <button class="tool-btn" data-tool="sticker">🏷️<br>스티커</button>
                 <button class="tool-btn" data-tool="lyrics">🎤<br>가사</button>
               </div>
             </div>
@@ -389,6 +393,17 @@
             <div class="adjust-section hidden" data-adjust="title">
               <div class="adjust-title">타이틀</div>
               <input type="text" class="text-input" id="title-text" placeholder="01. 나의 가는 이 길은" />
+              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
+                <span>폰트</span>
+                <select class="text-input" id="title-font">
+                  <option value="">기본 (시스템)</option>
+                  <option value="'Noto Serif KR', serif">Noto Serif (명조)</option>
+                  <option value="'Black Han Sans', sans-serif">Black Han Sans (강한 고딕)</option>
+                  <option value="'Gowun Batang', serif">Gowun Batang (필기체)</option>
+                  <option value="'Nanum Pen Script', cursive">Nanum Pen (펜글씨)</option>
+                  <option value="'Single Day', cursive">Single Day (캘리)</option>
+                </select>
+              </label>
               <label class="slider-row">
                 <span>크기</span>
                 <input type="range" min="20" max="120" value="48" id="title-size" />
@@ -399,9 +414,58 @@
                 <input type="range" min="0" max="100" value="85" id="title-y" />
                 <span class="slider-val" id="title-y-v">85%</span>
               </label>
+              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
+                <span>색상</span>
+                <input type="color" value="#ffffff" id="title-color" class="color-picker" />
+              </label>
               <label class="check-row">
                 <input type="checkbox" id="title-show" checked /> 타이틀 표시
               </label>
+              <label class="check-row">
+                <input type="checkbox" id="title-pulse" /> 비트에 맞춰 펄스
+              </label>
+              <div class="adjust-divider">OFFICIAL AUDIO 배지</div>
+              <label class="check-row">
+                <input type="checkbox" id="badge-show" /> 배지 표시
+              </label>
+              <label class="slider-row" style="grid-template-columns: 50px 1fr;">
+                <span>위치</span>
+                <select class="text-input" id="badge-pos">
+                  <option value="below">타이틀 아래</option>
+                  <option value="above">타이틀 위</option>
+                  <option value="top-right">우상단</option>
+                  <option value="top-left">좌상단</option>
+                </select>
+              </label>
+            </div>
+            <!-- sticker 도구 -->
+            <div class="adjust-section hidden" data-adjust="sticker">
+              <div class="adjust-title">스티커 (개별 조정)</div>
+              <div class="sticker-list" id="sticker-list">
+                <div class="sticker-empty">미디어 준비 단계에서 스티커를 먼저 추가하세요.</div>
+              </div>
+              <div id="sticker-edit" class="hidden">
+                <label class="slider-row">
+                  <span>X</span>
+                  <input type="range" min="0" max="100" id="sticker-x" />
+                  <span class="slider-val" id="sticker-x-v">0%</span>
+                </label>
+                <label class="slider-row">
+                  <span>Y</span>
+                  <input type="range" min="0" max="100" id="sticker-y" />
+                  <span class="slider-val" id="sticker-y-v">0%</span>
+                </label>
+                <label class="slider-row">
+                  <span>크기</span>
+                  <input type="range" min="20" max="400" id="sticker-size" />
+                  <span class="slider-val" id="sticker-size-v">80px</span>
+                </label>
+                <label class="slider-row">
+                  <span>투명도</span>
+                  <input type="range" min="0" max="100" id="sticker-opacity" />
+                  <span class="slider-val" id="sticker-opacity-v">100%</span>
+                </label>
+              </div>
             </div>
             <!-- logo 도구 -->
             <div class="adjust-section hidden" data-adjust="logo">

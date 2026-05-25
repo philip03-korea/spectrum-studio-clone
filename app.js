@@ -24,8 +24,9 @@ const DEFAULT_STATE = () => ({
   tool: 'bg',
   bg: { brightness: 100, saturation: 100, blur: 0, dim: 20 },
   spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80 },
-  title: { text: '', size: 48, y: 85, show: true },
+  title: { text: '', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below' },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
+  selectedStickerIdx: 0,
   lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium' },
   slideshow: { enabled: false, interval: 5, crossfade: true },
   frame: { style: 'none', intensity: 50 },
@@ -693,6 +694,11 @@ function bindAllSliders() {
 
   $('title-text').addEventListener('input', e => { state.title.text = e.target.value; debouncedSave(); });
   $('title-show').addEventListener('change', e => { state.title.show = e.target.checked; debouncedSave(); });
+  $('title-font').addEventListener('change', e => { state.title.font = e.target.value; debouncedSave(); });
+  $('title-color').addEventListener('input', e => { state.title.color = e.target.value; debouncedSave(); });
+  $('title-pulse').addEventListener('change', e => { state.title.pulse = e.target.checked; debouncedSave(); });
+  $('badge-show').addEventListener('change', e => { state.title.badge = e.target.checked; debouncedSave(); });
+  $('badge-pos').addEventListener('change', e => { state.title.badgePos = e.target.value; debouncedSave(); });
   $('lyrics-show').addEventListener('change', e => { state.lyrics.show = e.target.checked; debouncedSave(); });
   $('lyrics-color').addEventListener('input', e => { state.lyrics.color = e.target.value; debouncedSave(); });
   $('lyrics-shadow').addEventListener('change', e => { state.lyrics.shadow = e.target.value; debouncedSave(); });
@@ -1066,10 +1072,66 @@ function drawTextWithShadow(c, text, x, y, fontPx, color, shadow) {
   c.shadowBlur = 0;
 }
 
-function drawTitle(c, W, H) {
+function getPulseScale(data) {
+  if (!data) return 1;
+  // Average low-freq bins as bass energy
+  let sum = 0, n = Math.min(20, data.length);
+  for (let i = 0; i < n; i++) sum += data[i];
+  const v = (sum / n) / 255;  // 0..1
+  return 1 + v * 0.12;
+}
+function drawTitle(c, W, H, data) {
   if (!state.title.show || !state.title.text) return;
   const y = H * (state.title.y / 100);
-  drawTextWithShadow(c, state.title.text, W / 2, y, state.title.size, '#fff', 'medium');
+  const scale = state.title.pulse ? getPulseScale(data) : 1;
+  const size = state.title.size * scale;
+  const fam = state.title.font || getComputedStyle(document.body).fontFamily;
+  const color = state.title.color || '#fff';
+  c.save();
+  c.font = `bold ${size}px ${fam}`;
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 12;
+  c.lineWidth = Math.max(2, size * 0.06); c.strokeStyle = 'rgba(0,0,0,0.6)';
+  c.strokeText(state.title.text, W / 2, y);
+  c.fillStyle = color;
+  c.fillText(state.title.text, W / 2, y);
+  c.restore();
+  drawBadge(c, W, H, y, size);
+}
+function drawBadge(c, W, H, titleY, titleSize) {
+  if (!state.title.badge) return;
+  const fam = state.title.font || getComputedStyle(document.body).fontFamily;
+  const fSize = Math.max(18, titleSize * 0.28);
+  const text = 'OFFICIAL AUDIO';
+  c.save();
+  c.font = `bold ${fSize}px ${fam}`;
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  const m = c.measureText(text);
+  const padX = fSize * 0.8, padY = fSize * 0.4;
+  const bw = m.width + padX * 2, bh = fSize + padY * 2;
+  let bx = W / 2, by = titleY;
+  if (state.title.badgePos === 'below') { by = titleY + titleSize * 0.85 + bh / 2; }
+  else if (state.title.badgePos === 'above') { by = titleY - titleSize * 0.85 - bh / 2; }
+  else if (state.title.badgePos === 'top-right') { bx = W - bw / 2 - W * 0.03; by = bh / 2 + H * 0.03; }
+  else if (state.title.badgePos === 'top-left') { bx = bw / 2 + W * 0.03; by = bh / 2 + H * 0.03; }
+  // Rounded rect
+  const r = bh / 2;
+  c.fillStyle = '#ff5566';
+  c.beginPath();
+  c.moveTo(bx - bw/2 + r, by - bh/2);
+  c.lineTo(bx + bw/2 - r, by - bh/2);
+  c.quadraticCurveTo(bx + bw/2, by - bh/2, bx + bw/2, by - bh/2 + r);
+  c.lineTo(bx + bw/2, by + bh/2 - r);
+  c.quadraticCurveTo(bx + bw/2, by + bh/2, bx + bw/2 - r, by + bh/2);
+  c.lineTo(bx - bw/2 + r, by + bh/2);
+  c.quadraticCurveTo(bx - bw/2, by + bh/2, bx - bw/2, by + bh/2 - r);
+  c.lineTo(bx - bw/2, by - bh/2 + r);
+  c.quadraticCurveTo(bx - bw/2, by - bh/2, bx - bw/2 + r, by - bh/2);
+  c.closePath();
+  c.fill();
+  c.fillStyle = '#fff';
+  c.fillText(text, bx, by);
+  c.restore();
 }
 
 function drawLyrics(c, W, H, time) {
@@ -1148,7 +1210,7 @@ function drawFrame(c, W, H) {
 function drawScene(c, W, H, freqData, time) {
   drawBackgrounds(c, W, H, time);
   drawSpectrum(c, W, H, freqData);
-  drawTitle(c, W, H);
+  drawTitle(c, W, H, freqData);
   drawLyrics(c, W, H, time);
   drawLogo(c, W, H);
   drawStickers(c, W, H, time);
@@ -1189,6 +1251,20 @@ function fmtTime(sec) {
 // ====================================================================
 // Reset
 // ====================================================================
+// ====================================================================
+// Dark mode toggle
+// ====================================================================
+function bindDarkMode() {
+  const t = $('dark-toggle'); if (!t) return;
+  const apply = (on) => {
+    document.documentElement.dataset.theme = on ? 'dark' : 'light';
+    localStorage.setItem('ssc-theme', on ? 'dark' : 'light');
+  };
+  const saved = localStorage.getItem('ssc-theme');
+  if (saved) { t.checked = saved === 'dark'; apply(t.checked); }
+  t.addEventListener('change', e => apply(e.target.checked));
+}
+
 async function doReset() {
   if (!confirm('⚠️ 모든 업로드 파일과 설정을 삭제할까요?\n(되돌릴 수 없습니다)')) return;
   await dbClear();
@@ -1346,6 +1422,7 @@ function renderStickerThumbs() {
       const removed = state.stickers.splice(i, 1)[0];
       if (removed) URL.revokeObjectURL(removed.url);
       renderStickerThumbs();
+      renderStickerToolList();
       const stored = await dbGet('stickers') || [];
       stored.splice(i, 1);
       await dbSet('stickers', stored);
@@ -1354,6 +1431,65 @@ function renderStickerThumbs() {
     t.appendChild(x);
     wrap.appendChild(t);
   });
+  renderStickerToolList();
+}
+
+// ====================================================================
+// Sticker tool (Stage 2): individual position/size/opacity
+// ====================================================================
+function renderStickerToolList() {
+  const list = $('sticker-list');
+  const edit = $('sticker-edit');
+  if (!list || !edit) return;
+  list.innerHTML = '';
+  if (!state.stickers.length) {
+    list.innerHTML = '<div class="sticker-empty">미디어 준비 단계에서 스티커를 먼저 추가하세요.</div>';
+    edit.classList.add('hidden');
+    return;
+  }
+  state.stickers.forEach((s, i) => {
+    const it = document.createElement('div');
+    it.className = 'sticker-list-item' + (i === state.selectedStickerIdx ? ' active' : '');
+    it.title = s.name;
+    const im = document.createElement('img'); im.src = s.url; it.appendChild(im);
+    it.addEventListener('click', () => {
+      state.selectedStickerIdx = i;
+      renderStickerToolList();
+      syncStickerEditToActive();
+    });
+    list.appendChild(it);
+  });
+  edit.classList.remove('hidden');
+  syncStickerEditToActive();
+}
+function syncStickerEditToActive() {
+  const s = state.stickers[state.selectedStickerIdx];
+  if (!s) return;
+  const set = (id, v, fmt) => {
+    const el = $(id); if (!el) return;
+    el.value = v;
+    const ve = $(id + '-v'); if (ve) ve.textContent = fmt(v);
+  };
+  set('sticker-x', s.x, v => v + '%');
+  set('sticker-y', s.y, v => v + '%');
+  set('sticker-size', s.size, v => v + 'px');
+  set('sticker-opacity', s.opacity, v => v + '%');
+}
+function bindStickerEdit() {
+  const bind = (id, key, fmt) => {
+    const el = $(id); if (!el) return;
+    el.addEventListener('input', () => {
+      const s = state.stickers[state.selectedStickerIdx];
+      if (!s) return;
+      const v = Number(el.value); s[key] = v;
+      const ve = $(id + '-v'); if (ve) ve.textContent = fmt(v);
+      debouncedSave();
+    });
+  };
+  bind('sticker-x', 'x', v => v + '%');
+  bind('sticker-y', 'y', v => v + '%');
+  bind('sticker-size', 'size', v => v + 'px');
+  bind('sticker-opacity', 'opacity', v => v + '%');
 }
 
 // ====================================================================
@@ -1397,6 +1533,12 @@ function restoreUI() {
   setSlider('frame-intensity', state.frame.intensity, v => v + '%');
   $('title-text').value = state.title.text || '';
   $('title-show').checked = state.title.show;
+  $('title-font').value = state.title.font || '';
+  $('title-color').value = state.title.color || '#ffffff';
+  $('title-pulse').checked = !!state.title.pulse;
+  $('badge-show').checked = !!state.title.badge;
+  $('badge-pos').value = state.title.badgePos || 'below';
+  renderStickerToolList();
   $('lyrics-show').checked = state.lyrics.show;
   $('lyrics-color').value = state.lyrics.color || '#ffffff';
   $('lyrics-shadow').value = state.lyrics.shadow || 'medium';
@@ -1743,6 +1885,8 @@ async function init() {
   renderSolidPalette();
   renderGradients();
   renderAnimList();
+  bindStickerEdit();
+  bindDarkMode();
   wireDrop('drop-audio', 'file-audio', handleAudio);
   wireDrop('drop-bg', 'file-bg', files => handleBackgrounds(files));
   wireDrop('drop-logo', 'file-logo', handleLogo);

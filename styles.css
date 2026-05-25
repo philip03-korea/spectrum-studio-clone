@@ -1,4 +1,4 @@
-:root {
+:root, :root[data-theme="dark"] {
   --bg-0: #0b1020;
   --bg-1: #131a2e;
   --bg-2: #1b2440;
@@ -20,6 +20,17 @@
   --radius: 10px;
   --radius-sm: 6px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "맑은 고딕", Roboto, sans-serif;
+}
+:root[data-theme="light"] {
+  --bg-0: #f5f7fc;
+  --bg-1: #ffffff;
+  --bg-2: #eef2f9;
+  --bg-3: #dde4ef;
+  --border: #d2dae6;
+  --border-strong: #b6c1d2;
+  --text-0: #0a0e22;
+  --text-1: #303a55;
+  --text-2: #5b6885;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
@@ -781,6 +792,33 @@ body {
   border-radius: var(--radius-sm);
   background: var(--bg-2);
   cursor: pointer;
+}
+
+/* ===== Sticker tool ===== */
+.sticker-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.sticker-list-item {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--bg-2);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.sticker-list-item:hover { border-color: var(--text-2); }
+.sticker-list-item.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.sticker-list-item img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.sticker-empty {
+  font-size: 11px;
+  color: var(--text-2);
+  text-align: center;
+  padding: 16px 8px;
+  grid-column: 1 / -1;
 }
 
 .stage-nav {
