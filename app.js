@@ -1,0 +1,1244 @@
+/* ============================================================
+ * 스펙트럼 스튜디오 Clone — v0.5
+ * + 가사/자막, 슬라이드쇼, 프레임/필터, 영상배경 싱크
+ * ============================================================ */
+
+import { Muxer, ArrayBufferTarget } from 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.5/+esm';
+
+// ====================================================================
+// State
+// ====================================================================
+const DEFAULT_STATE = () => ({
+  audio: null,
+  backgrounds: [],
+  bgActiveIdx: 0,
+  logo: null,
+  encoding: { resolution: '1920x1080', aspect: '16:9', fps: 60 },
+  genre: 'project',
+  viz: 'bars',
+  tool: 'bg',
+  bg: { brightness: 100, saturation: 100, blur: 0, dim: 20 },
+  spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80 },
+  title: { text: '', size: 48, y: 85, show: true },
+  logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
+  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium' },
+  slideshow: { enabled: false, interval: 5, crossfade: true },
+  frame: { style: 'none', intensity: 50 },
+  filter: { preset: 'none' },
+  audioEl: null, audioCtx: null, analyser: null, source: null, freqData: null,
+  isPlaying: false,
+});
+const state = DEFAULT_STATE();
+
+const PRESETS = {
+  project:   { viz: 'bars',   colorMode: 'multi',   colors: ['#7c5cff','#4dd0ff','#ffb547'], size: 60, y: 80 },
+  edm:       { viz: 'bars',   colorMode: 'rainbow', colors: ['#ff5566','#7c5cff','#4dd0ff','#4ade80'], size: 75, y: 75 },
+  lofi:      { viz: 'wave',   colorMode: 'single',  colors: ['#c9a987'], size: 50, y: 60 },
+  pop:       { viz: 'dot',    colorMode: 'multi',   colors: ['#ff5566','#ffb547','#4dd0ff','#7c5cff'], size: 60, y: 80 },
+  classical: { viz: 'wave',   colorMode: 'single',  colors: ['#ffeb70'], size: 65, y: 50 },
+  rock:      { viz: 'bars',   colorMode: 'rainbow', colors: ['#ff5566','#ffb547','#7c5cff'], size: 70, y: 85 },
+  hiphop:    { viz: 'ring',   colorMode: 'rainbow', colors: ['#4ade80','#4dd0ff','#7c5cff','#ff5566','#ffb547'], size: 55, y: 50 },
+  ballad:    { viz: 'rising', colorMode: 'single',  colors: ['#ffe066'], size: 60, y: 95 },
+  ambient:   { viz: 'ring',   colorMode: 'rainbow', colors: ['#7c5cff','#4dd0ff','#4ade80','#ffb547','#ff5566'], size: 60, y: 50 },
+};
+const PALETTE = [
+  '#ffffff','#ff5566','#ff8a3d','#ffb547','#ffe066','#4ade80',
+  '#4dd0ff','#7c5cff','#c084fc','#f472b6','#000000','#94a3b8',
+];
+const FILTER_PRESETS = {
+  none:    { hueRotate: 0,  sepia: 0,  grayscale: 0,  contrast: 100, brightnessMul: 1.00, saturationMul: 1.00 },
+  vintage: { hueRotate: 0,  sepia: 35, grayscale: 0,  contrast: 110, brightnessMul: 0.95, saturationMul: 0.85 },
+  bw:      { hueRotate: 0,  sepia: 0,  grayscale: 100, contrast: 110, brightnessMul: 1.00, saturationMul: 0.00 },
+  warm:    { hueRotate: -15, sepia: 10, grayscale: 0,  contrast: 105, brightnessMul: 1.05, saturationMul: 1.10 },
+  cool:    { hueRotate: 20, sepia: 0,  grayscale: 0,  contrast: 105, brightnessMul: 1.00, saturationMul: 0.95 },
+  dream:   { hueRotate: 0,  sepia: 20, grayscale: 0,  contrast: 95,  brightnessMul: 1.10, saturationMul: 1.15 },
+};
+
+const $ = id => document.getElementById(id);
+const qsa = sel => document.querySelectorAll(sel);
+
+// ====================================================================
+// Persistence
+// ====================================================================
+const DB = 'spectrum-studio-clone', STORE = 'files', SETTINGS_KEY = 'ssc-settings';
+
+function dbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbSet(key, val) {
+  const db = await dbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(val, key);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+async function dbGet(key) {
+  const db = await dbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const r = tx.objectStore(STORE).get(key);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function dbClear() {
+  const db = await dbOpen();
+  return new Promise(res => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).clear();
+    tx.oncomplete = res;
+  });
+}
+
+function saveSettings() {
+  const s = {
+    encoding: state.encoding, genre: state.genre, viz: state.viz, tool: state.tool,
+    bg: state.bg, spectrum: state.spectrum, title: state.title, logoPos: state.logoPos,
+    bgActiveIdx: state.bgActiveIdx,
+    lyrics: { ...state.lyrics }, slideshow: state.slideshow, frame: state.frame, filter: state.filter,
+  };
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { console.warn(e); }
+}
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+    if (s) Object.assign(state, s);
+  } catch (e) { console.warn(e); }
+}
+let saveTimer;
+function debouncedSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveSettings, 200); }
+
+// ====================================================================
+// Step navigation
+// ====================================================================
+function goToStep(n) {
+  qsa('.step').forEach(el => el.classList.toggle('active', el.dataset.step === String(n)));
+  qsa('.pill').forEach(el => el.classList.toggle('active', el.dataset.goto === String(n)));
+  qsa('.step-panel').forEach(el => el.classList.toggle('active', el.dataset.panel === String(n)));
+  const tags = {
+    '1': ['STEP 1/3', '미디어 준비 — 오디오/배경/로고와 인코딩 설정을 선택하세요'],
+    '2': ['STEP 2/3', '비주얼 편집 — 효과를 추가하고 레이아웃을 확인하세요'],
+    '3': ['STEP 3/3', '영상 출력 — MP4 파일로 렌더링합니다'],
+  };
+  const [tag, headline] = tags[n] || tags['1'];
+  $('topbar-tag').textContent = tag;
+  $('topbar-headline').textContent = headline;
+  if (String(n) === '2') ensureStage2Started();
+  if (String(n) === '3') updateEta();
+}
+qsa('.step, [data-goto], .pill').forEach(el => {
+  el.addEventListener('click', () => {
+    const target = el.dataset.step || el.dataset.goto;
+    if (target) goToStep(target);
+  });
+});
+
+// ====================================================================
+// Drop
+// ====================================================================
+function wireDrop(areaId, inputId, onFiles) {
+  const area = $(areaId), input = $(inputId);
+  area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('dragover'); });
+  area.addEventListener('dragleave', () => area.classList.remove('dragover'));
+  area.addEventListener('drop', e => {
+    e.preventDefault(); area.classList.remove('dragover');
+    if (e.dataTransfer.files.length) onFiles([...e.dataTransfer.files]);
+  });
+  input.addEventListener('change', e => {
+    if (e.target.files.length) onFiles([...e.target.files]);
+  });
+}
+
+// ====================================================================
+// Audio
+// ====================================================================
+async function handleAudioFile(file, opts = {}) {
+  const url = URL.createObjectURL(file);
+  const audioEl = $('audio-preview');
+  audioEl.src = url;
+  $('info-audio').classList.remove('hidden');
+  $('audio-name').textContent = file.name;
+  $('audio-duration').textContent = '디코딩 중…';
+
+  try {
+    const arr = await file.arrayBuffer();
+    const tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await tmpCtx.decodeAudioData(arr.slice(0));
+    state.audio = {
+      name: file.name, type: file.type, url, buffer: buf,
+      duration: buf.duration, sampleRate: buf.sampleRate, channels: buf.numberOfChannels,
+    };
+    state.audioEl = audioEl;
+    $('audio-duration').textContent = fmtTime(buf.duration);
+    $('audio-rate').textContent = buf.sampleRate.toLocaleString() + ' Hz';
+    $('audio-channels').textContent = buf.numberOfChannels === 1 ? 'Mono' : buf.numberOfChannels === 2 ? 'Stereo' : buf.numberOfChannels + 'ch';
+    $('time-total').textContent = fmtTime(buf.duration);
+    $('track-name').textContent = file.name;
+    if (!state.title.text) {
+      state.title.text = file.name.replace(/\.[^.]+$/, '');
+      $('title-text').placeholder = state.title.text;
+    }
+    tmpCtx.close();
+    if (!opts.skipPersist) await dbSet('audio', file);
+    updateEnterButton();
+    refreshLyricsStats();
+    debouncedSave();
+  } catch (err) {
+    console.error(err);
+    $('audio-duration').textContent = '디코딩 실패';
+  }
+}
+async function handleAudio(files) { return handleAudioFile(files[0]); }
+
+// ====================================================================
+// Background — multi
+// ====================================================================
+async function addBackgroundFile(file) {
+  const isVideo = file.type.startsWith('video/');
+  const url = URL.createObjectURL(file);
+  return new Promise(res => {
+    const done = (w, h, el) => {
+      state.backgrounds.push({
+        name: file.name, type: file.type, url, kind: isVideo ? 'video' : 'image',
+        el, width: w, height: h,
+      });
+      res();
+    };
+    if (isVideo) {
+      const v = document.createElement('video');
+      v.muted = true; v.loop = true; v.playsInline = true; v.src = url;
+      v.addEventListener('loadedmetadata', () => { v.play().catch(()=>{}); done(v.videoWidth, v.videoHeight, v); }, { once: true });
+    } else {
+      const img = new Image(); img.src = url;
+      img.addEventListener('load', () => done(img.naturalWidth, img.naturalHeight, img), { once: true });
+    }
+  });
+}
+async function handleBackgrounds(files, opts = {}) {
+  const accepted = files.filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+  if (!accepted.length) return;
+  const wasEmpty = state.backgrounds.length === 0;
+  for (const f of accepted) await addBackgroundFile(f);
+  if (wasEmpty) state.bgActiveIdx = 0;
+  renderBgThumbs();
+  if (!opts.skipPersist) {
+    const stored = await dbGet('backgrounds') || [];
+    for (const f of accepted) stored.push(f);
+    await dbSet('backgrounds', stored);
+  }
+  debouncedSave();
+}
+function renderBgThumbs() {
+  const wrap = $('bg-thumbs');
+  const count = state.backgrounds.length;
+  $('bg-count').textContent = count;
+  if (!count) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '';
+  state.backgrounds.forEach((bg, i) => {
+    const t = document.createElement('div');
+    t.className = 'bg-thumb' + (i === state.bgActiveIdx ? ' active' : '');
+    t.title = bg.name;
+    if (bg.kind === 'video') {
+      const v = document.createElement('video');
+      v.src = bg.url; v.muted = true; v.loop = true; v.playsInline = true;
+      v.addEventListener('loadedmetadata', () => v.play().catch(()=>{}));
+      t.appendChild(v);
+    } else {
+      const im = document.createElement('img'); im.src = bg.url; t.appendChild(im);
+    }
+    const x = document.createElement('button');
+    x.className = 'bg-thumb-x'; x.textContent = '×';
+    x.addEventListener('click', async (e) => { e.stopPropagation(); await removeBackground(i); });
+    t.appendChild(x);
+    t.addEventListener('click', () => { state.bgActiveIdx = i; renderBgThumbs(); debouncedSave(); });
+    wrap.appendChild(t);
+  });
+}
+async function removeBackground(idx) {
+  const removed = state.backgrounds.splice(idx, 1)[0];
+  if (removed) URL.revokeObjectURL(removed.url);
+  if (state.bgActiveIdx >= state.backgrounds.length) state.bgActiveIdx = Math.max(0, state.backgrounds.length - 1);
+  renderBgThumbs();
+  const stored = await dbGet('backgrounds') || [];
+  stored.splice(idx, 1);
+  await dbSet('backgrounds', stored);
+  debouncedSave();
+}
+function getActiveBg() {
+  if (!state.backgrounds.length) return null;
+  return state.backgrounds[Math.min(state.bgActiveIdx, state.backgrounds.length - 1)];
+}
+/** Returns {bg, nextBg?, fadeAlpha?} for given time. Handles slideshow. */
+function getBgForTime(time) {
+  if (!state.slideshow.enabled || state.backgrounds.length <= 1) {
+    return { bg: getActiveBg() };
+  }
+  const interval = Math.max(1, state.slideshow.interval);
+  const fade = state.slideshow.crossfade ? Math.min(1.5, interval * 0.25) : 0;
+  const cycle = state.backgrounds.length * interval;
+  const t = time % cycle;
+  const idx = Math.floor(t / interval);
+  const local = t - idx * interval;
+  const bg = state.backgrounds[idx];
+  const next = state.backgrounds[(idx + 1) % state.backgrounds.length];
+  let fadeAlpha = 0;
+  if (fade > 0 && local > interval - fade) {
+    fadeAlpha = (local - (interval - fade)) / fade;
+  }
+  return { bg, nextBg: fadeAlpha > 0 ? next : null, fadeAlpha };
+}
+
+// ====================================================================
+// Logo
+// ====================================================================
+async function handleLogo(files, opts = {}) {
+  const file = files[0]; if (!file) return;
+  const url = URL.createObjectURL(file);
+  $('info-logo').classList.remove('hidden');
+  const img = $('logo-preview-img');
+  img.src = url; img.classList.remove('hidden');
+  await new Promise(r => img.addEventListener('load', r, { once: true }));
+  state.logo = { name: file.name, type: file.type, url, el: img, width: img.naturalWidth, height: img.naturalHeight };
+  if (!opts.skipPersist) await dbSet('logo', file);
+  debouncedSave();
+}
+
+// ====================================================================
+// Encoding
+// ====================================================================
+function bindSegs() {
+  qsa('[data-enc]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const grp = btn.dataset.enc;
+      qsa(`[data-enc="${grp}"]`).forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.encoding[grp] = btn.dataset.val;
+      if (stage2Started) applyCanvasSize();
+      debouncedSave();
+    });
+  });
+}
+function updateEnterButton() {
+  $('btn-enter-studio').disabled = !state.audio;
+  document.querySelector('.step[data-step="1"]')?.classList.toggle('completed', !!state.audio);
+}
+
+// ====================================================================
+// Capability
+// ====================================================================
+async function probe() {
+  const dot = $('cap-dot'), text = $('cap-text');
+  $('exp-cpu').textContent = (navigator.hardwareConcurrency || '?') + '코어';
+  const mem = navigator.deviceMemory;
+  $('exp-ram').textContent = mem ? `≥${mem}GB` : '확인불가';
+  if (typeof VideoEncoder === 'undefined') {
+    dot.className = 'cap-dot err'; text.textContent = 'WebCodecs 미지원';
+    $('exp-webcodecs').textContent = '미지원'; $('exp-webcodecs').style.color = '#ff5566';
+    return;
+  }
+  try {
+    const sup = await VideoEncoder.isConfigSupported({
+      codec: 'avc1.640028', width: 1920, height: 1080, bitrate: 10_000_000, framerate: 60,
+    });
+    if (sup.supported) { dot.className = 'cap-dot ok'; text.textContent = 'WebCodecs H.264 지원 — MP4 출력 가능'; $('exp-webcodecs').textContent = '✓ 지원'; }
+    else { dot.className = 'cap-dot warn'; text.textContent = 'H.264 미지원'; $('exp-webcodecs').textContent = 'H.264 미지원'; }
+  } catch (e) { dot.className = 'cap-dot warn'; text.textContent = '확인 실패: ' + e.message; }
+}
+
+// ====================================================================
+// Tools / genre / palette / sliders
+// ====================================================================
+function bindTools() {
+  qsa('.tool-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tool = btn.dataset.tool;
+      if (tool.startsWith('viz-')) state.viz = tool.replace('viz-', '');
+      else state.tool = tool;
+      qsa('.tool-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      let panelKey = state.tool;
+      if (tool.startsWith('viz-')) panelKey = 'color';
+      qsa('.adjust-section').forEach(s => s.classList.toggle('hidden', s.dataset.adjust !== panelKey));
+      debouncedSave();
+    });
+  });
+}
+function bindGenres() {
+  qsa('.genre-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      qsa('.genre-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      state.genre = tab.dataset.genre;
+      const p = PRESETS[state.genre];
+      if (p) {
+        state.viz = p.viz;
+        state.spectrum.colorMode = p.colorMode;
+        state.spectrum.color = p.colors[0];
+        state.spectrum.size = p.size;
+        state.spectrum.y = p.y;
+        renderPalette(p.colors);
+        $('adj-size').value = p.size; $('adj-size-v').textContent = p.size + '%';
+        $('adj-y').value = p.y; $('adj-y-v').textContent = p.y + '%';
+        qsa('[data-cm]').forEach(b => b.classList.toggle('active', b.dataset.cm === p.colorMode));
+      }
+      debouncedSave();
+    });
+  });
+}
+function renderPalette(extra) {
+  const all = [...new Set([...PALETTE, ...(extra || [])])];
+  const el = $('palette'); el.innerHTML = '';
+  all.forEach(c => {
+    const chip = document.createElement('button');
+    chip.className = 'color-chip' + (c === state.spectrum.color ? ' active' : '');
+    chip.style.background = c;
+    chip.addEventListener('click', () => {
+      state.spectrum.color = c;
+      qsa('.color-chip').forEach(x => x.classList.remove('active'));
+      chip.classList.add('active'); debouncedSave();
+    });
+    el.appendChild(chip);
+  });
+}
+function bindSlider(id, setter, fmt) {
+  const el = $(id), valEl = $(id + '-v');
+  el.addEventListener('input', () => {
+    const v = Number(el.value); setter(v);
+    if (valEl) valEl.textContent = fmt(v); debouncedSave();
+  });
+}
+function bindAllSliders() {
+  bindSlider('adj-brightness', v => state.bg.brightness = v, v => v + '%');
+  bindSlider('adj-saturation', v => state.bg.saturation = v, v => v + '%');
+  bindSlider('adj-blur',       v => state.bg.blur = v,       v => v + 'px');
+  bindSlider('adj-dim',        v => state.bg.dim = v,        v => v + '%');
+  bindSlider('adj-size',       v => state.spectrum.size = v, v => v + '%');
+  bindSlider('adj-y',          v => state.spectrum.y = v,    v => v + '%');
+  bindSlider('title-size',     v => state.title.size = v,    v => v + 'px');
+  bindSlider('title-y',        v => state.title.y = v,       v => v + '%');
+  bindSlider('logo-x',         v => state.logoPos.x = v,        v => v + '%');
+  bindSlider('logo-y',         v => state.logoPos.y = v,        v => v + '%');
+  bindSlider('logo-size',      v => state.logoPos.size = v,     v => v + 'px');
+  bindSlider('logo-opacity',   v => state.logoPos.opacity = v,  v => v + '%');
+  // Lyrics
+  bindSlider('lyrics-size',    v => state.lyrics.size = v,      v => v + 'px');
+  bindSlider('lyrics-y',       v => state.lyrics.y = v,         v => v + '%');
+  // Slideshow
+  bindSlider('slideshow-interval', v => state.slideshow.interval = v, v => v + '초');
+  // Frame
+  bindSlider('frame-intensity', v => state.frame.intensity = v, v => v + '%');
+
+  $('title-text').addEventListener('input', e => { state.title.text = e.target.value; debouncedSave(); });
+  $('title-show').addEventListener('change', e => { state.title.show = e.target.checked; debouncedSave(); });
+  $('lyrics-show').addEventListener('change', e => { state.lyrics.show = e.target.checked; debouncedSave(); });
+  $('lyrics-color').addEventListener('input', e => { state.lyrics.color = e.target.value; debouncedSave(); });
+  $('lyrics-shadow').addEventListener('change', e => { state.lyrics.shadow = e.target.value; debouncedSave(); });
+  $('slideshow-enabled').addEventListener('change', e => { state.slideshow.enabled = e.target.checked; debouncedSave(); });
+  $('slideshow-crossfade').addEventListener('change', e => { state.slideshow.crossfade = e.target.checked; debouncedSave(); });
+  $('frame-style').addEventListener('change', e => { state.frame.style = e.target.value; debouncedSave(); });
+
+  qsa('[data-cm]').forEach(b => b.addEventListener('click', () => {
+    qsa('[data-cm]').forEach(x => x.classList.remove('active')); b.classList.add('active');
+    state.spectrum.colorMode = b.dataset.cm; debouncedSave();
+  }));
+  qsa('[data-filter]').forEach(b => b.addEventListener('click', () => {
+    qsa('[data-filter]').forEach(x => x.classList.remove('active')); b.classList.add('active');
+    state.filter.preset = b.dataset.filter; debouncedSave();
+  }));
+}
+
+// ====================================================================
+// Lyrics
+// ====================================================================
+function parseLRC(text) {
+  const lines = [];
+  const re = /\[(\d{1,2}):(\d{1,2})(?:[\.:](\d{1,3}))?\]/g;
+  for (const line of text.split(/\r?\n/)) {
+    const matches = [...line.matchAll(re)];
+    if (!matches.length) continue;
+    const lyric = line.replace(re, '').trim();
+    if (!lyric) continue;
+    for (const m of matches) {
+      const min = +m[1], sec = +m[2];
+      let frac = 0;
+      if (m[3]) {
+        const part = m[3];
+        if (part.length === 2) frac = +part / 100;
+        else if (part.length === 3) frac = +part / 1000;
+        else frac = +part / 10;
+      }
+      lines.push({ time: min * 60 + sec + frac, text: lyric });
+    }
+  }
+  return lines.sort((a, b) => a.time - b.time);
+}
+function parseSRT(text) {
+  const lines = [];
+  const blocks = text.split(/\r?\n\r?\n/);
+  for (const block of blocks) {
+    const m = block.match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->/);
+    if (!m) continue;
+    const time = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000;
+    const idx = block.indexOf('\n', block.indexOf('-->'));
+    const txt = block.slice(idx + 1).trim();
+    if (txt) lines.push({ time, text: txt });
+  }
+  return lines.sort((a, b) => a.time - b.time);
+}
+function distributeTextEvenly(text, duration) {
+  const items = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!items.length) return [];
+  return items.map((t, i) => ({ time: (i / items.length) * duration, text: t }));
+}
+function parseLyricsInput(text) {
+  const t = text.trim();
+  if (!t) return [];
+  if (/\[\d{1,2}:\d{1,2}/.test(t)) return parseLRC(t);
+  if (/-->/.test(t)) return parseSRT(t);
+  if (state.audio?.duration) return distributeTextEvenly(t, state.audio.duration);
+  return [];
+}
+function updateLyrics(text, opts = {}) {
+  state.lyrics.rawText = text;
+  state.lyrics.lines = parseLyricsInput(text);
+  refreshLyricsStats();
+  if (!opts.skipPersist) debouncedSave();
+}
+function refreshLyricsStats() {
+  const n = state.lyrics.lines.length;
+  const last = state.lyrics.lines[n - 1]?.time || 0;
+  $('lyrics-stats').textContent = `${n}줄${last ? ' / 마지막 ' + fmtTime(last) : ''}`;
+}
+function bindLyrics() {
+  $('lyrics-text').addEventListener('input', e => updateLyrics(e.target.value));
+  $('lyrics-clear').addEventListener('click', () => {
+    $('lyrics-text').value = '';
+    updateLyrics('');
+  });
+  $('file-lrc').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const text = await f.text();
+    $('lyrics-text').value = text;
+    updateLyrics(text);
+  });
+}
+function getLyricAt(time) {
+  const lines = state.lyrics.lines;
+  if (!lines.length) return '';
+  // last line with time <= current
+  let lo = 0, hi = lines.length - 1, found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lines[mid].time <= time) { found = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return found >= 0 ? lines[found].text : '';
+}
+
+// ====================================================================
+// Playback
+// ====================================================================
+function ensureAudioGraph() {
+  if (state.audioCtx || !state.audioEl) return;
+  state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  state.source = state.audioCtx.createMediaElementSource(state.audioEl);
+  state.analyser = state.audioCtx.createAnalyser();
+  state.analyser.fftSize = 2048;
+  state.analyser.smoothingTimeConstant = 0.82;
+  state.source.connect(state.analyser);
+  state.analyser.connect(state.audioCtx.destination);
+  state.freqData = new Uint8Array(state.analyser.frequencyBinCount);
+}
+function togglePlay() {
+  if (!state.audioEl) return;
+  ensureAudioGraph();
+  if (state.audioCtx.state === 'suspended') state.audioCtx.resume();
+  if (state.audioEl.paused) {
+    state.audioEl.play(); state.isPlaying = true;
+    $('play-overlay').classList.add('playing'); $('play-btn').textContent = '❚❚';
+  } else {
+    state.audioEl.pause(); state.isPlaying = false;
+    $('play-overlay').classList.remove('playing'); $('play-btn').textContent = '▶';
+  }
+}
+function bindPlayback() {
+  $('play-overlay').addEventListener('click', togglePlay);
+  $('play-btn').addEventListener('click', togglePlay);
+  const track = $('track');
+  track.addEventListener('click', e => {
+    if (!state.audioEl || !state.audio) return;
+    const rect = track.getBoundingClientRect();
+    state.audioEl.currentTime = ((e.clientX - rect.left) / rect.width) * state.audio.duration;
+  });
+}
+function updateTimeline() {
+  if (state.audioEl && state.audio) {
+    const t = state.audioEl.currentTime, d = state.audio.duration;
+    const pct = (t / d) * 100;
+    $('track-fill').style.width = pct + '%';
+    $('track-handle').style.left = pct + '%';
+    $('time-now').textContent = fmtTime(t);
+  }
+}
+
+// ====================================================================
+// Drawing
+// ====================================================================
+const canvas = $('preview-canvas');
+const ctx = canvas.getContext('2d');
+
+function getCanvasSize() {
+  const [w, h] = state.encoding.resolution.split('x').map(Number);
+  if (state.encoding.aspect === '9:16') return [1080, 1920];
+  if (state.encoding.aspect === '1:1') return [1080, 1080];
+  return [w, h];
+}
+function applyCanvasSize() { const [w, h] = getCanvasSize(); canvas.width = w; canvas.height = h; }
+
+function buildFilterString() {
+  const fp = FILTER_PRESETS[state.filter.preset] || FILTER_PRESETS.none;
+  const bright = state.bg.brightness * fp.brightnessMul;
+  const sat = state.bg.saturation * fp.saturationMul;
+  let f = `brightness(${bright}%) saturate(${sat}%) blur(${state.bg.blur}px)`;
+  if (fp.contrast !== 100) f += ` contrast(${fp.contrast}%)`;
+  if (fp.hueRotate) f += ` hue-rotate(${fp.hueRotate}deg)`;
+  if (fp.sepia) f += ` sepia(${fp.sepia}%)`;
+  if (fp.grayscale) f += ` grayscale(${fp.grayscale}%)`;
+  return f;
+}
+
+function drawSingleBg(c, W, H, bg, alpha = 1) {
+  if (!bg || !bg.el) return false;
+  const el = bg.el;
+  const r = bg.width / bg.height, R = W / H;
+  let dw, dh, dx, dy;
+  if (r > R) { dh = H; dw = H * r; dx = (W - dw) / 2; dy = 0; }
+  else { dw = W; dh = W / r; dx = 0; dy = (H - dh) / 2; }
+  c.save();
+  c.globalAlpha = alpha;
+  c.filter = buildFilterString();
+  c.drawImage(el, dx, dy, dw, dh);
+  c.restore();
+  return true;
+}
+
+function drawBackgrounds(c, W, H, time) {
+  const { bg, nextBg, fadeAlpha } = getBgForTime(time);
+  let drawn = drawSingleBg(c, W, H, bg, 1);
+  if (nextBg && fadeAlpha > 0) drawn = drawSingleBg(c, W, H, nextBg, fadeAlpha) || drawn;
+  if (!drawn) {
+    const g = c.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, '#1a1f3a'); g.addColorStop(1, '#0a0e22');
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+  }
+  if (state.bg.dim > 0) {
+    c.fillStyle = `rgba(0,0,0,${state.bg.dim / 100})`;
+    c.fillRect(0, 0, W, H);
+  }
+}
+
+function getColorFor(i, total) {
+  const m = state.spectrum.colorMode;
+  if (m === 'single') return state.spectrum.color;
+  const p = PRESETS[state.genre];
+  const palette = (p?.colors?.length ? p.colors : [state.spectrum.color, '#4dd0ff', '#ffb547']);
+  if (m === 'rainbow') return `hsl(${(i / total) * 360}, 80%, 60%)`;
+  return palette[i % palette.length];
+}
+function drawSpectrum(c, W, H, data) {
+  if (!data) return;
+  const sizePct = state.spectrum.size / 100;
+  const cy = H * (state.spectrum.y / 100);
+  switch (state.viz) {
+    case 'bars':   return drawBars(c, data, W, H, sizePct, cy);
+    case 'dot':    return drawBars(c, data, W, H, sizePct, cy, true);
+    case 'wave':   return drawWave(c, data, W, H, sizePct, cy);
+    case 'ring':   return drawRing(c, data, W, H, sizePct, cy);
+    case 'rising': return drawRising(c, data, W, H, sizePct, cy);
+  }
+}
+function drawBars(c, data, W, H, sizePct, cy, dotMode) {
+  const N = 64, barW = (W / N) * 0.7, gap = (W / N) * 0.3, maxBarH = H * 0.4 * sizePct;
+  const step = Math.floor(data.length / N / 2);
+  for (let i = 0; i < N; i++) {
+    const v = data[i * step] / 255, h = v * maxBarH;
+    const x = i * (barW + gap) + gap / 2;
+    c.fillStyle = getColorFor(i, N);
+    if (dotMode) {
+      const dots = Math.max(1, Math.floor(h / 8));
+      for (let d = 0; d < dots; d++) { c.beginPath(); c.arc(x + barW / 2, cy - d * 8, barW / 3, 0, Math.PI * 2); c.fill(); }
+    } else {
+      c.fillRect(x, cy - h, barW, h);
+      c.globalAlpha = 0.3; c.fillRect(x, cy, barW, h * 0.5); c.globalAlpha = 1;
+    }
+  }
+}
+function drawWave(c, data, W, H, sizePct, cy) {
+  const N = 256, step = Math.floor(data.length / N), amp = H * 0.2 * sizePct;
+  c.strokeStyle = getColorFor(0, 1); c.lineWidth = 3;
+  c.beginPath();
+  for (let i = 0; i < N; i++) {
+    const v = (data[i * step] / 255) - 0.5;
+    const x = (i / (N - 1)) * W, y = cy + v * amp;
+    if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+  }
+  c.stroke();
+  c.shadowColor = getColorFor(0, 1); c.shadowBlur = 15; c.stroke(); c.shadowBlur = 0;
+}
+function drawRing(c, data, W, H, sizePct, cy) {
+  const N = 96, step = Math.floor(data.length / N / 1.5);
+  const cx = W / 2, r0 = Math.min(W, H) * 0.15 * sizePct, maxR = Math.min(W, H) * 0.12 * sizePct;
+  for (let i = 0; i < N; i++) {
+    const v = data[i * step] / 255;
+    const ang = (i / N) * Math.PI * 2 - Math.PI / 2, r1 = r0 + v * maxR;
+    const x0 = cx + Math.cos(ang) * r0, y0 = cy + Math.sin(ang) * r0;
+    const x1 = cx + Math.cos(ang) * r1, y1 = cy + Math.sin(ang) * r1;
+    c.strokeStyle = getColorFor(i, N); c.lineWidth = 4; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+  }
+}
+function drawRising(c, data, W, H, sizePct, cy) {
+  const N = 96, barW = (W / N) * 0.75, gap = (W / N) * 0.25, maxH = H * 0.5 * sizePct;
+  const step = Math.floor(data.length / N / 2);
+  for (let i = 0; i < N; i++) {
+    const v = data[i * step] / 255, h = v * maxH, x = i * (barW + gap);
+    const g = c.createLinearGradient(0, cy, 0, cy - h);
+    const col = getColorFor(i, N);
+    g.addColorStop(0, col); g.addColorStop(1, col + '00');
+    c.fillStyle = g; c.fillRect(x, cy - h, barW, h);
+  }
+}
+
+function drawTextWithShadow(c, text, x, y, fontPx, color, shadow) {
+  c.font = `bold ${fontPx}px ${getComputedStyle(document.body).fontFamily}`;
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  if (shadow === 'box') {
+    const metrics = c.measureText(text);
+    const tw = metrics.width + fontPx * 0.6;
+    const th = fontPx * 1.4;
+    c.fillStyle = 'rgba(0,0,0,0.6)';
+    c.fillRect(x - tw / 2, y - th / 2, tw, th);
+  } else {
+    c.shadowColor = shadow === 'soft' ? 'rgba(0,0,0,0.5)'
+                  : shadow === 'medium' ? 'rgba(0,0,0,0.8)'
+                  : 'rgba(0,0,0,1)';
+    c.shadowBlur = shadow === 'soft' ? 6 : shadow === 'medium' ? 10 : 14;
+    c.lineWidth = Math.max(2, fontPx * 0.08);
+    c.strokeStyle = 'rgba(0,0,0,0.6)';
+    c.strokeText(text, x, y);
+  }
+  c.fillStyle = color;
+  c.fillText(text, x, y);
+  c.shadowBlur = 0;
+}
+
+function drawTitle(c, W, H) {
+  if (!state.title.show || !state.title.text) return;
+  const y = H * (state.title.y / 100);
+  drawTextWithShadow(c, state.title.text, W / 2, y, state.title.size, '#fff', 'medium');
+}
+
+function drawLyrics(c, W, H, time) {
+  if (!state.lyrics.show) return;
+  const text = getLyricAt(time);
+  if (!text) return;
+  const y = H * (state.lyrics.y / 100);
+  // Wrap long lines
+  const lines = wrapText(c, text, W * 0.88, state.lyrics.size);
+  const lineHeight = state.lyrics.size * 1.3;
+  const totalH = lineHeight * lines.length;
+  let cy = y - totalH / 2 + lineHeight / 2;
+  for (const l of lines) {
+    drawTextWithShadow(c, l, W / 2, cy, state.lyrics.size, state.lyrics.color, state.lyrics.shadow);
+    cy += lineHeight;
+  }
+}
+function wrapText(c, text, maxWidth, fontPx) {
+  c.font = `bold ${fontPx}px ${getComputedStyle(document.body).fontFamily}`;
+  const words = text.split(' ');
+  const lines = []; let cur = '';
+  for (const w of words) {
+    const test = cur ? cur + ' ' + w : w;
+    if (c.measureText(test).width > maxWidth && cur) { lines.push(cur); cur = w; }
+    else cur = test;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function drawLogo(c, W, H) {
+  if (!state.logo || !state.logo.el) return;
+  const size = state.logoPos.size * (W / 1280);
+  const ratio = state.logo.height / state.logo.width;
+  const w = size, h = size * ratio;
+  const x = (W - w) * (state.logoPos.x / 100), y = (H - h) * (state.logoPos.y / 100);
+  c.globalAlpha = state.logoPos.opacity / 100;
+  c.drawImage(state.logo.el, x, y, w, h);
+  c.globalAlpha = 1;
+}
+
+function drawFrame(c, W, H) {
+  const s = state.frame;
+  if (s.style === 'cinemascope') {
+    const cinH = W / 2.35;
+    const barH = (H - cinH) / 2;
+    if (barH > 0) {
+      c.fillStyle = '#000';
+      c.fillRect(0, 0, W, barH);
+      c.fillRect(0, H - barH, W, barH);
+    }
+  } else if (s.style === 'vignette') {
+    const grad = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.65);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, `rgba(0,0,0,${s.intensity / 100})`);
+    c.fillStyle = grad;
+    c.fillRect(0, 0, W, H);
+  } else if (s.style === 'rounded') {
+    const radius = Math.min(W, H) * (s.intensity / 100) * 0.15;
+    c.fillStyle = '#000';
+    // 4 corners as inverse rounded rect (draw black squares with arc cutouts)
+    c.save();
+    c.beginPath();
+    c.moveTo(0, 0); c.lineTo(W, 0); c.lineTo(W, H); c.lineTo(0, H); c.closePath();
+    c.moveTo(radius, 0);
+    c.arcTo(W, 0, W, H, radius);
+    c.arcTo(W, H, 0, H, radius);
+    c.arcTo(0, H, 0, 0, radius);
+    c.arcTo(0, 0, W, 0, radius);
+    c.closePath();
+    c.fill('evenodd');
+    c.restore();
+  }
+}
+
+function drawScene(c, W, H, freqData, time) {
+  drawBackgrounds(c, W, H, time);
+  drawSpectrum(c, W, H, freqData);
+  drawTitle(c, W, H);
+  drawLyrics(c, W, H, time);
+  drawLogo(c, W, H);
+  drawFrame(c, W, H);
+}
+
+let renderInProgress = false;
+function renderFrame() {
+  if (!renderInProgress) {
+    if (state.analyser && state.freqData) state.analyser.getByteFrequencyData(state.freqData);
+    const t = state.audioEl?.currentTime || 0;
+    drawScene(ctx, canvas.width, canvas.height, state.freqData, t);
+    updateTimeline();
+  }
+  requestAnimationFrame(renderFrame);
+}
+
+// ====================================================================
+// Stage 2 init
+// ====================================================================
+let stage2Started = false;
+function ensureStage2Started() {
+  if (stage2Started) return;
+  stage2Started = true;
+  applyCanvasSize();
+  requestAnimationFrame(renderFrame);
+}
+
+// ====================================================================
+// Helpers
+// ====================================================================
+function fmtTime(sec) {
+  if (!isFinite(sec)) return '0:00';
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// ====================================================================
+// Reset
+// ====================================================================
+$('btn-reset').addEventListener('click', async () => {
+  if (!confirm('⚠️ 모든 업로드 파일과 설정을 삭제할까요?\n(되돌릴 수 없습니다)')) return;
+  await dbClear();
+  localStorage.removeItem(SETTINGS_KEY);
+  location.reload();
+});
+
+// ====================================================================
+// UI restoration
+// ====================================================================
+function restoreUI() {
+  qsa('[data-enc]').forEach(b => b.classList.toggle('active', state.encoding[b.dataset.enc] === b.dataset.val));
+  qsa('[data-cm]').forEach(b => b.classList.toggle('active', b.dataset.cm === state.spectrum.colorMode));
+  qsa('[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === state.filter.preset));
+  qsa('.genre-tab').forEach(t => t.classList.toggle('active', t.dataset.genre === state.genre));
+  qsa('.tool-btn').forEach(b => {
+    const t = b.dataset.tool;
+    b.classList.toggle('active', t === state.tool || t === 'viz-' + state.viz);
+  });
+  qsa('.adjust-section').forEach(s => s.classList.toggle('hidden', s.dataset.adjust !== state.tool));
+  const setSlider = (id, v, fmt) => {
+    const el = $(id); if (!el) return;
+    el.value = v; const ve = $(id + '-v'); if (ve) ve.textContent = fmt(v);
+  };
+  setSlider('adj-brightness', state.bg.brightness, v => v + '%');
+  setSlider('adj-saturation', state.bg.saturation, v => v + '%');
+  setSlider('adj-blur',       state.bg.blur,       v => v + 'px');
+  setSlider('adj-dim',        state.bg.dim,        v => v + '%');
+  setSlider('adj-size',       state.spectrum.size, v => v + '%');
+  setSlider('adj-y',          state.spectrum.y,    v => v + '%');
+  setSlider('title-size',     state.title.size,    v => v + 'px');
+  setSlider('title-y',        state.title.y,       v => v + '%');
+  setSlider('logo-x',         state.logoPos.x,        v => v + '%');
+  setSlider('logo-y',         state.logoPos.y,        v => v + '%');
+  setSlider('logo-size',      state.logoPos.size,     v => v + 'px');
+  setSlider('logo-opacity',   state.logoPos.opacity,  v => v + '%');
+  setSlider('lyrics-size',    state.lyrics.size,      v => v + 'px');
+  setSlider('lyrics-y',       state.lyrics.y,         v => v + '%');
+  setSlider('slideshow-interval', state.slideshow.interval, v => v + '초');
+  setSlider('frame-intensity', state.frame.intensity, v => v + '%');
+  $('title-text').value = state.title.text || '';
+  $('title-show').checked = state.title.show;
+  $('lyrics-show').checked = state.lyrics.show;
+  $('lyrics-color').value = state.lyrics.color || '#ffffff';
+  $('lyrics-shadow').value = state.lyrics.shadow || 'medium';
+  $('lyrics-text').value = state.lyrics.rawText || '';
+  if (state.lyrics.rawText) updateLyrics(state.lyrics.rawText, { skipPersist: true });
+  $('slideshow-enabled').checked = state.slideshow.enabled;
+  $('slideshow-crossfade').checked = state.slideshow.crossfade;
+  $('frame-style').value = state.frame.style;
+  renderPalette(PRESETS[state.genre]?.colors);
+}
+async function restoreFiles() {
+  const audioFile = await dbGet('audio');
+  if (audioFile) await handleAudioFile(audioFile, { skipPersist: true });
+  const bgFiles = await dbGet('backgrounds');
+  if (bgFiles && bgFiles.length) await handleBackgrounds(bgFiles, { skipPersist: true });
+  const logoFile = await dbGet('logo');
+  if (logoFile) await handleLogo([logoFile], { skipPersist: true });
+}
+
+// ====================================================================
+// ============= STAGE 3: MP4 RENDERER =============
+// ====================================================================
+
+const PROFILES = {
+  quality:  { bitrate: 10_000_000, label: '품질 (10 Mbps)' },
+  balanced: { bitrate:  8_000_000, label: '균형 (8 Mbps)' },
+  speed:    { bitrate:  6_000_000, label: '속도 (6 Mbps)' },
+};
+let renderProfile = 'balanced';
+let cancelRequested = false;
+
+qsa('[data-profile]').forEach(b => b.addEventListener('click', () => {
+  qsa('[data-profile]').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  renderProfile = b.dataset.profile;
+  updateEta();
+}));
+$('btn-render').addEventListener('click', () => doRender());
+$('btn-cancel').addEventListener('click', () => { cancelRequested = true; });
+
+function updateEta() {
+  if (!state.audio) { $('exp-eta').textContent = '오디오 필요'; return; }
+  const d = state.audio.duration;
+  const fast = Math.max(1, d / 6);
+  const slow = Math.max(1, d / 2);
+  $('exp-eta').textContent = `${fmtMin(fast)} ~ ${fmtMin(slow)}`;
+}
+function fmtMin(sec) {
+  if (sec < 60) return Math.round(sec) + '초';
+  const m = sec / 60;
+  return m < 10 ? m.toFixed(1) + '분' : Math.round(m) + '분';
+}
+function setProgress(pct, status) {
+  $('exp-progress').style.width = pct + '%';
+  $('exp-pct').textContent = Math.round(pct) + '%';
+  if (status) $('exp-status').textContent = status;
+}
+
+async function doRender() {
+  if (renderInProgress) return;
+  if (!state.audio?.buffer) { alert('오디오를 먼저 업로드하세요'); return; }
+  if (typeof VideoEncoder === 'undefined') { alert('이 브라우저는 WebCodecs를 지원하지 않습니다.'); return; }
+
+  renderInProgress = true; cancelRequested = false;
+  $('btn-render').classList.add('hidden');
+  $('btn-cancel').classList.remove('hidden');
+  setProgress(0, '준비 중…');
+
+  try {
+    await renderToMp4();
+    setProgress(100, '✅ 완료! 다운로드 시작');
+  } catch (e) {
+    if (e.message === 'cancelled') setProgress(0, '⏹ 중단됨');
+    else { console.error(e); setProgress(0, '❌ 실패: ' + e.message); alert('렌더링 실패: ' + e.message); }
+  } finally {
+    renderInProgress = false;
+    $('btn-render').classList.remove('hidden');
+    $('btn-cancel').classList.add('hidden');
+  }
+}
+
+// ---------- FFT ----------
+function fftInPlace(real, imag) {
+  const N = real.length;
+  let j = 0;
+  for (let i = 0; i < N - 1; i++) {
+    if (i < j) {
+      let t = real[i]; real[i] = real[j]; real[j] = t;
+      t = imag[i]; imag[i] = imag[j]; imag[j] = t;
+    }
+    let m = N >> 1;
+    while (m >= 1 && j >= m) { j -= m; m >>= 1; }
+    j += m;
+  }
+  for (let size = 2; size <= N; size <<= 1) {
+    const half = size >> 1;
+    const step = -2 * Math.PI / size;
+    for (let i = 0; i < N; i += size) {
+      for (let k = 0; k < half; k++) {
+        const theta = step * k;
+        const cos = Math.cos(theta), sin = Math.sin(theta);
+        const re = real[i + k + half], im = imag[i + k + half];
+        const tR = re * cos - im * sin;
+        const tI = re * sin + im * cos;
+        real[i + k + half] = real[i + k] - tR;
+        imag[i + k + half] = imag[i + k] - tI;
+        real[i + k] += tR;
+        imag[i + k] += tI;
+      }
+    }
+  }
+}
+function computeFFTAt(audioBuf, time, fftSize, scratchR, scratchI) {
+  const sampleOffset = Math.floor(time * audioBuf.sampleRate);
+  const start = Math.max(0, sampleOffset - (fftSize >> 1));
+  const ch0 = audioBuf.getChannelData(0);
+  const ch1 = audioBuf.numberOfChannels > 1 ? audioBuf.getChannelData(1) : ch0;
+  const len = ch0.length;
+  for (let i = 0; i < fftSize; i++) {
+    const idx = start + i;
+    const s = idx < len ? (ch0[idx] + ch1[idx]) * 0.5 : 0;
+    const w = 0.5 * (1 - Math.cos(2 * Math.PI * i / (fftSize - 1)));
+    scratchR[i] = s * w;
+    scratchI[i] = 0;
+  }
+  fftInPlace(scratchR, scratchI);
+  const N = fftSize >> 1;
+  const out = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    const mag = Math.sqrt(scratchR[i] * scratchR[i] + scratchI[i] * scratchI[i]);
+    const db = 20 * Math.log10((mag / fftSize) + 1e-10);
+    const v = Math.max(0, Math.min(1, (db + 100) / 80));
+    out[i] = (v * 255) | 0;
+  }
+  return out;
+}
+async function precomputeFFT(audioBuf, fps, totalFrames, fftSize, onProgress) {
+  const scratchR = new Float32Array(fftSize);
+  const scratchI = new Float32Array(fftSize);
+  const frames = new Array(totalFrames);
+  for (let f = 0; f < totalFrames; f++) {
+    if (cancelRequested) throw new Error('cancelled');
+    frames[f] = computeFFTAt(audioBuf, f / fps, fftSize, scratchR, scratchI);
+    if (f % 200 === 0) {
+      if (onProgress) onProgress(f / totalFrames);
+      await new Promise(r => setTimeout(r));
+    }
+  }
+  const alpha = 0.82;
+  for (let f = 1; f < totalFrames; f++) {
+    const cur = frames[f], prev = frames[f - 1];
+    for (let i = 0; i < cur.length; i++) {
+      cur[i] = (alpha * prev[i] + (1 - alpha) * cur[i]) | 0;
+    }
+  }
+  return frames;
+}
+async function resampleAudio(buf, targetRate, targetChannels) {
+  if (buf.sampleRate === targetRate && buf.numberOfChannels === targetChannels) return buf;
+  const off = new OfflineAudioContext(targetChannels, Math.ceil(buf.duration * targetRate), targetRate);
+  const src = off.createBufferSource();
+  src.buffer = buf;
+  src.connect(off.destination);
+  src.start();
+  return await off.startRendering();
+}
+
+// Properly seek a video element and wait for the frame to be ready
+function seekVideoTo(videoEl, time) {
+  return new Promise((resolve) => {
+    if (Math.abs(videoEl.currentTime - time) < 0.01) return resolve();
+    const onSeeked = () => { videoEl.removeEventListener('seeked', onSeeked); resolve(); };
+    videoEl.addEventListener('seeked', onSeeked);
+    try { videoEl.currentTime = time; } catch (_) { resolve(); }
+    // safety timeout
+    setTimeout(() => { videoEl.removeEventListener('seeked', onSeeked); resolve(); }, 200);
+  });
+}
+
+async function renderToMp4() {
+  const audioBuf = state.audio.buffer;
+  const duration = audioBuf.duration;
+  const fps = Number(state.encoding.fps);
+  const [W, H] = getCanvasSize();
+  const totalFrames = Math.floor(duration * fps);
+  const bitrate = PROFILES[renderProfile].bitrate;
+
+  if (state.audioEl && !state.audioEl.paused) togglePlay();
+
+  setProgress(2, '오디오 분석 중 (FFT)…');
+  const fftSize = 2048;
+  const fftPerFrame = await precomputeFFT(audioBuf, fps, totalFrames, fftSize, p => {
+    setProgress(2 + p * 13, `오디오 분석 중 ${Math.round(p * 100)}%`);
+  });
+  if (cancelRequested) throw new Error('cancelled');
+
+  setProgress(15, '오디오 리샘플링…');
+  const aacBuf = await resampleAudio(audioBuf, 48000, 2);
+  if (cancelRequested) throw new Error('cancelled');
+
+  const offCanvas = new OffscreenCanvas(W, H);
+  const offCtx = offCanvas.getContext('2d');
+
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'avc', width: W, height: H, frameRate: fps },
+    audio: { codec: 'aac', sampleRate: 48000, numberOfChannels: 2 },
+    fastStart: 'in-memory',
+  });
+
+  let videoErr;
+  const videoEncoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: e => { videoErr = e; },
+  });
+  videoEncoder.configure({
+    codec: 'avc1.640028',
+    width: W, height: H, bitrate, framerate: fps,
+  });
+
+  renderInProgress = true;
+  // collect unique video bgs for seek logic
+  const videoBgs = state.backgrounds.filter(b => b.kind === 'video');
+
+  setProgress(18, '비디오 인코딩 시작…');
+  const t0 = performance.now();
+
+  for (let f = 0; f < totalFrames; f++) {
+    if (cancelRequested) { try { videoEncoder.close(); } catch(_){} throw new Error('cancelled'); }
+    if (videoErr) throw videoErr;
+
+    const time = f / fps;
+
+    // Seek video bg(s) if any are currently used
+    const { bg, nextBg } = getBgForTime(time);
+    for (const b of [bg, nextBg]) {
+      if (b && b.kind === 'video' && b.el && isFinite(b.el.duration)) {
+        await seekVideoTo(b.el, time % b.el.duration);
+      }
+    }
+
+    drawScene(offCtx, W, H, fftPerFrame[f], time);
+
+    const ts = Math.round(time * 1_000_000);
+    const vf = new VideoFrame(offCanvas, { timestamp: ts, duration: Math.round(1_000_000 / fps) });
+    videoEncoder.encode(vf, { keyFrame: (f % (fps * 2)) === 0 });
+    vf.close();
+
+    if (f % 15 === 0) {
+      const pct = 18 + (f / totalFrames) * 62;
+      const elapsed = (performance.now() - t0) / 1000;
+      const fpsRender = (f + 1) / elapsed;
+      const eta = (totalFrames - f) / Math.max(fpsRender, 0.1);
+      setProgress(pct, `비디오 ${f}/${totalFrames} (${fpsRender.toFixed(1)} fps, ETA ${fmtMin(eta)})`);
+      await new Promise(r => setTimeout(r));
+    }
+    while (videoEncoder.encodeQueueSize > 20 && !cancelRequested) {
+      await new Promise(r => setTimeout(r, 5));
+    }
+  }
+  await videoEncoder.flush();
+  videoEncoder.close();
+  if (videoErr) throw videoErr;
+
+  setProgress(82, '오디오 인코딩 중…');
+  let audioErr;
+  const audioEncoder = new AudioEncoder({
+    output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+    error: e => { audioErr = e; },
+  });
+  audioEncoder.configure({
+    codec: 'mp4a.40.2',
+    sampleRate: 48000, numberOfChannels: 2, bitrate: 192_000,
+  });
+
+  const chunkSize = 1024;
+  const ch0 = aacBuf.getChannelData(0);
+  const ch1 = aacBuf.numberOfChannels > 1 ? aacBuf.getChannelData(1) : ch0;
+  const totalSamples = aacBuf.length;
+  for (let off = 0; off < totalSamples; off += chunkSize) {
+    if (cancelRequested) { try { audioEncoder.close(); } catch(_){} throw new Error('cancelled'); }
+    if (audioErr) throw audioErr;
+    const numFrames = Math.min(chunkSize, totalSamples - off);
+    const planar = new Float32Array(numFrames * 2);
+    planar.set(ch0.subarray(off, off + numFrames), 0);
+    planar.set(ch1.subarray(off, off + numFrames), numFrames);
+    const ts = Math.round((off / 48000) * 1_000_000);
+    const ad = new AudioData({
+      format: 'f32-planar',
+      sampleRate: 48000, numberOfChannels: 2,
+      numberOfFrames: numFrames, timestamp: ts, data: planar,
+    });
+    audioEncoder.encode(ad);
+    ad.close();
+    if ((off / chunkSize) % 100 === 0) {
+      const pct = 82 + (off / totalSamples) * 12;
+      setProgress(pct, `오디오 ${Math.round(off/48000)}초/${Math.round(totalSamples/48000)}초`);
+      await new Promise(r => setTimeout(r));
+    }
+  }
+  await audioEncoder.flush();
+  audioEncoder.close();
+  if (audioErr) throw audioErr;
+
+  setProgress(96, 'MP4 합성 중…');
+  muxer.finalize();
+  renderInProgress = false;
+
+  const blob = new Blob([muxer.target.buffer], { type: 'video/mp4' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const baseName = (state.title.text || state.audio.name || 'spectrum').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_');
+  a.href = url;
+  a.download = baseName + '.mp4';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+  // Resume video bg playback for preview
+  for (const b of videoBgs) { try { b.el.play().catch(()=>{}); } catch(_){} }
+}
+
+// ====================================================================
+// Init
+// ====================================================================
+async function init() {
+  loadSettings();
+  bindSegs(); bindTools(); bindGenres(); bindAllSliders(); bindPlayback();
+  bindLyrics();
+  wireDrop('drop-audio', 'file-audio', handleAudio);
+  wireDrop('drop-bg', 'file-bg', files => handleBackgrounds(files));
+  wireDrop('drop-logo', 'file-logo', handleLogo);
+  $('btn-enter-studio').addEventListener('click', () => goToStep(2));
+  restoreUI();
+  await probe();
+  await restoreFiles();
+  updateEta();
+}
+init();

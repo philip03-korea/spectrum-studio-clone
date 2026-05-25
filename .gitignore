@@ -1,0 +1,27 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local server logs
+*.log
+
+# Local test files (사용자가 테스트로 둔 미디어 파일이 있으면 제외)
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.mp4
+*.webm
+*.mkv
+
+# Build outputs (혹시 모를)
+dist/
+build/
+node_modules/
