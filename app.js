@@ -24,10 +24,10 @@ const DEFAULT_STATE = () => ({
   tool: 'bg',
   bg: { brightness: 100, saturation: 100, blur: 0, dim: 20 },
   spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80 },
-  title: { text: '', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below' },
+  title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'bold', deco: 'none' },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
-  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true },
+  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: '', display: 'ko' },
   slideshow: { enabled: false, interval: 5, crossfade: true },
   frame: { style: 'none', intensity: 50 },
   filter: { preset: 'none' },
@@ -471,9 +471,15 @@ async function handleAudioFile(file, opts = {}) {
     $('audio-channels').textContent = buf.numberOfChannels === 1 ? 'Mono' : buf.numberOfChannels === 2 ? 'Stereo' : buf.numberOfChannels + 'ch';
     $('time-total').textContent = fmtTime(buf.duration);
     $('track-name').textContent = file.name;
-    if (!state.title.text) {
+    // Auto-fill title from filename only if user hasn't customized it
+    // (default placeholder 'BEORANGKKEUT STUDIO' counts as 'not customized' — replace it)
+    if (!state.title.text || state.title.text === 'BEORANGKKEUT STUDIO') {
       state.title.text = file.name.replace(/\.[^.]+$/, '');
-      $('title-text').placeholder = state.title.text;
+    }
+    const tEl = $('title-text');
+    if (tEl) {
+      tEl.placeholder = state.title.text;
+      if (!tEl.value) tEl.value = state.title.text;
     }
     tmpCtx.close();
     if (!opts.skipPersist) await dbSet('audio', file);
@@ -747,6 +753,9 @@ function bindAllSliders() {
   onE('lyrics-shadow','change',e => { state.lyrics.shadow = e.target.value; debouncedSave(); });
   onE('lyrics-mode',  'change',e => { state.lyrics.mode = e.target.value; debouncedSave(); });
   onE('lyrics-highlight','change',e => { state.lyrics.highlight = e.target.checked; debouncedSave(); });
+  onE('lyrics-lang',  'change',e => { state.lyrics.lang = e.target.value; debouncedSave(); });
+  onE('lyrics-display','change',e => { state.lyrics.display = e.target.value; debouncedSave(); });
+  onE('lyrics-translate','click', translateAllLyrics);
   onE('slideshow-enabled', 'change', e => { state.slideshow.enabled = e.target.checked; debouncedSave(); });
   onE('slideshow-crossfade','change', e => { state.slideshow.crossfade = e.target.checked; debouncedSave(); });
   onE('frame-style', 'change', e => { state.frame.style = e.target.value; debouncedSave(); });
@@ -900,6 +909,36 @@ function bindLyrics() {
     updateLyrics(cleaned);
   });
 }
+// ===== 자동 번역 (MyMemory free API) =====
+async function translateText(text, target) {
+  if (!text || !target) return '';
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=ko|${target}`;
+    const r = await fetch(url);
+    const j = await r.json();
+    const t = j?.responseData?.translatedText;
+    if (t && !/^(INVALID|MYMEMORY WARNING)/i.test(t)) return t;
+  } catch (e) { console.warn('translate err:', e); }
+  return '';
+}
+async function translateAllLyrics() {
+  const lang = state.lyrics.lang;
+  if (!lang) { alert('언어를 먼저 선택하세요'); return; }
+  const lines = state.lyrics.lines;
+  if (!lines.length) { alert('가사가 비어 있습니다'); return; }
+  const statusEl = $('trans-status');
+  if (statusEl) statusEl.textContent = `번역 준비 중... (${lines.length}줄)`;
+  for (let i = 0; i < lines.length; i++) {
+    lines[i].translation = await translateText(lines[i].text, lang);
+    lines[i].translationLang = lang;
+    if (statusEl) statusEl.textContent = `번역 중 ${i + 1}/${lines.length}...`;
+    // Throttle slightly to avoid hammering the free API
+    if (i % 3 === 2) await new Promise(r => setTimeout(r, 120));
+  }
+  if (statusEl) statusEl.textContent = `✅ 완료 — ${lines.length}줄 번역됨 (${lang})`;
+  debouncedSave();
+}
+
 function getLyricAt(time) {
   const lines = state.lyrics.lines;
   if (!lines.length) return '';
@@ -1664,18 +1703,48 @@ function drawLyrics(c, W, H, time) {
     }
   };
 
+  const display = state.lyrics.display || 'ko';
+  // Helper: get the text to display for a given line based on display mode
+  const txtFor = (l, includeBoth) => {
+    if (!l) return null;
+    if (display === 'trans') return l.translation || l.text;
+    if (display === 'ko') return l.text;
+    // 'both' — caller decides what to do
+    return l.text;
+  };
+
   if (mode === 'single') {
     if (curIdx < 0) return;
-    drawLine(arr[curIdx].text, W/2, cy, baseSize, color, 1);
+    const cur = arr[curIdx];
+    if (display === 'both' && cur.translation) {
+      drawLine(cur.text, W/2, cy - baseSize * 0.5, baseSize, color, 1);
+      drawLine(cur.translation, W/2, cy + baseSize * 0.6, baseSize * 0.65, color, 0.85);
+    } else {
+      drawLine(txtFor(cur), W/2, cy, baseSize, color, 1);
+    }
   } else if (mode === 'three') {
     const prev = curIdx > 0 ? arr[curIdx-1] : null;
     const cur  = curIdx >= 0 ? arr[curIdx] : null;
     const next = curIdx + 1 < arr.length ? arr[curIdx+1] : null;
     const sidesSize = highlight ? baseSize * 0.7 : baseSize * 0.85;
     const curSize   = baseSize;
-    if (prev) drawLine(prev.text, W/2, cy - lh,     sidesSize, color, 0.5);
-    if (cur)  drawLine(cur.text,  W/2, cy,          curSize,   color, 1);
-    if (next) drawLine(next.text, W/2, cy + lh,     sidesSize, color, 0.5);
+    if (display === 'both' && cur && cur.translation) {
+      // Korean 3-line + ONLY current line's translation below current
+      if (prev) drawLine(prev.text, W/2, cy - lh, sidesSize, color, 0.5);
+      drawLine(cur.text, W/2, cy - baseSize * 0.45, curSize, color, 1);
+      drawLine(cur.translation, W/2, cy + baseSize * 0.55, baseSize * 0.65, color, 0.85);
+      if (next) drawLine(next.text, W/2, cy + lh, sidesSize, color, 0.5);
+    } else if (display === 'trans') {
+      // 3-line of translation only
+      if (prev) drawLine(prev.translation || prev.text, W/2, cy - lh, sidesSize, color, 0.5);
+      if (cur)  drawLine(cur.translation  || cur.text,  W/2, cy,      curSize,   color, 1);
+      if (next) drawLine(next.translation || next.text, W/2, cy + lh, sidesSize, color, 0.5);
+    } else {
+      // Korean only (default)
+      if (prev) drawLine(prev.text, W/2, cy - lh,     sidesSize, color, 0.5);
+      if (cur)  drawLine(cur.text,  W/2, cy,          curSize,   color, 1);
+      if (next) drawLine(next.text, W/2, cy + lh,     sidesSize, color, 0.5);
+    }
   } else if (mode === 'full') {
     const linesToShow = 9;
     const startIdx = Math.max(0, (curIdx < 0 ? 0 : curIdx) - 4);
@@ -1686,7 +1755,15 @@ function drawLyrics(c, W, H, time) {
       const dist = Math.abs(i - (curIdx < 0 ? 0 : curIdx));
       const alpha = isActive ? 1 : Math.max(0.18, 0.65 - dist * 0.13);
       const sizeMul = isActive && highlight ? 1 : 0.65;
-      drawLine(arr[i].text, W/2, cy + dy, baseSize * sizeMul, color, alpha);
+      const line = arr[i];
+      let text;
+      if (display === 'trans') text = line.translation || line.text;
+      else text = line.text;
+      drawLine(text, W/2, cy + dy, baseSize * sizeMul, color, alpha);
+      // Both mode: under active line draw translation
+      if (display === 'both' && isActive && line.translation) {
+        drawLine(line.translation, W/2, cy + dy + baseSize * 0.85, baseSize * 0.55, color, 0.85);
+      }
     }
   }
 }

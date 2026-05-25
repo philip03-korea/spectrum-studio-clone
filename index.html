@@ -6,11 +6,11 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>스펙트럼 스튜디오 PRO V2.1 (Clone)</title>
+<title>벼랑끝 스튜디오 — Beorangkkeut Studio PRO V2.1</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Black+Han+Sans&family=Gowun+Batang:wght@400;700&family=Nanum+Pen+Script&family=Single+Day&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=v1_0_lrcclean" />
+<link rel="stylesheet" href="styles.css?v=v1_1_translate" />
 </head>
 <body>
   <div class="app-shell">
@@ -20,7 +20,7 @@
         <div class="brand-row">
           <span class="brand-mark">▮▮▯▮</span>
           <div>
-            <div class="brand-name">SPECTRUM</div>
+            <div class="brand-name">BEORANGKKEUT</div>
             <div class="brand-sub">STUDIO <span class="brand-pro">PRO</span> <span class="brand-ver">V2.1</span></div>
           </div>
         </div>
@@ -680,6 +680,28 @@
               <label class="check-row">
                 <input type="checkbox" id="lyrics-highlight" checked /> 현재 줄 강조 (크게/밝게)
               </label>
+              <div class="adjust-divider">🌐 자동 번역</div>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>언어</span>
+                <select class="text-input" id="lyrics-lang">
+                  <option value="">선택...</option>
+                  <option value="en">영어 (English)</option>
+                  <option value="ja">일본어 (日本語)</option>
+                  <option value="zh-CN">중국어 (中文)</option>
+                  <option value="hi">힌디어 (हिन्दी)</option>
+                  <option value="vi">베트남어 (Tiếng Việt)</option>
+                </select>
+              </label>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>표시</span>
+                <select class="text-input" id="lyrics-display">
+                  <option value="ko">한글만</option>
+                  <option value="both">한글 + 번역 (현재 줄 아래)</option>
+                  <option value="trans">번역만 (3줄)</option>
+                </select>
+              </label>
+              <button class="btn-mini" id="lyrics-translate" style="width:100%;padding:10px;background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;">🌐 자동 번역 실행</button>
+              <div class="lyrics-stats" id="trans-status"></div>
             </div>
 
             <!-- 로고 설정 -->
@@ -801,6 +823,6 @@
     </main>
   </div>
 
-  <script type="module" src="app.js?v=v1_0_lrcclean"></script>
+  <script type="module" src="app.js?v=v1_1_translate"></script>
 </body>
 </html>
