@@ -26,7 +26,7 @@ const DEFAULT_STATE = () => ({
   spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80,
               renderStyle: 'line', center: true, width: 100, speed: 70, sens: 85,
               bands: 64, maxH: 100, lineW: 4, barW: 8, gap: 0 },
-  title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'none', position: 'top-right', xFine: 0, yFine: 0 },
+  title: { text: '벼량끝 On the Brink Studio', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'none', position: 'top-right', xFine: 0, yFine: 0 },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
   lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'dual' },
@@ -474,8 +474,8 @@ async function handleAudioFile(file, opts = {}) {
     $('time-total').textContent = fmtTime(buf.duration);
     $('track-name').textContent = file.name;
     // Auto-fill title from filename only if user hasn't customized it
-    // (default placeholder 'BEORANGKKEUT STUDIO' counts as 'not customized' — replace it)
-    if (!state.title.text || state.title.text === 'BEORANGKKEUT STUDIO') {
+    // (default placeholder '벼량끝 On the Brink Studio' counts as 'not customized' — replace it)
+    if (!state.title.text || state.title.text === '벼량끝 On the Brink Studio') {
       state.title.text = file.name.replace(/\.[^.]+$/, '');
     }
     const tEl = $('title-text');

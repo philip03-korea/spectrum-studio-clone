@@ -1,4 +1,4 @@
-# 스펙트럼 스튜디오 Clone
+# 벼량끝 On the Brink Studio
 
 Suno 같은 AI 음악을 유튜브 영상으로 올릴 때 쓰는 **스펙트럼 시각화 영상(MP4)** 생성 도구. 원본 Spectrum Studio PRO V2.1의 워크플로우와 외관을 따라 만든 순수 브라우저 앱.
 
