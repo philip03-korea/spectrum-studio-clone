@@ -812,6 +812,69 @@ function parseLyricsInput(text) {
   if (state.audio?.duration) return distributeTextEvenly(t, state.audio.duration);
   return [];
 }
+
+// ----- parseAndCleanLrc: 섹션 태그 제거 + 단어→문장 병합 (사용자 스펙) -----
+// Input: raw LRC text (word-level OR sentence-level, may include [Intro]/[Verse] tags & blank lines)
+// Output: cleaned LRC text — one line per sentence, format `[mm:ss.xx]문장`
+//
+// Rules (in order):
+//   1) Drop lines whose text (after stripping timestamps) is exactly a single
+//      bracketed section name like [Intro], [Verse 1], [Pre-Chorus], etc.
+//   2) Use blank lines AND section-tag lines as SENTENCE BOUNDARIES.
+//   3) Within a boundary group, concatenate the texts with single spaces;
+//      keep only the FIRST timestamp as the sentence's start time.
+//   4) Lines that are timestamp-only (no text) are skipped.
+//   5) Already-sentence-level LRC passes through unchanged (each sentence is
+//      its own boundary group of size 1).
+//   6) Pure TXT (no [mm:ss] at all) → just remove blank lines & bracket-only lines.
+function parseAndCleanLrc(rawText) {
+  const text = String(rawText || '');
+  const hasAnyTs = /\[\d{1,2}:\d{1,2}/.test(text);
+  if (!hasAnyTs) {
+    // TXT path
+    return text.split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(l => l && !/^\[[^\]]+\]$/.test(l))
+      .join('\n');
+  }
+  const tsAnyRe = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
+  const tsFirstRe = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/;
+  const lines = text.split(/\r?\n/);
+  const out = [];
+  let curStartFormatted = null;   // e.g. "00:13.23"
+  let curWords = [];
+  const flush = () => {
+    if (curWords.length && curStartFormatted) {
+      const sentence = curWords.join(' ').replace(/\s+/g, ' ').trim();
+      if (sentence) out.push(`[${curStartFormatted}]${sentence}`);
+    }
+    curStartFormatted = null;
+    curWords = [];
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flush(); continue; }                           // Rule 2: blank line = boundary
+    const tsMatch = line.match(tsFirstRe);
+    if (!tsMatch) {
+      // No timestamp on this line. Could be a stray continuation; append as a word.
+      // (Spec doesn't address this explicitly; safest is to attach to current group.)
+      if (line && !/^\[[^\]]+\]$/.test(line)) curWords.push(line);
+      else flush();
+      continue;
+    }
+    // Build the canonical timestamp string for the FIRST timestamp on the line.
+    const [, mm, ss, frac] = tsMatch;
+    const tsStr = `${mm}:${ss}` + (frac != null ? `.${frac}` : '');
+    // Strip all timestamps to get the textual remainder.
+    const rest = line.replace(tsAnyRe, '').trim();
+    if (!rest) continue;                                         // Rule 4: ts-only
+    if (/^\[[^\]]+\]$/.test(rest)) { flush(); continue; }        // Rule 1+2: section tag = boundary
+    if (!curStartFormatted) curStartFormatted = tsStr;
+    curWords.push(rest);
+  }
+  flush();
+  return out.join('\n');
+}
 function updateLyrics(text, opts = {}) {
   state.lyrics.rawText = text;
   state.lyrics.lines = parseLyricsInput(text);
@@ -831,9 +894,10 @@ function bindLyrics() {
   });
   $('file-lrc').addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    const text = await f.text();
-    $('lyrics-text').value = text;
-    updateLyrics(text);
+    const raw = await f.text();
+    const cleaned = parseAndCleanLrc(raw);
+    $('lyrics-text').value = cleaned;
+    updateLyrics(cleaned);
   });
 }
 function getLyricAt(time) {
@@ -996,14 +1060,67 @@ function drawStickers(c, W, H, time) {
   }
 }
 
+// vfx state (visualizer 효과: 글로우펄스/비트펀치/그라디언트스윕/컬러사이클)
+const _vfx = { hueOff: 0, lastBeat: 0, beatBoost: 1, cycleIdx: 0, glowAlpha: 0 };
+function updateVfxState(time, data) {
+  const v = state.vfx || {};
+  // 그라디언트 스윕: 시간에 따라 hue 회전
+  _vfx.hueOff = v['gradient-sweep'] ? (time * 30) % 360 : 0;
+  // 컬러 사이클: 0.5초마다 팔레트 시프트
+  _vfx.cycleIdx = v['color-cycle'] ? Math.floor(time * 2) : 0;
+  // 비트 펀치: 저주파 평균이 임계 넘으면 1.0 → 1.6 boost
+  if (v['beat-punch'] && data) {
+    let s = 0; for (let i = 0; i < 8; i++) s += data[i] || 0;
+    const bass = s / 8 / 255;
+    if (bass > 0.55 && time - _vfx.lastBeat > 0.18) {
+      _vfx.lastBeat = time; _vfx.beatBoost = 1.6;
+    }
+    _vfx.beatBoost = Math.max(1, _vfx.beatBoost * 0.88);
+  } else {
+    _vfx.beatBoost = 1;
+  }
+  // 글로우 펄스: bass에 따라 spectrum 주변 광원
+  if (v['glow-pulse'] && data) {
+    let s = 0; for (let i = 0; i < 16; i++) s += data[i] || 0;
+    _vfx.glowAlpha = (s / 16 / 255) * 0.6;
+  } else { _vfx.glowAlpha = 0; }
+}
+function applyVfxOverlay(c, W, H) {
+  if (_vfx.glowAlpha > 0.01) {
+    const cy = H * (state.spectrum.y / 100);
+    const r = W * 0.45 * (0.6 + _vfx.glowAlpha);
+    const baseCol = state.spectrum.color || '#7c5cff';
+    const g = c.createRadialGradient(W/2, cy, 0, W/2, cy, r);
+    g.addColorStop(0, hexToRgba(baseCol, _vfx.glowAlpha * 0.7));
+    g.addColorStop(1, hexToRgba(baseCol, 0));
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+  }
+}
+function hexToRgba(c, a) {
+  if (!c) return `rgba(124,92,255,${a})`;
+  if (c.startsWith('hsl')) {
+    return c.replace('hsl(', 'hsla(').replace(')', `,${a})`);
+  }
+  if (c.startsWith('#') && c.length === 7) {
+    const r = parseInt(c.slice(1,3),16), g = parseInt(c.slice(3,5),16), b = parseInt(c.slice(5,7),16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  return c;
+}
+
 function getColorFor(i, total) {
   const m = state.spectrum.colorMode;
   if (m === 'single') return state.spectrum.color;
   const p = PRESETS[state.genre];
   const palette = (p?.colors?.length ? p.colors : [state.spectrum.color, '#4dd0ff', '#ffb547']);
   if (m === 'rainbow') {
-    const hue = (i / Math.max(1, total)) * 360;
+    const hue = ((i / Math.max(1, total)) * 360 + _vfx.hueOff) % 360;
     return `hsl(${hue}, 90%, 62%)`;
+  }
+  // color-cycle: rotate palette over time
+  if (_vfx.cycleIdx) {
+    return palette[(i + _vfx.cycleIdx) % palette.length];
   }
   return palette[i % palette.length];
 }
@@ -1242,7 +1359,7 @@ function drawBars(c, data, W, H, sizePct, cy, dotMode) {
   const step = Math.floor((data?.length || 1024) / N / 2);
   for (let i = 0; i < N; i++) {
     const raw = data ? data[i * step] / 255 : 0;
-    const v = Math.max(0.02, raw);  // small baseline so something is always visible
+    const v = Math.max(0.02, raw) * _vfx.beatBoost;  // beat-punch 적용
     const h = Math.max(minH, v * maxBarH);
     const x = i * (barW + gap) + gap / 2;
     c.fillStyle = getColorFor(i, N);
@@ -1633,6 +1750,7 @@ function drawFrame(c, W, H) {
 
 function drawScene(c, W, H, freqData, time) {
   drawBackgrounds(c, W, H, time);
+  applyVfxOverlay(c, W, H);  // 글로우 펄스 (스펙트럼 아래)
   drawSpectrum(c, W, H, freqData);
   drawTitle(c, W, H, freqData);
   drawLyrics(c, W, H, time);
@@ -1646,6 +1764,7 @@ function renderOneFrame() {
   if (!renderInProgress) {
     if (state.analyser && state.freqData) state.analyser.getByteFrequencyData(state.freqData);
     const t = state.audioEl?.currentTime || 0;
+    updateVfxState(t, state.freqData);
     drawScene(ctx, canvas.width, canvas.height, state.freqData, t);
     updateTimeline();
   }
