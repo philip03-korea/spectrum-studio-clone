@@ -24,7 +24,7 @@ const DEFAULT_STATE = () => ({
   tool: 'bg',
   bg: { brightness: 100, saturation: 100, blur: 0, dim: 20 },
   spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80 },
-  title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'bold', deco: 'none' },
+  title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'bold', deco: 'none', position: 'bottom-center', yFine: 0 },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
   lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: '', display: 'ko' },
@@ -725,7 +725,8 @@ function bindAllSliders() {
   bindSlider('adj-size',       v => state.spectrum.size = v, v => v + '%');
   bindSlider('adj-y',          v => state.spectrum.y = v,    v => v + '%');
   bindSlider('title-size',     v => state.title.size = v,    v => v + 'px');
-  bindSlider('title-y',        v => state.title.y = v,       v => v + '%');
+  bindSlider('title-y',        v => state.title.y = v,       v => v + '%');  // legacy
+  bindSlider('title-y-fine',   v => state.title.yFine = v,   v => v + '%');
   bindSlider('logo-x',         v => state.logoPos.x = v,        v => v + '%');
   bindSlider('logo-y',         v => state.logoPos.y = v,        v => v + '%');
   bindSlider('logo-size',      v => state.logoPos.size = v,     v => v + 'px');
@@ -1467,10 +1468,21 @@ function getPulseScale(data) {
   const v = (sum / n) / 255;  // 0..1
   return 1 + v * 0.12;
 }
+const TITLE_POSITIONS = {
+  'top-left':      { x: 6,  y: 8,  align: 'left'   },
+  'top-center':    { x: 50, y: 8,  align: 'center' },
+  'top-right':     { x: 94, y: 8,  align: 'right'  },
+  'bottom-left':   { x: 6,  y: 92, align: 'left'   },
+  'bottom-center': { x: 50, y: 92, align: 'center' },
+  'bottom-right':  { x: 94, y: 92, align: 'right'  },
+};
 function drawTitle(c, W, H, data) {
   if (!state.title.show || !state.title.text) return;
   const text = state.title.text;
-  const y = H * (state.title.y / 100);
+  const pos = TITLE_POSITIONS[state.title.position || 'bottom-center'] || TITLE_POSITIONS['bottom-center'];
+  const yFine = (state.title.yFine || 0);
+  const x = W * (pos.x / 100);
+  const y = H * ((pos.y + yFine) / 100);
   const scale = state.title.pulse ? getPulseScale(data) : 1;
   const size = state.title.size * scale;
   const fam = state.title.font || getComputedStyle(document.body).fontFamily;
@@ -1478,30 +1490,32 @@ function drawTitle(c, W, H, data) {
   const styleKey = state.title.style || 'bold';
   const deco = state.title.deco || 'none';
   c.save();
-  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.textAlign = pos.align; c.textBaseline = 'middle';
   switch (styleKey) {
     case 'minimal':
       c.font = `300 ${size}px ${fam}`;
       c.shadowColor = 'rgba(0,0,0,0.4)'; c.shadowBlur = 6;
-      c.fillStyle = color; c.fillText(text, W/2, y);
+      c.fillStyle = color; c.fillText(text, x, y);
       break;
     case 'modern':
       c.font = `600 ${size}px ${fam}`;
       c.shadowColor = 'rgba(0,0,0,0.55)'; c.shadowBlur = 8;
-      c.fillStyle = color; c.fillText(text, W/2, y);
+      c.fillStyle = color; c.fillText(text, x, y);
       break;
     case 'underline': {
       c.font = `700 ${size}px ${fam}`;
       c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 10;
       c.lineWidth = Math.max(2, size * 0.04); c.strokeStyle = 'rgba(0,0,0,0.6)';
-      c.strokeText(text, W/2, y);
-      c.fillStyle = color; c.fillText(text, W/2, y);
+      c.strokeText(text, x, y);
+      c.fillStyle = color; c.fillText(text, x, y);
       const m = c.measureText(text);
       c.shadowBlur = 0;
       c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.06);
+      const lx0 = pos.align === 'left' ? x - 4 : (pos.align === 'right' ? x - m.width - 4 : x - m.width/2 - 12);
+      const lx1 = pos.align === 'left' ? x + m.width + 4 : (pos.align === 'right' ? x + 4 : x + m.width/2 + 12);
       c.beginPath();
-      c.moveTo(W/2 - m.width/2 - 12, y + size * 0.6);
-      c.lineTo(W/2 + m.width/2 + 12, y + size * 0.6);
+      c.moveTo(lx0, y + size * 0.6);
+      c.lineTo(lx1, y + size * 0.6);
       c.stroke();
       break;
     }
@@ -1509,47 +1523,49 @@ function drawTitle(c, W, H, data) {
       c.font = `700 ${size}px ${fam}`;
       const m = c.measureText(text);
       const cardW = m.width + size * 0.9, cardH = size * 1.5;
+      const cx0 = pos.align === 'left' ? x - size * 0.45 : (pos.align === 'right' ? x - cardW + size * 0.45 : x - cardW/2);
       c.fillStyle = 'rgba(0,0,0,0.7)';
       if (c.roundRect) {
-        c.beginPath(); c.roundRect(W/2 - cardW/2, y - cardH/2, cardW, cardH, size * 0.2); c.fill();
-      } else c.fillRect(W/2 - cardW/2, y - cardH/2, cardW, cardH);
-      c.fillStyle = color; c.fillText(text, W/2, y);
+        c.beginPath(); c.roundRect(cx0, y - cardH/2, cardW, cardH, size * 0.2); c.fill();
+      } else c.fillRect(cx0, y - cardH/2, cardW, cardH);
+      c.fillStyle = color; c.fillText(text, x, y);
       break;
     }
     case 'neon': {
       c.font = `800 ${size}px ${fam}`;
       for (let i = 4; i > 0; i--) {
         c.shadowColor = color; c.shadowBlur = size * 0.18 * i;
-        c.fillStyle = color; c.fillText(text, W/2, y);
+        c.fillStyle = color; c.fillText(text, x, y);
       }
-      c.shadowBlur = 0; c.fillStyle = '#fff'; c.fillText(text, W/2, y);
+      c.shadowBlur = 0; c.fillStyle = '#fff'; c.fillText(text, x, y);
       break;
     }
     case 'glitch':
       c.font = `800 ${size}px ${fam}`;
-      c.fillStyle = 'rgba(255,40,90,0.85)';  c.fillText(text, W/2 - size * 0.04, y);
-      c.fillStyle = 'rgba(0,210,255,0.85)';  c.fillText(text, W/2 + size * 0.04, y);
+      c.fillStyle = 'rgba(255,40,90,0.85)';  c.fillText(text, x - size * 0.04, y);
+      c.fillStyle = 'rgba(0,210,255,0.85)';  c.fillText(text, x + size * 0.04, y);
       c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 8;
-      c.fillStyle = color; c.fillText(text, W/2, y);
+      c.fillStyle = color; c.fillText(text, x, y);
       break;
     case 'outline':
       c.font = `800 ${size}px ${fam}`;
       c.lineWidth = Math.max(3, size * 0.07); c.strokeStyle = color;
       c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 8;
-      c.strokeText(text, W/2, y);
+      c.strokeText(text, x, y);
       break;
     case 'vintage': {
       c.font = `700 ${size}px ${fam}`;
       c.shadowColor = 'rgba(0,0,0,0.6)'; c.shadowBlur = 6;
-      c.fillStyle = color; c.fillText(text, W/2, y);
+      c.fillStyle = color; c.fillText(text, x, y);
       c.shadowBlur = 0;
       const m = c.measureText(text);
       c.strokeStyle = color; c.lineWidth = 2;
       const gp = size * 0.6, lw = m.width * 0.6;
+      const ax = pos.align === 'left' ? x + m.width/2 : (pos.align === 'right' ? x - m.width/2 : x);
       for (let off of [-gp, gp]) {
         c.beginPath();
-        c.moveTo(W/2 - lw/2, y + off);     c.lineTo(W/2 + lw/2, y + off);
-        c.moveTo(W/2 - lw/2, y + off + 5); c.lineTo(W/2 + lw/2, y + off + 5);
+        c.moveTo(ax - lw/2, y + off);     c.lineTo(ax + lw/2, y + off);
+        c.moveTo(ax - lw/2, y + off + 5); c.lineTo(ax + lw/2, y + off + 5);
         c.stroke();
       }
       break;
@@ -1559,12 +1575,13 @@ function drawTitle(c, W, H, data) {
       c.font = `800 ${size}px ${fam}`;
       c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 12;
       c.lineWidth = Math.max(2, size * 0.06); c.strokeStyle = 'rgba(0,0,0,0.6)';
-      c.strokeText(text, W/2, y);
-      c.fillStyle = color; c.fillText(text, W/2, y);
+      c.strokeText(text, x, y);
+      c.fillStyle = color; c.fillText(text, x, y);
       break;
   }
   c.restore();
-  drawTitleDeco(c, W, H, y, size, text, deco, color, fam);
+  if (pos.align === 'center') drawTitleDeco(c, W, H, y, size, text, deco, color, fam);
+  // badge UI was removed in v1.2 — keep function but it stays disabled by default
   drawBadge(c, W, H, y, size);
 }
 
@@ -1826,14 +1843,275 @@ function drawFrame(c, W, H) {
 }
 
 function drawScene(c, W, H, freqData, time) {
+  // 비트펄스/줌펄스: 캔버스 전체에 스케일 변형 적용
+  const ppScale = getPpScale(freqData, time);
+  c.save();
+  if (ppScale !== 1) {
+    c.translate(W/2, H/2);
+    c.scale(ppScale, ppScale);
+    c.translate(-W/2, -H/2);
+  }
   drawBackgrounds(c, W, H, time);
-  applyVfxOverlay(c, W, H);  // 글로우 펄스 (스펙트럼 아래)
+  applyVfxOverlay(c, W, H);
   drawSpectrum(c, W, H, freqData);
   drawTitle(c, W, H, freqData);
   drawLyrics(c, W, H, time);
   drawLogo(c, W, H);
   drawStickers(c, W, H, time);
+  c.restore();
+  // 파티클 / 포스트프로세싱은 변형 밖에서
+  drawParticles(c, W, H, time, freqData);
+  drawPostProcessing(c, W, H, time, freqData);
   drawFrame(c, W, H);
+}
+
+// ===== 이펙트: 포스트 프로세싱 + 파티클 =====
+function getPpScale(data, time) {
+  const pp = state.postProcessing || {};
+  let scale = 1;
+  if (pp['zoom-pulse']) {
+    scale *= 1 + Math.sin(time * 2) * 0.025;
+  }
+  if (pp['beat-pulse'] && data) {
+    let s = 0; for (let i = 0; i < 8; i++) s += data[i] || 0;
+    const bass = s / 8 / 255;
+    scale *= 1 + bass * 0.035;
+  }
+  return scale;
+}
+function drawPostProcessing(c, W, H, time, data) {
+  const pp = state.postProcessing || {};
+  if (pp['film-grain']) {
+    // Random noise overlay (sparse)
+    c.save();
+    c.globalAlpha = 0.08;
+    for (let i = 0; i < 200; i++) {
+      c.fillStyle = Math.random() > 0.5 ? '#fff' : '#000';
+      c.fillRect(Math.random() * W, Math.random() * H, 2, 2);
+    }
+    c.restore();
+  }
+  if (pp['light-leak']) {
+    // Soft diagonal light streak
+    const t = (time * 0.3) % 2;
+    const g = c.createLinearGradient(0, H * t * 0.5, W, H * (t * 0.5 + 0.5));
+    g.addColorStop(0, 'rgba(255,200,120,0)');
+    g.addColorStop(0.5, 'rgba(255,200,120,0.18)');
+    g.addColorStop(1, 'rgba(255,200,120,0)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+  }
+  if (pp['chromatic']) {
+    // Subtle red/blue offsets at edges
+    c.save();
+    c.globalCompositeOperation = 'screen';
+    c.globalAlpha = 0.08;
+    c.fillStyle = '#ff0000'; c.fillRect(-3, 0, W, H);
+    c.fillStyle = '#00ffff'; c.fillRect( 3, 0, W, H);
+    c.restore();
+  }
+  if (pp['bass-wave'] && data) {
+    let s = 0; for (let i = 0; i < 8; i++) s += data[i] || 0;
+    const bass = s / 8 / 255;
+    if (bass > 0.3) {
+      const rings = 3;
+      for (let i = 0; i < rings; i++) {
+        const r = (W * 0.35) * ((time * 0.7 + i / rings) % 1);
+        c.strokeStyle = `rgba(124,92,255,${bass * (1 - r / (W * 0.35)) * 0.5})`;
+        c.lineWidth = 4;
+        c.beginPath();
+        c.arc(W/2, H/2, r, 0, Math.PI * 2);
+        c.stroke();
+      }
+    }
+  }
+}
+
+const _ptcPool = {};
+function ensurePtc(kind, n, init) {
+  if (!_ptcPool[kind] || _ptcPool[kind].length !== n) {
+    _ptcPool[kind] = [];
+    for (let i = 0; i < n; i++) _ptcPool[kind].push(init(i));
+  }
+  return _ptcPool[kind];
+}
+let _lastPtcTime = 0;
+function drawParticles(c, W, H, time, data) {
+  const ptc = state.particles || {};
+  const dt = Math.max(0, Math.min(0.05, time - _lastPtcTime));
+  _lastPtcTime = time;
+  const colors = ['#ff5566','#ffb547','#ffe066','#4ade80','#4dd0ff','#7c5cff','#c084fc'];
+  const rainbowMode = state.lyrics?.lang ? false : true; // not relevant; just use palette
+
+  if (ptc['snow']) {
+    const arr = ensurePtc('snow', 90, () => ({
+      x: Math.random()*W, y: Math.random()*H, r: 1+Math.random()*3,
+      speed: 40+Math.random()*80, wob: Math.random()*Math.PI*2,
+    }));
+    c.fillStyle = '#fff';
+    for (const p of arr) {
+      p.y += p.speed * dt; p.wob += dt * 1.5; p.x += Math.sin(p.wob) * 0.4;
+      if (p.y > H + 5) { p.y = -5; p.x = Math.random()*W; }
+      c.globalAlpha = 0.7 + Math.sin(p.wob)*0.2;
+      c.beginPath(); c.arc(p.x, p.y, p.r, 0, Math.PI*2); c.fill();
+    }
+    c.globalAlpha = 1;
+  }
+  if (ptc['petals']) {
+    const arr = ensurePtc('petals', 50, () => ({
+      x: Math.random()*W, y: Math.random()*H, r: 6+Math.random()*8,
+      speed: 30+Math.random()*40, wob: Math.random()*Math.PI*2, rot: Math.random()*Math.PI*2,
+    }));
+    for (const p of arr) {
+      p.y += p.speed * dt; p.wob += dt; p.x += Math.sin(p.wob) * 0.8; p.rot += dt * 0.5;
+      if (p.y > H + 10) { p.y = -10; p.x = Math.random()*W; }
+      c.save(); c.translate(p.x, p.y); c.rotate(p.rot);
+      c.fillStyle = `rgba(255, 170, 190, 0.85)`;
+      c.beginPath(); c.ellipse(0, 0, p.r, p.r * 0.45, 0, 0, Math.PI*2); c.fill();
+      c.restore();
+    }
+  }
+  if (ptc['sparkle'] || ptc['glitter']) {
+    const N = ptc['glitter'] ? 120 : 50;
+    const arr = ensurePtc('sparkle', N, () => ({
+      x: Math.random()*W, y: Math.random()*H, life: Math.random(), phase: Math.random()*Math.PI*2,
+    }));
+    for (const p of arr) {
+      p.life -= dt * 0.6;
+      if (p.life <= 0) { p.life = 1; p.x = Math.random()*W; p.y = Math.random()*H; }
+      const alpha = Math.sin(p.life * Math.PI);
+      const s = 2 + alpha * 4;
+      c.fillStyle = `rgba(255, 240, 180, ${alpha})`;
+      c.fillRect(p.x - s/2, p.y - 0.5, s, 1);
+      c.fillRect(p.x - 0.5, p.y - s/2, 1, s);
+    }
+  }
+  if (ptc['fireflies']) {
+    const arr = ensurePtc('fireflies', 30, () => ({
+      x: Math.random()*W, y: Math.random()*H, ang: Math.random()*Math.PI*2, speed: 20+Math.random()*30, phase: Math.random()*Math.PI*2,
+    }));
+    for (const p of arr) {
+      p.ang += (Math.random() - 0.5) * dt * 2;
+      p.x += Math.cos(p.ang) * p.speed * dt;
+      p.y += Math.sin(p.ang) * p.speed * dt;
+      p.phase += dt * 3;
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      const a = 0.4 + Math.sin(p.phase) * 0.5;
+      const g = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, 18);
+      g.addColorStop(0, `rgba(255, 230, 100, ${a})`);
+      g.addColorStop(1, 'rgba(255, 230, 100, 0)');
+      c.fillStyle = g; c.fillRect(p.x - 18, p.y - 18, 36, 36);
+    }
+  }
+  if (ptc['stars']) {
+    const arr = ensurePtc('stars', 40, () => ({
+      x: Math.random()*W, y: Math.random()*H, r: 5+Math.random()*8, rot: Math.random()*Math.PI*2, speed: 10+Math.random()*30,
+    }));
+    c.fillStyle = '#fff';
+    for (const p of arr) {
+      p.y += p.speed * dt; p.rot += dt * 0.5;
+      if (p.y > H + 10) { p.y = -10; p.x = Math.random()*W; }
+      drawStar(c, p.x, p.y, p.r, p.rot);
+    }
+  }
+  if (ptc['fire']) {
+    const arr = ensurePtc('fire', 80, () => ({
+      x: Math.random()*W, y: H + Math.random()*40, life: Math.random(), speed: 60+Math.random()*120,
+    }));
+    for (const p of arr) {
+      p.y -= p.speed * dt; p.life -= dt * 0.7;
+      if (p.life <= 0) { p.life = 1; p.x = Math.random()*W; p.y = H + 10; }
+      const a = p.life;
+      const hue = 10 + p.life * 40;
+      c.fillStyle = `hsla(${hue}, 90%, 60%, ${a * 0.7})`;
+      c.beginPath(); c.arc(p.x, p.y, 4 + (1-p.life)*8, 0, Math.PI*2); c.fill();
+    }
+  }
+  if (ptc['water']) {
+    // Ripples expanding
+    const arr = ensurePtc('water', 8, (i) => ({
+      x: Math.random()*W, y: H * 0.6 + Math.random()*H*0.3, life: i / 8, speed: 0.4,
+    }));
+    for (const p of arr) {
+      p.life += dt * p.speed;
+      if (p.life > 1) { p.life = 0; p.x = Math.random()*W; p.y = H*0.6 + Math.random()*H*0.3; }
+      const r = 60 * p.life;
+      c.strokeStyle = `rgba(120, 200, 255, ${(1 - p.life) * 0.6})`;
+      c.lineWidth = 2;
+      c.beginPath(); c.ellipse(p.x, p.y, r, r * 0.35, 0, 0, Math.PI*2); c.stroke();
+    }
+  }
+  if (ptc['light-rays']) {
+    // Radial beams from top
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 5; i++) {
+      const ang = -Math.PI/2 + (i - 2) * 0.2 + Math.sin(time * 0.3 + i) * 0.05;
+      const x2 = W/2 + Math.cos(ang) * H * 1.5;
+      const y2 = 0 + Math.sin(ang) * H * 1.5;
+      const g = c.createLinearGradient(W/2, 0, x2, y2);
+      g.addColorStop(0, 'rgba(255, 250, 220, 0.20)');
+      g.addColorStop(1, 'rgba(255, 250, 220, 0)');
+      c.strokeStyle = g; c.lineWidth = 80;
+      c.beginPath(); c.moveTo(W/2, 0); c.lineTo(x2, y2); c.stroke();
+    }
+    c.restore();
+  }
+  if (ptc['sound-rings'] && data) {
+    let s = 0; for (let i = 0; i < 16; i++) s += data[i] || 0;
+    const eng = s / 16 / 255;
+    if (eng > 0.2) {
+      const rings = 5;
+      for (let i = 0; i < rings; i++) {
+        const t = (time * 0.6 + i / rings) % 1;
+        const r = W * 0.4 * t;
+        c.strokeStyle = `rgba(180, 100, 255, ${(1 - t) * eng * 0.7})`;
+        c.lineWidth = 3;
+        c.beginPath(); c.arc(W/2, H * (state.spectrum.y/100), r, 0, Math.PI*2); c.stroke();
+      }
+    }
+  }
+  if (ptc['smoke']) {
+    const arr = ensurePtc('smoke', 25, () => ({
+      x: Math.random()*W, y: H + Math.random()*30, life: Math.random(), speed: 20+Math.random()*30, r: 30+Math.random()*40,
+    }));
+    for (const p of arr) {
+      p.y -= p.speed * dt; p.life -= dt * 0.3;
+      if (p.life <= 0) { p.life = 1; p.x = Math.random()*W; p.y = H + 30; }
+      const g = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+      g.addColorStop(0, `rgba(180, 180, 200, ${p.life * 0.2})`);
+      g.addColorStop(1, 'rgba(180, 180, 200, 0)');
+      c.fillStyle = g; c.fillRect(p.x - p.r, p.y - p.r, p.r*2, p.r*2);
+    }
+  }
+  if (ptc['dust']) {
+    const arr = ensurePtc('dust', 200, () => ({
+      x: Math.random()*W, y: Math.random()*H, r: 0.5+Math.random()*1.5,
+      speed: 5+Math.random()*15, ang: Math.random()*Math.PI*2,
+    }));
+    c.fillStyle = 'rgba(255, 230, 180, 0.5)';
+    for (const p of arr) {
+      p.x += Math.cos(p.ang) * p.speed * dt;
+      p.y += Math.sin(p.ang) * p.speed * dt - dt * 5;
+      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) {
+        p.x = Math.random()*W; p.y = H + 5;
+      }
+      c.beginPath(); c.arc(p.x, p.y, p.r, 0, Math.PI*2); c.fill();
+    }
+  }
+}
+function drawStar(c, x, y, r, rot) {
+  c.save(); c.translate(x, y); c.rotate(rot);
+  c.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI/2 + i * 2 * Math.PI / 5;
+    const a2 = a + Math.PI / 5;
+    c.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    c.lineTo(Math.cos(a2) * r * 0.4, Math.sin(a2) * r * 0.4);
+  }
+  c.closePath(); c.fill();
+  c.restore();
 }
 
 let renderInProgress = false;
@@ -2016,6 +2294,15 @@ function updateActiveEffectsUI() {
   }
   const sub = $('effect-count-sub');
   if (sub) sub.textContent = `활성 ${items.length}개 · 강도/파티클 옵션`;
+}
+function bindTitlePosChips() {
+  qsa('.title-pos-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      qsa('.title-pos-chip').forEach(x => x.classList.toggle('active', x === b));
+      state.title.position = b.dataset.tpos;
+      debouncedSave();
+    });
+  });
 }
 function bindTitleStyleChips() {
   qsa('.title-style-chip').forEach(b => {
@@ -2683,6 +2970,7 @@ async function init() {
   bindFilterChips();
   bindEffectChips();
   bindTitleStyleChips();
+  bindTitlePosChips();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);
