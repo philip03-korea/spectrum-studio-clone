@@ -26,11 +26,11 @@ const DEFAULT_STATE = () => ({
   spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80,
               renderStyle: 'line', center: true, width: 100, speed: 70, sens: 85,
               bands: 64, maxH: 100, lineW: 4, barW: 8, gap: 0 },
-  title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'bold', deco: 'none', position: 'bottom-center', xFine: 0, yFine: 0 },
+  title: { text: 'BEORANGKKEUT STUDIO', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'none', position: 'top-right', xFine: 0, yFine: 0 },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
-  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: '', display: 'ko' },
-  slideshow: { enabled: false, interval: 5, crossfade: true },
+  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'dual' },
+  slideshow: { enabled: true, interval: 5, crossfade: true },
   frame: { style: 'none', intensity: 50 },
   filter: { preset: 'none' },
   audioEl: null, audioCtx: null, analyser: null, source: null, freqData: null,
@@ -2328,16 +2328,63 @@ function bindSidebarBottomButtons() {
       if (e.target === guideModal) guideModal.classList.add('hidden');
     });
   }
-  // 개발자 채널 → 작자의 GitHub 프로필
+  // 개발자 채널 / 공식 사이트 — 외부 링크 비활성화 (사용자 요청)
   const devBtn = $('btn-dev-channel');
-  if (devBtn) devBtn.addEventListener('click', () => {
-    window.open('https://github.com/philip03-korea', '_blank', 'noopener');
-  });
-  // 공식 사이트 → 프로젝트 저장소
+  if (devBtn) devBtn.addEventListener('click', e => e.preventDefault());
   const offBtn = $('btn-official');
-  if (offBtn) offBtn.addEventListener('click', () => {
-    window.open('https://github.com/philip03-korea/spectrum-studio-clone', '_blank', 'noopener');
+  if (offBtn) offBtn.addEventListener('click', e => e.preventDefault());
+}
+
+// Stage 1 / Stage 2 가사 텍스트박스 양방향 동기화 + Stage 1 LRC 자동 정리·번역
+function bindStage1Lyrics() {
+  const ta1 = $('lyrics-text-stage1');
+  const ta2 = $('lyrics-text');
+  const file1 = $('file-lrc-stage1');
+  const clr1 = $('lyrics-clear-stage1');
+  const stat1 = $('lyrics-stats-stage1');
+  const trans1 = $('trans-status-stage1');
+  if (!ta1) return;
+  // 텍스트박스 변경 시 양쪽 모두 동기화
+  ta1.addEventListener('input', () => {
+    if (ta2) ta2.value = ta1.value;
+    updateLyrics(ta1.value);
+    if (stat1) stat1.textContent = `${state.lyrics.lines.length}줄`;
   });
+  if (ta2) {
+    ta2.addEventListener('input', () => {
+      ta1.value = ta2.value;
+      if (stat1) stat1.textContent = `${state.lyrics.lines.length}줄`;
+    });
+  }
+  if (clr1) clr1.addEventListener('click', () => {
+    ta1.value = ''; if (ta2) ta2.value = '';
+    updateLyrics('');
+    if (stat1) stat1.textContent = '0줄';
+    if (trans1) trans1.textContent = '업로드 시 자동으로 한글+영어 모드로 설정됩니다';
+  });
+  if (file1) file1.addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const raw = await f.text();
+    const cleaned = parseAndCleanLrc(raw);
+    ta1.value = cleaned; if (ta2) ta2.value = cleaned;
+    updateLyrics(cleaned);
+    if (stat1) stat1.textContent = `${state.lyrics.lines.length}줄`;
+    // 자동 영어 번역 + 한글+영어 모드
+    state.lyrics.lang = 'en';
+    state.lyrics.display = 'dual';
+    const langSel = $('lyrics-lang'); if (langSel) langSel.value = 'en';
+    const dispSel = $('lyrics-display'); if (dispSel) dispSel.value = 'dual';
+    if (trans1) trans1.textContent = `🌐 영어로 자동 번역 중... (${state.lyrics.lines.length}줄)`;
+    try {
+      await translateAllLyrics();
+      if (trans1) trans1.textContent = `✅ 한글+영어 모드 자동 설정 완료`;
+    } catch (err) {
+      if (trans1) trans1.textContent = `⚠️ 번역 일부 실패 — Stage 2에서 다시 시도 가능`;
+    }
+    debouncedSave();
+  });
+  // 초기 텍스트 반영
+  if (state.lyrics.rawText) ta1.value = state.lyrics.rawText;
 }
 
 async function doReset() {
@@ -3174,6 +3221,7 @@ async function init() {
   bindBgSort();
   bindSidebarBottomButtons();
   bindSpectrumControls();
+  bindStage1Lyrics();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);

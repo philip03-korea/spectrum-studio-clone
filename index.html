@@ -184,6 +184,22 @@
               </div>
             </div>
 
+            <!-- 가사 / 자막 (Stage 1에서도 미리 업로드) -->
+            <div class="card mini-drop">
+              <div class="card-head"><h3>🎤 가사 / 자막</h3><span class="badge badge-optional">선택</span></div>
+              <div class="lyrics-mode">
+                <label class="file-btn">
+                  <input type="file" id="file-lrc-stage1" accept=".lrc,.txt,.srt" hidden />
+                  📂 LRC/TXT 파일 열기
+                </label>
+                <button class="btn-mini" id="lyrics-clear-stage1">비우기</button>
+              </div>
+              <textarea class="text-area" id="lyrics-text-stage1" rows="4"
+                placeholder="여기에 가사 붙여넣기 (LRC/TXT). Stage 2와 자동 동기화."></textarea>
+              <div class="lyrics-stats" id="lyrics-stats-stage1">0줄</div>
+              <div class="hint-text" id="trans-status-stage1" style="margin-top: 4px;">업로드 시 자동으로 한글+영어 모드로 설정됩니다</div>
+            </div>
+
             <!-- 인코딩 설정 -->
             <div class="card encoding-card">
               <div class="card-head"><h3>🎚️ 인코딩 설정</h3></div>
@@ -507,7 +523,7 @@
               </label>
               <div class="adjust-divider">슬라이드쇼 (여러 배경)</div>
               <label class="check-row">
-                <input type="checkbox" id="slideshow-enabled" /> 배경 자동 전환
+                <input type="checkbox" id="slideshow-enabled" checked /> 배경 자동 전환
               </label>
               <label class="slider-row">
                 <span>간격</span>
@@ -578,10 +594,10 @@
               <div class="viz-grid grid3">
                 <button class="title-style-chip" data-tstyle="minimal">미니멀</button>
                 <button class="title-style-chip" data-tstyle="modern">모던</button>
-                <button class="title-style-chip active" data-tstyle="bold">볼드</button>
+                <button class="title-style-chip" data-tstyle="bold">볼드</button>
                 <button class="title-style-chip" data-tstyle="underline">언더라인</button>
                 <button class="title-style-chip" data-tstyle="card">카드</button>
-                <button class="title-style-chip" data-tstyle="neon">네온</button>
+                <button class="title-style-chip active" data-tstyle="neon">네온</button>
                 <button class="title-style-chip" data-tstyle="glitch">글리치</button>
                 <button class="title-style-chip" data-tstyle="outline">아웃라인</button>
                 <button class="title-style-chip" data-tstyle="vintage">빈티지</button>
@@ -605,9 +621,9 @@
               <div class="viz-grid grid3">
                 <button class="title-pos-chip" data-tpos="top-left">↖<br>좌상단</button>
                 <button class="title-pos-chip" data-tpos="top-center">↑<br>상단중간</button>
-                <button class="title-pos-chip" data-tpos="top-right">↗<br>우상단</button>
+                <button class="title-pos-chip active" data-tpos="top-right">↗<br>우상단</button>
                 <button class="title-pos-chip" data-tpos="bottom-left">↙<br>좌아래</button>
-                <button class="title-pos-chip active" data-tpos="bottom-center">↓<br>중간아래</button>
+                <button class="title-pos-chip" data-tpos="bottom-center">↓<br>중간아래</button>
                 <button class="title-pos-chip" data-tpos="bottom-right">↘<br>우아래</button>
               </div>
               <div class="adjust-divider">디테일</div>
@@ -871,6 +887,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=v1_6_renderstyle"></script>
+  <script type="module" src="app.js?v=v1_7_stage1lyrics"></script>
 </body>
 </html>
