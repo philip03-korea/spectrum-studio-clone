@@ -1965,10 +1965,11 @@ function getPpScale(data, time) {
 function drawPostProcessing(c, W, H, time, data) {
   const pp = state.postProcessing || {};
   if (pp['film-grain']) {
-    // Random noise overlay (sparse)
+    const mul = perfMul();
+    const grainN = Math.max(40, Math.floor(200 * mul));
     c.save();
     c.globalAlpha = 0.08;
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < grainN; i++) {
       c.fillStyle = Math.random() > 0.5 ? '#fff' : '#000';
       c.fillRect(Math.random() * W, Math.random() * H, 2, 2);
     }
@@ -1984,7 +1985,7 @@ function drawPostProcessing(c, W, H, time, data) {
     c.fillStyle = g;
     c.fillRect(0, 0, W, H);
   }
-  if (pp['chromatic']) {
+  if (pp['chromatic'] && !isHeavyAndShouldSkip('chromatic')) {
     // Subtle red/blue offsets at edges
     c.save();
     c.globalCompositeOperation = 'screen';
@@ -1993,7 +1994,7 @@ function drawPostProcessing(c, W, H, time, data) {
     c.fillStyle = '#00ffff'; c.fillRect( 3, 0, W, H);
     c.restore();
   }
-  if (pp['bass-wave'] && data) {
+  if (pp['bass-wave'] && !isHeavyAndShouldSkip('bass-wave') && data) {
     let s = 0; for (let i = 0; i < 8; i++) s += data[i] || 0;
     const bass = s / 8 / 255;
     if (bass > 0.3) {
@@ -2018,16 +2019,36 @@ function ensurePtc(kind, n, init) {
   }
   return _ptcPool[kind];
 }
+// 성능 모드 → 파티클 수 / 효과 강도 배수
+function perfMul() {
+  const m = state.performanceMode || 'auto';
+  if (m === 'quality') return 1.0;
+  if (m === 'performance') return 0.35;
+  // 자동: 활성 효과가 많으면 자동 감속
+  const ppOn = Object.values(state.postProcessing || {}).filter(Boolean).length;
+  const ptcOn = Object.values(state.particles || {}).filter(Boolean).length;
+  const total = ppOn + ptcOn;
+  if (total >= 5) return 0.5;
+  if (total >= 3) return 0.7;
+  return 1.0;
+}
+// 무거운 효과 (⚡ 표시) — performance 모드에선 skip
+function isHeavyAndShouldSkip(key) {
+  if ((state.performanceMode || 'auto') !== 'performance') return false;
+  const HEAVY = new Set(['chromatic', 'bass-wave', 'fire', 'water', 'light-rays', 'sound-rings']);
+  return HEAVY.has(key);
+}
 let _lastPtcTime = 0;
 function drawParticles(c, W, H, time, data) {
   const ptc = state.particles || {};
   const dt = Math.max(0, Math.min(0.05, time - _lastPtcTime));
   _lastPtcTime = time;
   const colors = ['#ff5566','#ffb547','#ffe066','#4ade80','#4dd0ff','#7c5cff','#c084fc'];
-  const rainbowMode = state.lyrics?.lang ? false : true; // not relevant; just use palette
+  const mul = perfMul();
+  const N = (base) => Math.max(4, Math.floor(base * mul));
 
   if (ptc['snow']) {
-    const arr = ensurePtc('snow', 90, () => ({
+    const arr = ensurePtc('snow', N(90), () => ({
       x: Math.random()*W, y: Math.random()*H, r: 1+Math.random()*3,
       speed: 40+Math.random()*80, wob: Math.random()*Math.PI*2,
     }));
@@ -2041,7 +2062,7 @@ function drawParticles(c, W, H, time, data) {
     c.globalAlpha = 1;
   }
   if (ptc['petals']) {
-    const arr = ensurePtc('petals', 50, () => ({
+    const arr = ensurePtc('petals', N(50), () => ({
       x: Math.random()*W, y: Math.random()*H, r: 6+Math.random()*8,
       speed: 30+Math.random()*40, wob: Math.random()*Math.PI*2, rot: Math.random()*Math.PI*2,
     }));
@@ -2055,8 +2076,8 @@ function drawParticles(c, W, H, time, data) {
     }
   }
   if (ptc['sparkle'] || ptc['glitter']) {
-    const N = ptc['glitter'] ? 120 : 50;
-    const arr = ensurePtc('sparkle', N, () => ({
+    const sparkleN = N(ptc['glitter'] ? 120 : 50);
+    const arr = ensurePtc('sparkle', sparkleN, () => ({
       x: Math.random()*W, y: Math.random()*H, life: Math.random(), phase: Math.random()*Math.PI*2,
     }));
     for (const p of arr) {
@@ -2070,7 +2091,7 @@ function drawParticles(c, W, H, time, data) {
     }
   }
   if (ptc['fireflies']) {
-    const arr = ensurePtc('fireflies', 30, () => ({
+    const arr = ensurePtc('fireflies', N(30), () => ({
       x: Math.random()*W, y: Math.random()*H, ang: Math.random()*Math.PI*2, speed: 20+Math.random()*30, phase: Math.random()*Math.PI*2,
     }));
     for (const p of arr) {
@@ -2088,7 +2109,7 @@ function drawParticles(c, W, H, time, data) {
     }
   }
   if (ptc['stars']) {
-    const arr = ensurePtc('stars', 40, () => ({
+    const arr = ensurePtc('stars', N(40), () => ({
       x: Math.random()*W, y: Math.random()*H, r: 5+Math.random()*8, rot: Math.random()*Math.PI*2, speed: 10+Math.random()*30,
     }));
     c.fillStyle = '#fff';
@@ -2098,8 +2119,8 @@ function drawParticles(c, W, H, time, data) {
       drawStar(c, p.x, p.y, p.r, p.rot);
     }
   }
-  if (ptc['fire']) {
-    const arr = ensurePtc('fire', 80, () => ({
+  if (ptc['fire'] && !isHeavyAndShouldSkip('fire')) {
+    const arr = ensurePtc('fire', N(80), () => ({
       x: Math.random()*W, y: H + Math.random()*40, life: Math.random(), speed: 60+Math.random()*120,
     }));
     for (const p of arr) {
@@ -2111,9 +2132,8 @@ function drawParticles(c, W, H, time, data) {
       c.beginPath(); c.arc(p.x, p.y, 4 + (1-p.life)*8, 0, Math.PI*2); c.fill();
     }
   }
-  if (ptc['water']) {
-    // Ripples expanding
-    const arr = ensurePtc('water', 8, (i) => ({
+  if (ptc['water'] && !isHeavyAndShouldSkip('water')) {
+    const arr = ensurePtc('water', Math.max(3, Math.floor(8 * mul)), (i) => ({
       x: Math.random()*W, y: H * 0.6 + Math.random()*H*0.3, life: i / 8, speed: 0.4,
     }));
     for (const p of arr) {
@@ -2125,7 +2145,7 @@ function drawParticles(c, W, H, time, data) {
       c.beginPath(); c.ellipse(p.x, p.y, r, r * 0.35, 0, 0, Math.PI*2); c.stroke();
     }
   }
-  if (ptc['light-rays']) {
+  if (ptc['light-rays'] && !isHeavyAndShouldSkip('light-rays')) {
     // Radial beams from top
     c.save();
     c.globalCompositeOperation = 'lighter';
@@ -2141,7 +2161,7 @@ function drawParticles(c, W, H, time, data) {
     }
     c.restore();
   }
-  if (ptc['sound-rings'] && data) {
+  if (ptc['sound-rings'] && !isHeavyAndShouldSkip('sound-rings') && data) {
     let s = 0; for (let i = 0; i < 16; i++) s += data[i] || 0;
     const eng = s / 16 / 255;
     if (eng > 0.2) {
@@ -2156,7 +2176,7 @@ function drawParticles(c, W, H, time, data) {
     }
   }
   if (ptc['smoke']) {
-    const arr = ensurePtc('smoke', 25, () => ({
+    const arr = ensurePtc('smoke', N(25), () => ({
       x: Math.random()*W, y: H + Math.random()*30, life: Math.random(), speed: 20+Math.random()*30, r: 30+Math.random()*40,
     }));
     for (const p of arr) {
@@ -2169,7 +2189,7 @@ function drawParticles(c, W, H, time, data) {
     }
   }
   if (ptc['dust']) {
-    const arr = ensurePtc('dust', 200, () => ({
+    const arr = ensurePtc('dust', N(200), () => ({
       x: Math.random()*W, y: Math.random()*H, r: 0.5+Math.random()*1.5,
       speed: 5+Math.random()*15, ang: Math.random()*Math.PI*2,
     }));
