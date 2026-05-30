@@ -61,19 +61,26 @@
         <li class="step active" data-step="1">
           <span class="step-num">1</span>
           <div class="step-text">
-            <div class="step-label">미디어 준비</div>
-            <div class="step-desc">오디오 + 배경</div>
+            <div class="step-label">가사 이미지 생성</div>
+            <div class="step-desc">AI 장면별 이미지</div>
           </div>
         </li>
         <li class="step" data-step="2">
           <span class="step-num">2</span>
           <div class="step-text">
-            <div class="step-label">비주얼 편집</div>
-            <div class="step-desc">효과 + 레이아웃</div>
+            <div class="step-label">미디어 준비</div>
+            <div class="step-desc">오디오 + 배경</div>
           </div>
         </li>
         <li class="step" data-step="3">
           <span class="step-num">3</span>
+          <div class="step-text">
+            <div class="step-label">비주얼 편집</div>
+            <div class="step-desc">효과 + 레이아웃</div>
+          </div>
+        </li>
+        <li class="step" data-step="4">
+          <span class="step-num">4</span>
           <div class="step-text">
             <div class="step-label">영상 출력</div>
             <div class="step-desc">MP4 렌더링</div>
@@ -101,14 +108,114 @@
           <span class="step-headline" id="topbar-headline">미디어 준비 — 오디오/배경/로고와 인코딩 설정을 선택하세요</span>
         </div>
         <div class="topbar-right">
-          <button class="pill" data-goto="1"><span class="pill-num">1</span> 미디어 준비</button>
-          <button class="pill active" data-goto="2"><span class="pill-num">2</span> 비주얼 편집</button>
-          <button class="pill" data-goto="3"><span class="pill-num">3</span> 영상 출력</button>
+          <button class="pill active" data-goto="1"><span class="pill-num">1</span> 가사 이미지</button>
+          <button class="pill" data-goto="2"><span class="pill-num">2</span> 미디어 준비</button>
+          <button class="pill" data-goto="3"><span class="pill-num">3</span> 비주얼 편집</button>
+          <button class="pill" data-goto="4"><span class="pill-num">4</span> 영상 출력</button>
         </div>
       </header>
 
-      <!-- ===== STAGE 1 ===== -->
+      <!-- ===== STAGE 1: 가사 이미지 생성 (NEW) ===== -->
       <section class="step-panel active" data-panel="1">
+        <div class="ig-stage-grid">
+          <!-- 좌측: 입력 -->
+          <div class="ig-left card">
+            <h2 class="panel-title">🎨 가사 맞춤 이미지 생성</h2>
+            <p class="panel-desc">가사를 분석해서 장면별 이미지를 자동 생성합니다. (필요한 경우만 사용 — Stage 2로 바로 이동해도 됩니다)</p>
+
+            <div class="sub-title">🔑 OpenAI API 키</div>
+            <input type="password" class="text-input" id="lg-apikey" placeholder="sk-..." autocomplete="off" />
+            <div class="hint-text" style="margin-top: 2px;">이 브라우저에만 저장 (localStorage)</div>
+
+            <div class="sub-title">📋 기본 정보</div>
+            <input type="text" class="text-input" id="lg-title" placeholder="곡 제목" style="margin-bottom: 6px;" />
+            <input type="text" class="text-input" id="lg-theme" placeholder="성경 인물/주제 (예: 아브라함의 연대기)" />
+
+            <div class="sub-title">🎭 스타일 이미지 (최대 10장)</div>
+            <div class="drop-area drop-mini" id="lg-style-drop">
+              <input type="file" id="lg-style-file" accept="image/*" multiple hidden />
+              <label for="lg-style-file" class="drop-label">
+                <div class="drop-icon">🎭</div>
+                <div class="drop-text">캐릭터/장면 스타일 (최대 10장)</div>
+                <div class="drop-hint">프리셋 없으면 이 이미지가 reference로 사용됨</div>
+              </label>
+            </div>
+            <div class="bg-thumbs hidden" id="lg-style-thumbs"></div>
+
+            <div class="sub-title">🖌️ 스타일 프리셋</div>
+            <select class="text-input" id="lg-preset">
+              <option value="">없음 (업로드 이미지가 reference)</option>
+              <option value="ghibli">지브리풍</option>
+              <option value="cinematic">시네마틱 사실주의</option>
+              <option value="oil-painting">오일 페인팅</option>
+              <option value="watercolor">수채화</option>
+              <option value="anime">아니메</option>
+              <option value="biblical-classic">고전 성경 회화</option>
+              <option value="hopeful-modern">희망찬 모던</option>
+              <option value="dreamy-soft">몽환적</option>
+            </select>
+
+            <div class="sub-title">⚙️ 생성 옵션</div>
+            <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+              <span>모델</span>
+              <select class="text-input" id="lg-model">
+                <option value="gpt-image-1" selected>gpt-image-1 (최신)</option>
+                <option value="dall-e-3">DALL-E 3</option>
+              </select>
+            </label>
+            <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+              <span>비율</span>
+              <select class="text-input" id="lg-aspect">
+                <option value="9:16" selected>9:16 (Shorts)</option>
+                <option value="16:9">16:9</option>
+                <option value="1:1">1:1</option>
+              </select>
+            </label>
+            <label class="check-row" style="margin-top: 6px;">
+              <input type="checkbox" id="lg-auto-count" checked /> 가사 분석에 맞춰 자동 (8~20)
+            </label>
+            <label class="slider-row">
+              <span>프레임 수</span>
+              <input type="range" min="4" max="20" value="8" id="lg-frames" />
+              <span class="slider-val" id="lg-frames-v">8</span>
+            </label>
+
+            <button class="btn btn-primary" id="lg-analyze" style="width:100%; margin-top: 10px; padding:12px;">
+              ① 가사 분석 → 장면 분할
+            </button>
+            <div class="hint-text" id="lg-analyze-status" style="margin-top: 4px;">가사 자동 로드 · 의미·감정 흐름 + 성경 사건 보정</div>
+
+            <button class="btn btn-primary" id="lg-gen-all" disabled style="width:100%; padding:12px; margin-top: 8px;">
+              ② 전체 프레임 생성
+            </button>
+
+            <div class="hint-text" id="lg-progress" style="margin-top: 8px;">대기 중</div>
+            <div class="viz-grid grid2" style="margin-top: 8px;">
+              <button class="btn btn-ghost" id="lg-to-bgs" disabled>→ 배경에 추가</button>
+              <button class="btn btn-ghost" id="lg-download-zip" disabled>📥 ZIP 다운로드</button>
+            </div>
+          </div>
+
+          <!-- 우측: 장면 목록 -->
+          <div class="ig-right card">
+            <h3 style="margin-top:0;">🎬 장면 플랜 & 생성 결과</h3>
+            <div id="lg-scenes" class="ig-scenes">
+              <div class="hint-text" style="padding: 24px; text-align: center;">
+                먼저 Stage 2 가사 영역(또는 Stage 1 LRC)에 가사를 넣은 뒤<br>
+                좌측에서 ① 가사 분석 버튼을 누르세요
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stage-nav">
+          <span class="hint-text">선택 단계 — 건너뛰고 다음으로 넘어가도 됩니다</span>
+          <button class="btn btn-primary" data-goto="2">다음: 미디어 준비 →</button>
+        </div>
+      </section>
+
+      <!-- ===== STAGE 2: 미디어 준비 (was Stage 1) ===== -->
+      <section class="step-panel" data-panel="2">
         <div class="stage1-grid">
           <div class="card drop-zone-card">
             <div class="card-head">
@@ -282,15 +389,15 @@
 
             <!-- 스튜디오 입장 + 초기화 (가로) -->
             <div class="enter-row">
-              <button class="btn btn-enter" id="btn-enter-studio" disabled>스튜디오 입장 →</button>
+              <button class="btn btn-enter" id="btn-enter-studio" data-goto="3" disabled>스튜디오 입장 →</button>
               <button class="btn btn-reset-inline" id="btn-reset-inline">↻ 초기화</button>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- ===== STAGE 2 (재작업: 원본 충실 재현) ===== -->
-      <section class="step-panel" data-panel="2">
+      <!-- ===== STAGE 3: 비주얼 편집 (was Stage 2) ===== -->
+      <section class="step-panel" data-panel="3">
         <!-- 장르 프리셋 탭 (상단) -->
         <div class="genre-tabs">
           <button class="genre-tab active" data-genre="project">🎵 프리셋</button>
@@ -307,11 +414,10 @@
         <div class="studio-grid">
           <!-- 좌측 도구 패널: 3 메인 탭 -->
           <aside class="tool-panel">
-            <div class="left-tabs four">
+            <div class="left-tabs">
               <button class="left-tab active" data-left-tab="spectrum">📊<br>스펙트럼</button>
               <button class="left-tab" data-left-tab="bg">🖼️<br>배경</button>
               <button class="left-tab" data-left-tab="effect">✨<br>이펙트</button>
-              <button class="left-tab" data-left-tab="lyricgen">🎨<br>가사이미지</button>
             </div>
 
             <!-- 스펙트럼 탭 -->
@@ -406,90 +512,6 @@
               </div>
             </div>
 
-            <!-- 가사이미지 탭 -->
-            <div class="left-tab-content hidden" data-left-content="lyricgen">
-              <div class="sub-hdr">🎨 가사 맞춤 이미지 생성 <span class="sub-hint">OpenAI</span></div>
-
-              <div class="sub-title">🔑 OpenAI API 키</div>
-              <input type="password" class="text-input" id="lg-apikey" placeholder="sk-..." autocomplete="off" />
-              <div class="hint-text" style="margin-top: 2px;">키는 이 브라우저에만 저장됨 (localStorage)</div>
-
-              <div class="sub-title">📋 기본 정보</div>
-              <input type="text" class="text-input" id="lg-title" placeholder="곡 제목 (예: 나의 가는 이 길은)" style="margin-bottom: 6px;" />
-              <input type="text" class="text-input" id="lg-theme" placeholder="성경 인물/주제 (예: 아브라함의 연대기)" />
-
-              <div class="sub-title">🎭 스타일 이미지 (선택)</div>
-              <div class="drop-area drop-tiny" id="lg-style-drop">
-                <input type="file" id="lg-style-file" accept="image/*" hidden />
-                <label for="lg-style-file" class="drop-label">
-                  <div class="drop-icon">🎭</div>
-                  <div class="drop-text">캐릭터/장면 스타일 1장</div>
-                  <div class="drop-hint">분석해서 프롬프트 반영</div>
-                </label>
-              </div>
-              <div class="bg-preview-wrap" id="lg-style-preview-wrap" style="display:none; margin-top:6px;">
-                <img id="lg-style-preview" class="bg-preview" alt="" />
-              </div>
-
-              <div class="sub-title">🖌️ 스타일 프리셋</div>
-              <select class="text-input" id="lg-preset">
-                <option value="">없음 (스타일 이미지/자유)</option>
-                <option value="ghibli">지브리풍 (따뜻한 손그림)</option>
-                <option value="cinematic">시네마틱 사실주의</option>
-                <option value="oil-painting">오일 페인팅</option>
-                <option value="watercolor">수채화</option>
-                <option value="anime">아니메 일러스트</option>
-                <option value="biblical-classic">고전 성경 회화</option>
-                <option value="hopeful-modern">희망찬 모던 일러스트</option>
-                <option value="dreamy-soft">몽환적 부드러움</option>
-              </select>
-
-              <div class="sub-title">⚙️ 생성 옵션</div>
-              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
-                <span>모델</span>
-                <select class="text-input" id="lg-model">
-                  <option value="gpt-image-1" selected>gpt-image-1 (최신, 권장)</option>
-                  <option value="dall-e-3">DALL-E 3 (안정)</option>
-                </select>
-              </label>
-              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
-                <span>비율</span>
-                <select class="text-input" id="lg-aspect">
-                  <option value="9:16" selected>9:16 (세로, Shorts/Reels)</option>
-                  <option value="16:9">16:9 (가로)</option>
-                  <option value="1:1">1:1 (정사각)</option>
-                </select>
-              </label>
-              <label class="check-row" style="margin-top: 6px;">
-                <input type="checkbox" id="lg-auto-count" checked /> 가사 분석 결과에 맞춰 자동 (8~20)
-              </label>
-              <label class="slider-row">
-                <span>프레임 수</span>
-                <input type="range" min="4" max="20" value="8" id="lg-frames" />
-                <span class="slider-val" id="lg-frames-v">8</span>
-              </label>
-
-              <div class="sub-title">🧠 가사 분석 & 생성</div>
-              <button class="btn btn-primary" id="lg-analyze" style="width:100%; padding:10px;">
-                ① 가사 분석 → 장면 분할
-              </button>
-              <div class="hint-text" id="lg-analyze-status" style="margin-top: 4px;">가사 자동 불러오기 → 의미·감정 흐름 기반 N장면 + 성경 사건 보정</div>
-
-              <div class="active-effects" id="lg-scenes" style="margin-top: 10px; max-height: 280px; overflow-y: auto;">
-                <div class="hint-text">아직 분석되지 않았습니다</div>
-              </div>
-
-              <button class="btn btn-primary" id="lg-gen-all" disabled style="width:100%; padding:10px; margin-top: 8px;">
-                ② 전체 프레임 생성
-              </button>
-
-              <div class="sub-title">📦 결과</div>
-              <div class="hint-text" id="lg-progress" style="margin-bottom: 6px;">대기 중</div>
-              <div class="viz-grid grid2">
-                <button class="btn btn-ghost" id="lg-to-bgs" disabled>→ 배경에 추가</button>
-                <button class="btn btn-ghost" id="lg-download-zip" disabled>📥 ZIP 다운로드</button>
-              </div>
-            </div>
           </aside>
 
           <!-- 중앙 프리뷰 -->
@@ -904,13 +926,13 @@
         </div>
 
         <div class="stage-nav">
-          <button class="btn btn-ghost" data-goto="1">← 미디어 준비</button>
-          <button class="btn btn-primary" data-goto="3">영상 출력 →</button>
+          <button class="btn btn-ghost" data-goto="2">← 미디어 준비</button>
+          <button class="btn btn-primary" data-goto="4">영상 출력 →</button>
         </div>
       </section>
 
-      <!-- ===== STAGE 3 ===== -->
-      <section class="step-panel" data-panel="3">
+      <!-- ===== STAGE 4: 영상 출력 (was Stage 3) ===== -->
+      <section class="step-panel" data-panel="4">
         <div class="export-card">
           <h2 class="export-title">내보내기 (MP4)</h2>
           <p class="export-sub">H.264 + AAC 코덱을 사용하여 호환성이 뛰어난 MP4 영상을 만듭니다.</p>
@@ -955,7 +977,7 @@
 
           <button class="btn btn-render" id="btn-render">🚀 MP4 렌더링 시작</button>
           <button class="btn btn-cancel hidden" id="btn-cancel">중단</button>
-          <button class="btn btn-ghost btn-back" data-goto="2">← 편집 스튜디오로 돌아가기</button>
+          <button class="btn btn-ghost btn-back" data-goto="3">← 편집 스튜디오로 돌아가기</button>
         </div>
       </section>
     </main>
@@ -1004,6 +1026,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v2_1_lyricgen"></script>
+  <script type="module" src="app.js?v=v2_2_stage1promo"></script>
 </body>
 </html>

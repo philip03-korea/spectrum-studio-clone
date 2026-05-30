@@ -415,15 +415,16 @@ function goToStep(n) {
   qsa('.pill').forEach(el => el.classList.toggle('active', el.dataset.goto === String(n)));
   qsa('.step-panel').forEach(el => el.classList.toggle('active', el.dataset.panel === String(n)));
   const tags = {
-    '1': ['STEP 1/3', '미디어 준비 — 오디오/배경/로고와 인코딩 설정을 선택하세요'],
-    '2': ['STEP 2/3', '비주얼 편집 — 효과를 추가하고 레이아웃을 확인하세요'],
-    '3': ['STEP 3/3', '영상 출력 — MP4 파일로 렌더링합니다'],
+    '1': ['STEP 1/4', '가사 이미지 생성 — AI로 가사 장면별 이미지를 만들 수 있습니다 (선택)'],
+    '2': ['STEP 2/4', '미디어 준비 — 오디오/배경/로고와 인코딩 설정을 선택하세요'],
+    '3': ['STEP 3/4', '비주얼 편집 — 효과를 추가하고 레이아웃을 확인하세요'],
+    '4': ['STEP 4/4', '영상 출력 — MP4 파일로 렌더링합니다'],
   };
   const [tag, headline] = tags[n] || tags['1'];
   $('topbar-tag').textContent = tag;
   $('topbar-headline').textContent = headline;
-  if (String(n) === '2') ensureStage2Started();
-  if (String(n) === '3') updateEta();
+  if (String(n) === '3') ensureStage2Started();
+  if (String(n) === '4') updateEta();
 }
 qsa('.step, [data-goto], .pill').forEach(el => {
   el.addEventListener('click', () => {
@@ -3367,36 +3368,56 @@ function buildPromptForScene(scene, theme, preset, styleHints) {
 }
 
 // ----- OpenAI 이미지 생성 호출 -----
-async function generateImageViaOpenAI(apiKey, model, prompt, aspect) {
+// styleFiles 있으면 /v1/images/edits 사용 (이미지를 reference로)
+async function generateImageViaOpenAI(apiKey, model, prompt, aspect, styleFiles) {
   const size = (ASPECT_TO_SIZE[aspect] || ASPECT_TO_SIZE['9:16'])[model === 'dall-e-3' ? 'dalle3' : 'gptimg'];
-  const body = {
-    model,
-    prompt,
-    n: 1,
-    size,
-    response_format: 'b64_json',
-  };
-  if (model === 'dall-e-3') body.quality = 'standard';
-  const res = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  let res;
+  if (styleFiles && styleFiles.length > 0 && model === 'gpt-image-1') {
+    // 스타일 이미지를 reference로 사용 → /v1/images/edits
+    const fd = new FormData();
+    fd.append('model', model);
+    fd.append('prompt', prompt);
+    fd.append('size', size);
+    // gpt-image-1은 최대 16개 image 입력 가능. 사용자 업로드 모두 추가
+    for (let i = 0; i < Math.min(styleFiles.length, 16); i++) {
+      fd.append('image[]', styleFiles[i]);
+    }
+    res = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      body: fd,
+    });
+  } else {
+    const body = { model, prompt, n: 1, size, response_format: 'b64_json' };
+    if (model === 'dall-e-3') body.quality = 'standard';
+    res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  }
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`API ${res.status}: ${err.slice(0, 200)}`);
   }
   const j = await res.json();
   const b64 = j.data?.[0]?.b64_json;
-  if (!b64) throw new Error('응답에 이미지 데이터 없음');
-  // b64 → Blob
-  const bin = atob(b64);
-  const u8 = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-  return new Blob([u8], { type: 'image/png' });
+  if (b64) {
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return new Blob([u8], { type: 'image/png' });
+  }
+  // edits 엔드포인트는 URL 반환할 수도 있음
+  const url = j.data?.[0]?.url;
+  if (url) {
+    const r = await fetch(url);
+    return await r.blob();
+  }
+  throw new Error('응답에 이미지 데이터 없음');
 }
 
 // ----- UI 바인딩 -----
@@ -3426,16 +3447,36 @@ function bindLyricImageGen() {
   $L('lg-title').addEventListener('input', e => { _lg.title = e.target.value; });
   $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; });
 
-  // 스타일 이미지 드롭/업로드
+  // 스타일 이미지 다중 업로드 (최대 10)
+  _lg.styleFiles = _lg.styleFiles || [];
+  const renderStyleThumbs = () => {
+    const wrap = $L('lg-style-thumbs');
+    if (!wrap) return;
+    const n = _lg.styleFiles.length;
+    if (!n) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+    wrap.classList.remove('hidden');
+    wrap.innerHTML = '';
+    _lg.styleFiles.forEach((f, i) => {
+      const t = document.createElement('div');
+      t.className = 'bg-thumb';
+      t.title = f.name;
+      const im = document.createElement('img'); im.src = URL.createObjectURL(f); t.appendChild(im);
+      const x = document.createElement('button');
+      x.className = 'bg-thumb-x'; x.textContent = '×';
+      x.addEventListener('click', e => {
+        e.stopPropagation();
+        _lg.styleFiles.splice(i, 1);
+        renderStyleThumbs();
+      });
+      t.appendChild(x);
+      wrap.appendChild(t);
+    });
+  };
   wireDrop('lg-style-drop', 'lg-style-file', async (files) => {
-    const f = files[0]; if (!f) return;
-    const url = URL.createObjectURL(f);
-    const img = $L('lg-style-preview');
-    img.src = url;
-    $L('lg-style-preview-wrap').style.display = 'block';
-    _lg.styleFile = f;
-    // 사용자에게 간단 힌트: 파일명에서 키워드 추출 (정식 vision 분석은 추후)
-    _lg.styleHints = '';
+    const accepted = files.filter(f => f.type.startsWith('image/'));
+    const remaining = 10 - _lg.styleFiles.length;
+    _lg.styleFiles.push(...accepted.slice(0, Math.max(0, remaining)));
+    renderStyleThumbs();
   });
 
   // 자동 카운트 토글
@@ -3523,12 +3564,16 @@ async function generateAllFrames() {
   const total = _lg.scenePlan.scenes.length;
   const btn = document.getElementById('lg-gen-all');
   btn.disabled = true;
+  // 프리셋 없으면 업로드 이미지를 reference로 사용 (gpt-image-1 edits)
+  const preset = document.getElementById('lg-preset').value;
+  const useStyleAsRef = !preset && _lg.styleFiles && _lg.styleFiles.length > 0 && model === 'gpt-image-1';
+  const styleFiles = useStyleAsRef ? _lg.styleFiles : null;
   for (let i = 0; i < total; i++) {
     const s = _lg.scenePlan.scenes[i];
     const prompt = _lg.prompts[i].prompt;
-    document.getElementById('lg-progress').textContent = `생성 중 ${i+1}/${total} — 장면 ${s.idx}`;
+    document.getElementById('lg-progress').textContent = `생성 중 ${i+1}/${total} — 장면 ${s.idx}${useStyleAsRef ? ' (스타일 reference 사용)' : ''}`;
     try {
-      const blob = await generateImageViaOpenAI(apiKey, model, prompt, aspect);
+      const blob = await generateImageViaOpenAI(apiKey, model, prompt, aspect, styleFiles);
       const url = URL.createObjectURL(blob);
       _lg.frames.push({ idx: s.idx, blob, url, prompt });
       renderScenePlan();
@@ -3552,9 +3597,11 @@ async function regenerateFrame(idx) {
   const aspect = document.getElementById('lg-aspect').value;
   const promptObj = _lg.prompts.find(p => p.idx === idx);
   if (!promptObj) return;
+  const preset = document.getElementById('lg-preset').value;
+  const useStyleAsRef = !preset && _lg.styleFiles && _lg.styleFiles.length > 0 && model === 'gpt-image-1';
   document.getElementById('lg-progress').textContent = `재생성 중 #${idx}…`;
   try {
-    const blob = await generateImageViaOpenAI(apiKey, model, promptObj.prompt, aspect);
+    const blob = await generateImageViaOpenAI(apiKey, model, promptObj.prompt, aspect, useStyleAsRef ? _lg.styleFiles : null);
     const url = URL.createObjectURL(blob);
     const existing = _lg.frames.find(f => f.idx === idx);
     if (existing) {
