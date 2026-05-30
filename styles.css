@@ -895,6 +895,8 @@ body {
   border-radius: var(--radius-sm);
 }
 .left-tabs { grid-template-columns: 1fr 1fr 1fr; }
+.left-tabs.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
+.left-tabs.four .left-tab { font-size: 9px; padding: 6px 2px; }
 .right-tabs { grid-template-columns: repeat(5, 1fr); }
 .left-tab, .right-tab {
   background: transparent;

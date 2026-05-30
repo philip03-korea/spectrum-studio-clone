@@ -307,10 +307,11 @@
         <div class="studio-grid">
           <!-- 좌측 도구 패널: 3 메인 탭 -->
           <aside class="tool-panel">
-            <div class="left-tabs">
+            <div class="left-tabs four">
               <button class="left-tab active" data-left-tab="spectrum">📊<br>스펙트럼</button>
               <button class="left-tab" data-left-tab="bg">🖼️<br>배경</button>
               <button class="left-tab" data-left-tab="effect">✨<br>이펙트</button>
+              <button class="left-tab" data-left-tab="lyricgen">🎨<br>가사이미지</button>
             </div>
 
             <!-- 스펙트럼 탭 -->
@@ -402,6 +403,91 @@
                 <button class="ptc-chip" data-ptc="dust">🌫️<br>빛먼지</button>
                 <button class="ptc-chip" data-ptc="petals">🌸<br>꽃잎</button>
                 <button class="ptc-chip" data-ptc="snow">❄️<br>눈내림</button>
+              </div>
+            </div>
+
+            <!-- 가사이미지 탭 -->
+            <div class="left-tab-content hidden" data-left-content="lyricgen">
+              <div class="sub-hdr">🎨 가사 맞춤 이미지 생성 <span class="sub-hint">OpenAI</span></div>
+
+              <div class="sub-title">🔑 OpenAI API 키</div>
+              <input type="password" class="text-input" id="lg-apikey" placeholder="sk-..." autocomplete="off" />
+              <div class="hint-text" style="margin-top: 2px;">키는 이 브라우저에만 저장됨 (localStorage)</div>
+
+              <div class="sub-title">📋 기본 정보</div>
+              <input type="text" class="text-input" id="lg-title" placeholder="곡 제목 (예: 나의 가는 이 길은)" style="margin-bottom: 6px;" />
+              <input type="text" class="text-input" id="lg-theme" placeholder="성경 인물/주제 (예: 아브라함의 연대기)" />
+
+              <div class="sub-title">🎭 스타일 이미지 (선택)</div>
+              <div class="drop-area drop-tiny" id="lg-style-drop">
+                <input type="file" id="lg-style-file" accept="image/*" hidden />
+                <label for="lg-style-file" class="drop-label">
+                  <div class="drop-icon">🎭</div>
+                  <div class="drop-text">캐릭터/장면 스타일 1장</div>
+                  <div class="drop-hint">분석해서 프롬프트 반영</div>
+                </label>
+              </div>
+              <div class="bg-preview-wrap" id="lg-style-preview-wrap" style="display:none; margin-top:6px;">
+                <img id="lg-style-preview" class="bg-preview" alt="" />
+              </div>
+
+              <div class="sub-title">🖌️ 스타일 프리셋</div>
+              <select class="text-input" id="lg-preset">
+                <option value="">없음 (스타일 이미지/자유)</option>
+                <option value="ghibli">지브리풍 (따뜻한 손그림)</option>
+                <option value="cinematic">시네마틱 사실주의</option>
+                <option value="oil-painting">오일 페인팅</option>
+                <option value="watercolor">수채화</option>
+                <option value="anime">아니메 일러스트</option>
+                <option value="biblical-classic">고전 성경 회화</option>
+                <option value="hopeful-modern">희망찬 모던 일러스트</option>
+                <option value="dreamy-soft">몽환적 부드러움</option>
+              </select>
+
+              <div class="sub-title">⚙️ 생성 옵션</div>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>모델</span>
+                <select class="text-input" id="lg-model">
+                  <option value="gpt-image-1" selected>gpt-image-1 (최신, 권장)</option>
+                  <option value="dall-e-3">DALL-E 3 (안정)</option>
+                </select>
+              </label>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>비율</span>
+                <select class="text-input" id="lg-aspect">
+                  <option value="9:16" selected>9:16 (세로, Shorts/Reels)</option>
+                  <option value="16:9">16:9 (가로)</option>
+                  <option value="1:1">1:1 (정사각)</option>
+                </select>
+              </label>
+              <label class="check-row" style="margin-top: 6px;">
+                <input type="checkbox" id="lg-auto-count" checked /> 가사 분석 결과에 맞춰 자동 (8~20)
+              </label>
+              <label class="slider-row">
+                <span>프레임 수</span>
+                <input type="range" min="4" max="20" value="8" id="lg-frames" />
+                <span class="slider-val" id="lg-frames-v">8</span>
+              </label>
+
+              <div class="sub-title">🧠 가사 분석 & 생성</div>
+              <button class="btn btn-primary" id="lg-analyze" style="width:100%; padding:10px;">
+                ① 가사 분석 → 장면 분할
+              </button>
+              <div class="hint-text" id="lg-analyze-status" style="margin-top: 4px;">가사 자동 불러오기 → 의미·감정 흐름 기반 N장면 + 성경 사건 보정</div>
+
+              <div class="active-effects" id="lg-scenes" style="margin-top: 10px; max-height: 280px; overflow-y: auto;">
+                <div class="hint-text">아직 분석되지 않았습니다</div>
+              </div>
+
+              <button class="btn btn-primary" id="lg-gen-all" disabled style="width:100%; padding:10px; margin-top: 8px;">
+                ② 전체 프레임 생성
+              </button>
+
+              <div class="sub-title">📦 결과</div>
+              <div class="hint-text" id="lg-progress" style="margin-bottom: 6px;">대기 중</div>
+              <div class="viz-grid grid2">
+                <button class="btn btn-ghost" id="lg-to-bgs" disabled>→ 배경에 추가</button>
+                <button class="btn btn-ghost" id="lg-download-zip" disabled>📥 ZIP 다운로드</button>
               </div>
             </div>
           </aside>
@@ -917,6 +1003,7 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=v2_0_logo"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script type="module" src="app.js?v=v2_1_lyricgen"></script>
 </body>
 </html>

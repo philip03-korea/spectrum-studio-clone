@@ -3248,6 +3248,372 @@ async function renderToMp4() {
 }
 
 // ====================================================================
+// 🎨 가사 맞춤 이미지 생성 (OpenAI gpt-image-1 / DALL-E 3)
+// ====================================================================
+
+const LG_NEG_PROMPT = 'no text, no subtitles, no lyrics, no timestamp, no numbers, no logo, no watermark, no UI, no speech bubble, no comic panel border, no split screen, no collage, single full-frame image only.';
+
+// 성경 인물 정규 스토리 아크 (테마 매칭 시 우선 사용)
+const BIBLE_ARCS = {
+  '아브라함': ['하나님의 부르심 (창세기 12장)','갈대아 우르를 떠남','별빛 약속과 언약','사라와의 긴 기다림','이삭의 탄생','모리아 산으로 향함','예비하신 수양','믿음의 조상 칭호'],
+  '모세':     ['갈대상자 아기 모세','미디안 광야로 도주','떨기나무 불길','바로 대면과 열 재앙','홍해를 가르심','시내산 십계명','광야 40년 인도','약속의 땅을 바라봄'],
+  '다윗':     ['들판의 양치기 소년','사울 앞 수금 연주','골리앗과의 대결','광야의 도피 생활','왕위 즉위와 예루살렘','우리아와 밧세바 사건','시편의 회개','솔로몬에게 위임'],
+  '예수':     ['베들레헴 마구간','성전의 12세 소년','요단강 세례','광야 40일 시험','산상수훈과 치유','변화산의 영광','겟세마네와 십자가','부활하신 새벽'],
+  '엘리야':   ['아합 앞의 선포','그릿 시냇가 까마귀','사르밧 과부의 기름','갈멜산 대결','로뎀나무 아래','호렙산 세미한 음성','엘리사에게 겉옷','불수레로 승천'],
+  '요셉':     ['아버지의 사랑받는 아들','형제들에게 팔림','보디발의 집','감옥에서 꿈 해석','애굽의 총리','형제들과의 재회','이스라엘 가족의 이주','믿음의 마지막 유언'],
+  '룻':       ['모압의 며느리','시어머니와 함께 떠남','보아스의 밭에서','이삭 줍는 룻','보아스의 친절','발치에 누움','기업 무를 자','다윗의 증조모'],
+  '에스더':   ['바사 왕궁의 처녀','왕후가 됨','하만의 음모','모르드개의 호소','죽으면 죽으리이다','왕 앞에 나아감','잔치와 진상 폭로','부림절 제정'],
+};
+
+function findBibleArc(themeText) {
+  if (!themeText) return null;
+  for (const name of Object.keys(BIBLE_ARCS)) {
+    if (themeText.includes(name)) return { name, scenes: BIBLE_ARCS[name] };
+  }
+  return null;
+}
+
+const STYLE_PRESETS = {
+  'ghibli':           'soft hand-painted Ghibli-inspired animation style, warm pastel colors, gentle lighting, cinematic composition',
+  'cinematic':        'photorealistic cinematic photography, 35mm film grain, golden hour lighting, shallow depth of field, atmospheric',
+  'oil-painting':     'classical oil painting style, visible brush strokes, Rembrandt-like dramatic lighting, rich earth tones',
+  'watercolor':       'delicate watercolor illustration, soft washes, translucent layers, paper texture',
+  'anime':            'modern anime illustration style, clean line art, vibrant colors, expressive eyes, dynamic composition',
+  'biblical-classic': 'classical biblical fine art painting style, reminiscent of Caravaggio and Tissot, dramatic chiaroscuro, reverent atmosphere',
+  'hopeful-modern':   'modern hopeful illustration, warm sunrise light, soft gradients, contemporary digital painting',
+  'dreamy-soft':      'dreamy soft-focus illustration, ethereal glow, pastel palette, gentle bokeh, peaceful mood',
+};
+
+const ASPECT_TO_SIZE = {
+  '9:16':  { dalle3: '1024x1792', gptimg: '1024x1536' },
+  '16:9':  { dalle3: '1792x1024', gptimg: '1536x1024' },
+  '1:1':   { dalle3: '1024x1024', gptimg: '1024x1024' },
+};
+
+// ----- 가사 → 장면 분할 (의미/감정 흐름 기반, 간단 휴리스틱) -----
+function groupLyricsToScenes(lines, N) {
+  if (!lines.length || N <= 0) return [];
+  // 빈 줄이나 명확한 구분 없으면 균등 분할
+  const chunkSize = Math.ceil(lines.length / N);
+  const scenes = [];
+  for (let i = 0; i < N; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(lines.length, start + chunkSize);
+    if (start >= lines.length) break;
+    const groupLines = lines.slice(start, end);
+    scenes.push({
+      idx: i + 1,
+      timeStart: groupLines[0]?.time || 0,
+      timeEnd: groupLines[groupLines.length - 1]?.time || 0,
+      lyricText: groupLines.map(l => l.text).join(' '),
+      emotion: detectEmotion(groupLines.map(l => l.text).join(' ')),
+    });
+  }
+  return scenes;
+}
+function detectEmotion(text) {
+  if (/사랑|은혜|기쁨|찬양|영광|평안|희망|빛/.test(text)) return 'hopeful';
+  if (/슬픔|눈물|어두|고통|짐|무거|상처/.test(text))     return 'somber';
+  if (/믿음|기다림|약속|순종|기도/.test(text))            return 'contemplative';
+  if (/주여|하나님|여호와|아버지|예수/.test(text))         return 'reverent';
+  return 'neutral';
+}
+
+// 성경 아크와 가사를 결합해 최종 장면 플랜 생성
+function buildScenePlan(lyrics, theme, N) {
+  const arc = findBibleArc(theme);
+  const groups = groupLyricsToScenes(lyrics, N);
+  const scenes = [];
+  for (let i = 0; i < N; i++) {
+    const g = groups[i] || { idx: i+1, lyricText: '', emotion: 'neutral', timeStart: 0, timeEnd: 0 };
+    const arcScene = arc ? arc.scenes[Math.floor(i * arc.scenes.length / N)] : null;
+    scenes.push({
+      idx: i + 1,
+      timeStart: g.timeStart,
+      timeEnd: g.timeEnd,
+      lyricSummary: g.lyricText.slice(0, 80) + (g.lyricText.length > 80 ? '…' : ''),
+      lyricFull: g.lyricText,
+      emotion: g.emotion,
+      biblicalEvent: arcScene || null,
+    });
+  }
+  return { theme, character: arc?.name || null, scenes };
+}
+
+function buildPromptForScene(scene, theme, preset, styleHints) {
+  const parts = [];
+  // 성경 사건이 있으면 우선
+  if (scene.biblicalEvent) {
+    parts.push(`Biblical scene: ${scene.biblicalEvent}.`);
+  } else if (theme) {
+    parts.push(`Scene from "${theme}".`);
+  }
+  // 감정 톤
+  const emotionMap = {
+    'hopeful': 'hopeful, warm light streaming down, peaceful expression',
+    'somber': 'solemn mood, soft cool light, contemplative atmosphere',
+    'contemplative': 'quiet contemplation, soft natural light, thoughtful posture',
+    'reverent': 'reverent and sacred atmosphere, golden divine light, awe',
+    'neutral': 'balanced natural mood, gentle ambient light',
+  };
+  parts.push(emotionMap[scene.emotion] || emotionMap.neutral);
+  // 스타일 프리셋
+  if (preset && STYLE_PRESETS[preset]) parts.push(STYLE_PRESETS[preset]);
+  // 업로드 스타일 힌트
+  if (styleHints) parts.push(`Match this style: ${styleHints}.`);
+  // 항상 금지 조건
+  parts.push(LG_NEG_PROMPT);
+  return parts.join(' ');
+}
+
+// ----- OpenAI 이미지 생성 호출 -----
+async function generateImageViaOpenAI(apiKey, model, prompt, aspect) {
+  const size = (ASPECT_TO_SIZE[aspect] || ASPECT_TO_SIZE['9:16'])[model === 'dall-e-3' ? 'dalle3' : 'gptimg'];
+  const body = {
+    model,
+    prompt,
+    n: 1,
+    size,
+    response_format: 'b64_json',
+  };
+  if (model === 'dall-e-3') body.quality = 'standard';
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`API ${res.status}: ${err.slice(0, 200)}`);
+  }
+  const j = await res.json();
+  const b64 = j.data?.[0]?.b64_json;
+  if (!b64) throw new Error('응답에 이미지 데이터 없음');
+  // b64 → Blob
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new Blob([u8], { type: 'image/png' });
+}
+
+// ----- UI 바인딩 -----
+const _lg = {
+  styleHints: '',           // 업로드 스타일 이미지에서 추출한 텍스트 (현재는 사용자가 지정 가능; 추후 vision API)
+  scenePlan: null,           // { theme, character, scenes: [...] }
+  prompts: [],               // scene별 프롬프트
+  frames: [],                // [{ idx, blob, url, prompt }]
+  projectId: '',             // 고유 ID
+};
+
+function bindLyricImageGen() {
+  const $L = id => document.getElementById(id);
+  if (!$L('lg-apikey')) return;
+
+  // API 키 영속
+  const savedKey = localStorage.getItem('ssc-openai-key');
+  if (savedKey) $L('lg-apikey').value = savedKey;
+  $L('lg-apikey').addEventListener('input', e => {
+    localStorage.setItem('ssc-openai-key', e.target.value.trim());
+  });
+
+  // 곡 제목 자동 채움 (state.title.text)
+  if ($L('lg-title') && !$L('lg-title').value) {
+    $L('lg-title').value = state.title.text || '';
+  }
+  $L('lg-title').addEventListener('input', e => { _lg.title = e.target.value; });
+  $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; });
+
+  // 스타일 이미지 드롭/업로드
+  wireDrop('lg-style-drop', 'lg-style-file', async (files) => {
+    const f = files[0]; if (!f) return;
+    const url = URL.createObjectURL(f);
+    const img = $L('lg-style-preview');
+    img.src = url;
+    $L('lg-style-preview-wrap').style.display = 'block';
+    _lg.styleFile = f;
+    // 사용자에게 간단 힌트: 파일명에서 키워드 추출 (정식 vision 분석은 추후)
+    _lg.styleHints = '';
+  });
+
+  // 자동 카운트 토글
+  const updateFramesUI = () => {
+    const auto = $L('lg-auto-count').checked;
+    $L('lg-frames').disabled = auto;
+  };
+  $L('lg-auto-count').addEventListener('change', updateFramesUI);
+  updateFramesUI();
+  $L('lg-frames').addEventListener('input', e => {
+    $L('lg-frames-v').textContent = e.target.value;
+  });
+
+  // ① 가사 분석
+  $L('lg-analyze').addEventListener('click', () => {
+    const lines = state.lyrics.lines;
+    if (!lines.length) {
+      $L('lg-analyze-status').textContent = '⚠️ 가사가 비어있습니다 (Stage 1에서 LRC 업로드 또는 텍스트 붙여넣기)';
+      return;
+    }
+    let N = Number($L('lg-frames').value);
+    if ($L('lg-auto-count').checked) {
+      // 자동: 가사 줄 수 / 2 + 2 (8~20 클램프)
+      N = Math.max(8, Math.min(20, Math.round(lines.length / 2.5)));
+      $L('lg-frames').value = N;
+      $L('lg-frames-v').textContent = N;
+    }
+    const theme = $L('lg-theme').value.trim();
+    const plan = buildScenePlan(lines, theme, N);
+    _lg.scenePlan = plan;
+    // 프롬프트 미리 생성
+    const preset = $L('lg-preset').value;
+    _lg.prompts = plan.scenes.map(s => ({
+      idx: s.idx, prompt: buildPromptForScene(s, theme, preset, _lg.styleHints),
+    }));
+    renderScenePlan();
+    $L('lg-analyze-status').textContent = `✅ ${plan.scenes.length}장면 ${plan.character ? '(' + plan.character + ' 아크 매칭됨)' : ''}`;
+    $L('lg-gen-all').disabled = false;
+  });
+
+  // ② 전체 생성
+  $L('lg-gen-all').addEventListener('click', () => generateAllFrames());
+
+  $L('lg-to-bgs').addEventListener('click', () => addFramesToBackgrounds());
+  $L('lg-download-zip').addEventListener('click', () => downloadFramesZip());
+}
+
+function renderScenePlan() {
+  const wrap = document.getElementById('lg-scenes');
+  if (!wrap || !_lg.scenePlan) return;
+  wrap.innerHTML = '';
+  _lg.scenePlan.scenes.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'border-bottom: 1px solid var(--border); padding: 8px 4px; font-size: 11px;';
+    const frame = _lg.frames.find(f => f.idx === s.idx);
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <b style="color: var(--accent-hover);">#${String(s.idx).padStart(2,'0')}</b>
+        <button class="btn-mini lg-regen-btn" data-idx="${s.idx}">🔄 재생성</button>
+      </div>
+      ${s.biblicalEvent ? `<div style="color: var(--warn); font-weight:600;">📖 ${s.biblicalEvent}</div>` : ''}
+      <div style="color: var(--text-2); margin-top: 2px;">🎵 ${s.lyricSummary || '(가사 없음)'}</div>
+      <div style="color: var(--text-2); font-size: 10px;">감정: ${s.emotion}</div>
+      ${frame ? `<img src="${frame.url}" style="margin-top:6px; width:100%; max-height:120px; object-fit:cover; border-radius:4px;" />` : ''}
+    `;
+    wrap.appendChild(row);
+  });
+  // 재생성 버튼
+  wrap.querySelectorAll('.lg-regen-btn').forEach(b => {
+    b.addEventListener('click', () => regenerateFrame(Number(b.dataset.idx)));
+  });
+}
+
+async function generateAllFrames() {
+  const apiKey = (document.getElementById('lg-apikey').value || '').trim();
+  if (!apiKey || !apiKey.startsWith('sk-')) {
+    alert('OpenAI API 키를 먼저 입력하세요 (sk-…)');
+    return;
+  }
+  if (!_lg.scenePlan) return;
+  _lg.projectId = _lg.projectId || `proj-${Date.now()}`;
+  _lg.frames = [];
+  const model = document.getElementById('lg-model').value;
+  const aspect = document.getElementById('lg-aspect').value;
+  const total = _lg.scenePlan.scenes.length;
+  const btn = document.getElementById('lg-gen-all');
+  btn.disabled = true;
+  for (let i = 0; i < total; i++) {
+    const s = _lg.scenePlan.scenes[i];
+    const prompt = _lg.prompts[i].prompt;
+    document.getElementById('lg-progress').textContent = `생성 중 ${i+1}/${total} — 장면 ${s.idx}`;
+    try {
+      const blob = await generateImageViaOpenAI(apiKey, model, prompt, aspect);
+      const url = URL.createObjectURL(blob);
+      _lg.frames.push({ idx: s.idx, blob, url, prompt });
+      renderScenePlan();
+    } catch (e) {
+      console.error('frame gen err', e);
+      document.getElementById('lg-progress').textContent = `❌ ${i+1}번 실패: ${e.message}`;
+      btn.disabled = false;
+      return;
+    }
+  }
+  document.getElementById('lg-progress').textContent = `✅ ${total}개 생성 완료`;
+  document.getElementById('lg-to-bgs').disabled = false;
+  document.getElementById('lg-download-zip').disabled = false;
+  btn.disabled = false;
+}
+
+async function regenerateFrame(idx) {
+  const apiKey = (document.getElementById('lg-apikey').value || '').trim();
+  if (!apiKey) { alert('API 키 필요'); return; }
+  const model = document.getElementById('lg-model').value;
+  const aspect = document.getElementById('lg-aspect').value;
+  const promptObj = _lg.prompts.find(p => p.idx === idx);
+  if (!promptObj) return;
+  document.getElementById('lg-progress').textContent = `재생성 중 #${idx}…`;
+  try {
+    const blob = await generateImageViaOpenAI(apiKey, model, promptObj.prompt, aspect);
+    const url = URL.createObjectURL(blob);
+    const existing = _lg.frames.find(f => f.idx === idx);
+    if (existing) {
+      URL.revokeObjectURL(existing.url);
+      existing.blob = blob; existing.url = url; existing.prompt = promptObj.prompt;
+    } else {
+      _lg.frames.push({ idx, blob, url, prompt: promptObj.prompt });
+    }
+    renderScenePlan();
+    document.getElementById('lg-progress').textContent = `✅ #${idx} 재생성 완료`;
+  } catch (e) {
+    document.getElementById('lg-progress').textContent = `❌ #${idx} 실패: ${e.message}`;
+  }
+}
+
+async function addFramesToBackgrounds() {
+  if (!_lg.frames.length) return;
+  // 프레임 순서대로 배경에 추가
+  for (const f of _lg.frames.sort((a,b)=>a.idx-b.idx)) {
+    const file = new File([f.blob], `frame-${String(f.idx).padStart(2,'0')}.png`, { type: 'image/png' });
+    await handleBackgrounds([file]);
+  }
+  alert(`${_lg.frames.length}개 프레임이 배경에 추가됐습니다. 슬라이드쇼가 자동 ON이라 영상에 그대로 들어갑니다.`);
+}
+
+async function downloadFramesZip() {
+  if (!_lg.frames.length) return;
+  if (typeof JSZip === 'undefined') { alert('JSZip 라이브러리 미로드'); return; }
+  const zip = new JSZip();
+  const folder = zip.folder(`public/generated/lyric-images/${_lg.projectId}`);
+  // 이미지
+  for (const f of _lg.frames.sort((a,b)=>a.idx-b.idx)) {
+    folder.file(`frame-${String(f.idx).padStart(2,'0')}.png`, f.blob);
+  }
+  // scene-plan.json
+  folder.file('scene-plan.json', JSON.stringify(_lg.scenePlan, null, 2));
+  // prompts.json
+  folder.file('prompts.json', JSON.stringify(_lg.prompts, null, 2));
+  // remotion-ready.json (Remotion 배경 이미지 시퀀스 연결용)
+  const remotionData = {
+    projectId: _lg.projectId,
+    aspect: document.getElementById('lg-aspect').value,
+    frames: _lg.frames.sort((a,b)=>a.idx-b.idx).map(f => ({
+      idx: f.idx,
+      file: `frame-${String(f.idx).padStart(2,'0')}.png`,
+      timeStart: _lg.scenePlan.scenes.find(s=>s.idx===f.idx)?.timeStart || 0,
+      timeEnd: _lg.scenePlan.scenes.find(s=>s.idx===f.idx)?.timeEnd || 0,
+    })),
+  };
+  folder.file('remotion-ready.json', JSON.stringify(remotionData, null, 2));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `lyric-images-${_lg.projectId}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ====================================================================
 // Init
 // ====================================================================
 async function init() {
@@ -3270,6 +3636,7 @@ async function init() {
   bindSidebarBottomButtons();
   bindSpectrumControls();
   bindStage1Lyrics();
+  bindLyricImageGen();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);
