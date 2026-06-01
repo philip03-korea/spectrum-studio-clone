@@ -485,6 +485,11 @@ async function handleAudioFile(file, opts = {}) {
       if (!tEl.value) tEl.value = state.title.text;
     }
     tmpCtx.close();
+    // 평문 가사를 오디오보다 먼저 넣어둔 경우, 실제 길이에 맞춰 타이밍 재분배
+    const lraw = state.lyrics?.rawText?.trim();
+    if (lraw && !/\[\d{1,2}:\d{1,2}/.test(lraw) && !/-->/.test(lraw)) {
+      state.lyrics.lines = distributeTextEvenly(lraw, buf.duration);
+    }
     if (!opts.skipPersist) await dbSet('audio', file);
     updateEnterButton();
     refreshLyricsStats();
@@ -892,8 +897,10 @@ function parseLyricsInput(text) {
   if (!t) return [];
   if (/\[\d{1,2}:\d{1,2}/.test(t)) return parseLRC(t);
   if (/-->/.test(t)) return parseSRT(t);
-  if (state.audio?.duration) return distributeTextEvenly(t, state.audio.duration);
-  return [];
+  // 평문(타임스탬프 없음): 오디오가 있으면 길이에 맞춰 균등 분배,
+  // 아직 없으면 임시 길이(180초)로라도 줄을 생성한다.
+  // (가사 분석·이미지 생성·번역은 타이밍이 없어도 동작해야 하므로 빈 배열을 돌려주면 안 됨)
+  return distributeTextEvenly(t, state.audio?.duration || 180);
 }
 
 // ----- parseAndCleanLrc: 섹션 태그 제거 + 단어→문장 병합 (사용자 스펙) -----
@@ -967,21 +974,15 @@ function updateLyrics(text, opts = {}) {
 function refreshLyricsStats() {
   const n = state.lyrics.lines.length;
   const last = state.lyrics.lines[n - 1]?.time || 0;
-  $('lyrics-stats').textContent = `${n}줄${last ? ' / 마지막 ' + fmtTime(last) : ''}`;
+  const txt = `${n}줄${last ? ' / 마지막 ' + fmtTime(last) : ''}`;
+  ['lyrics-stats', 'lyrics-stats-stage1', 'lyrics-stats-ig'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  });
 }
 function bindLyrics() {
-  $('lyrics-text').addEventListener('input', e => updateLyrics(e.target.value));
-  $('lyrics-clear').addEventListener('click', () => {
-    $('lyrics-text').value = '';
-    updateLyrics('');
-  });
-  $('file-lrc').addEventListener('change', async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    const raw = await f.text();
-    const cleaned = parseAndCleanLrc(raw);
-    $('lyrics-text').value = cleaned;
-    updateLyrics(cleaned);
-  });
+  // 가사 텍스트박스/파일/비우기 바인딩은 모두 bindStage1Lyrics()의
+  // 통합 매니저에서 처리한다 (3개 단계 textarea 양방향 동기화).
 }
 // ===== 자동 번역 (MyMemory free API) =====
 async function translateText(text, target) {
@@ -2384,56 +2385,92 @@ function bindSidebarBottomButtons() {
   if (offBtn) offBtn.addEventListener('click', e => e.preventDefault());
 }
 
-// Stage 1 / Stage 2 가사 텍스트박스 양방향 동기화 + Stage 1 LRC 자동 정리·번역
+// 가사 통합 매니저 — 3개 단계(가사 이미지 / 미디어 준비 / 비주얼 편집)의
+// 가사 textarea·파일·비우기·번역상태를 양방향 동기화한다.
+// 어느 단계에서 LRC를 업로드하든 나머지 단계에 자동 등록된다.
 function bindStage1Lyrics() {
-  const ta1 = $('lyrics-text-stage1');
-  const ta2 = $('lyrics-text');
-  const file1 = $('file-lrc-stage1');
-  const clr1 = $('lyrics-clear-stage1');
-  const stat1 = $('lyrics-stats-stage1');
-  const trans1 = $('trans-status-stage1');
-  if (!ta1) return;
-  // 텍스트박스 변경 시 양쪽 모두 동기화
-  ta1.addEventListener('input', () => {
-    if (ta2) ta2.value = ta1.value;
-    updateLyrics(ta1.value);
-    if (stat1) stat1.textContent = `${state.lyrics.lines.length}줄`;
-  });
-  if (ta2) {
-    ta2.addEventListener('input', () => {
-      ta1.value = ta2.value;
-      if (stat1) stat1.textContent = `${state.lyrics.lines.length}줄`;
-    });
-  }
-  if (clr1) clr1.addEventListener('click', () => {
-    ta1.value = ''; if (ta2) ta2.value = '';
-    updateLyrics('');
-    if (stat1) stat1.textContent = '0줄';
-    if (trans1) trans1.textContent = '업로드 시 자동으로 한글+영어 모드로 설정됩니다';
-  });
-  if (file1) file1.addEventListener('change', async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    const raw = await f.text();
+  const widgets = [
+    { ta: $('lyrics-text-ig'),     file: $('file-lrc-ig'),     clr: $('lyrics-clear-ig'),     trans: $('trans-status-ig') },
+    { ta: $('lyrics-text-stage1'), file: $('file-lrc-stage1'), clr: $('lyrics-clear-stage1'), trans: $('trans-status-stage1') },
+    { ta: $('lyrics-text'),        file: $('file-lrc'),        clr: $('lyrics-clear'),        trans: $('trans-status') },
+  ].filter(w => w.ta || w.file);
+  if (!widgets.length) return;
+
+  const TRANS_IDLE = '업로드 시 자동으로 한글+영어 모드로 설정됩니다';
+  const setAllText = (text) => {
+    widgets.forEach(w => { if (w.ta) w.ta.value = text; });
+  };
+  const setAllTrans = (text) => {
+    widgets.forEach(w => { if (w.trans) w.trans.textContent = text; });
+  };
+
+  // LRC/TXT/SRT 파일을 읽어 정리 → 전 단계 동기화 → 자동 한/영 번역
+  const loadLyricsFromFile = async (file) => {
+    if (!file) return;
+    const name = (file.name || '').toLowerCase();
+    if (!/\.(lrc|txt|srt)$/.test(name) && !/^text\//.test(file.type || '')) {
+      setAllTrans('⚠️ LRC / TXT / SRT 파일만 지원합니다');
+      return;
+    }
+    const raw = await file.text();
     const cleaned = parseAndCleanLrc(raw);
-    ta1.value = cleaned; if (ta2) ta2.value = cleaned;
+    setAllText(cleaned);
     updateLyrics(cleaned);
-    if (stat1) stat1.textContent = `${state.lyrics.lines.length}줄`;
     // 자동 영어 번역 + 한글+영어 모드
     state.lyrics.lang = 'en';
     state.lyrics.display = 'dual';
     const langSel = $('lyrics-lang'); if (langSel) langSel.value = 'en';
     const dispSel = $('lyrics-display'); if (dispSel) dispSel.value = 'dual';
-    if (trans1) trans1.textContent = `🌐 영어로 자동 번역 중... (${state.lyrics.lines.length}줄)`;
+    setAllTrans(`🌐 영어로 자동 번역 중... (${state.lyrics.lines.length}줄)`);
     try {
       await translateAllLyrics();
-      if (trans1) trans1.textContent = `✅ 한글+영어 모드 자동 설정 완료`;
+      setAllTrans('✅ 한글+영어 모드 자동 설정 완료 · 전 단계 동기화됨');
     } catch (err) {
-      if (trans1) trans1.textContent = `⚠️ 번역 일부 실패 — Stage 2에서 다시 시도 가능`;
+      setAllTrans('⚠️ 번역 일부 실패 — 비주얼 편집에서 다시 시도 가능');
     }
     debouncedSave();
+  };
+
+  // 어느 textarea를 편집하든 나머지에 즉시 반영
+  widgets.forEach(src => {
+    if (src.ta) src.ta.addEventListener('input', () => {
+      widgets.forEach(o => { if (o !== src && o.ta) o.ta.value = src.ta.value; });
+      updateLyrics(src.ta.value);
+    });
+    if (src.clr) src.clr.addEventListener('click', () => {
+      setAllText('');
+      updateLyrics('');
+      setAllTrans(TRANS_IDLE);
+    });
+    if (src.file) src.file.addEventListener('change', async (e) => {
+      await loadLyricsFromFile(e.target.files[0]);
+      e.target.value = '';   // 같은 파일 재선택 허용
+    });
+    // textarea 위에 파일 드롭 허용 (기본 동작 차단 + 파일 읽기)
+    if (src.ta) {
+      src.ta.addEventListener('dragover', e => { e.preventDefault(); src.ta.classList.add('dragover'); });
+      src.ta.addEventListener('dragleave', () => src.ta.classList.remove('dragover'));
+      src.ta.addEventListener('drop', async e => {
+        if (!e.dataTransfer?.files?.length) return;
+        e.preventDefault(); src.ta.classList.remove('dragover');
+        await loadLyricsFromFile(e.dataTransfer.files[0]);
+      });
+    }
   });
+
+  // 전용 드롭존 (가사 이미지 단계)
+  const dropZone = $('lyrics-drop-ig');
+  if (dropZone) {
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', async e => {
+      e.preventDefault(); dropZone.classList.remove('dragover');
+      if (e.dataTransfer?.files?.length) await loadLyricsFromFile(e.dataTransfer.files[0]);
+    });
+  }
+
   // 초기 텍스트 반영
-  if (state.lyrics.rawText) ta1.value = state.lyrics.rawText;
+  if (state.lyrics.rawText) setAllText(state.lyrics.rawText);
 }
 
 async function doReset() {
@@ -2905,18 +2942,23 @@ function restoreUI() {
   setSlider('lyrics-y',       state.lyrics.y,         v => v + '%');
   setSlider('slideshow-interval', state.slideshow.interval, v => v + '초');
   setSlider('frame-intensity', state.frame.intensity, v => v + '%');
-  $('title-text').value = state.title.text || '';
-  $('title-show').checked = state.title.show;
-  $('title-font').value = state.title.font || '';
-  $('title-color').value = state.title.color || '#ffffff';
-  $('title-pulse').checked = !!state.title.pulse;
-  $('badge-show').checked = !!state.title.badge;
-  $('badge-pos').value = state.title.badgePos || 'below';
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = v; };
+  setVal('title-text', state.title.text || '');
+  setChk('title-show', state.title.show);
+  setVal('title-font', state.title.font || '');
+  setVal('title-color', state.title.color || '#ffffff');
+  setChk('title-pulse', !!state.title.pulse);
+  setChk('badge-show', !!state.title.badge);
+  setVal('badge-pos', state.title.badgePos || 'below');
   renderStickerToolList();
   $('lyrics-show').checked = state.lyrics.show;
   $('lyrics-color').value = state.lyrics.color || '#ffffff';
   $('lyrics-shadow').value = state.lyrics.shadow || 'medium';
-  $('lyrics-text').value = state.lyrics.rawText || '';
+  ['lyrics-text', 'lyrics-text-stage1', 'lyrics-text-ig'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = state.lyrics.rawText || '';
+  });
   if (state.lyrics.rawText) updateLyrics(state.lyrics.rawText, { skipPersist: true });
   $('slideshow-enabled').checked = state.slideshow.enabled;
   $('slideshow-crossfade').checked = state.slideshow.crossfade;
@@ -3388,7 +3430,10 @@ async function generateImageViaOpenAI(apiKey, model, prompt, aspect, styleFiles)
       body: fd,
     });
   } else {
-    const body = { model, prompt, n: 1, size, response_format: 'b64_json' };
+    const body = { model, prompt, n: 1, size };
+    // response_format은 DALL-E 계열만 지원. gpt-image-1에 보내면 400(Unknown parameter).
+    // gpt-image-1은 기본으로 b64_json을 돌려준다.
+    if (model === 'dall-e-3' || model === 'dall-e-2') body.response_format = 'b64_json';
     if (model === 'dall-e-3') body.quality = 'standard';
     res = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
@@ -3400,8 +3445,18 @@ async function generateImageViaOpenAI(apiKey, model, prompt, aspect, styleFiles)
     });
   }
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`API ${res.status}: ${err.slice(0, 200)}`);
+    const errText = await res.text();
+    let msg = errText.slice(0, 200);
+    try { msg = JSON.parse(errText).error?.message || msg; } catch (_) {}
+    // 안전 시스템 거부 → 사용자가 조치할 수 있게 명확히 안내
+    if (res.status === 400 && /safety system/i.test(msg)) {
+      const usedRef = styleFiles && styleFiles.length > 0 && model === 'gpt-image-1';
+      const hint = usedRef
+        ? '업로드한 reference 이미지에 실제 인물 얼굴이 있으면 거부됩니다. ① 스타일 프리셋을 선택하거나 ② 얼굴이 없는 이미지를 쓰거나 ③ reference 없이 생성하세요.'
+        : '프롬프트(가사/주제) 내용이 안전 필터에 걸렸습니다. 주제·가사 표현을 순화해 주세요.';
+      throw new Error(`OpenAI 안전 시스템 거부: ${hint}`);
+    }
+    throw new Error(`API ${res.status}: ${msg}`);
   }
   const j = await res.json();
   const b64 = j.data?.[0]?.b64_json;
@@ -3420,6 +3475,125 @@ async function generateImageViaOpenAI(apiKey, model, prompt, aspect, styleFiles)
   throw new Error('응답에 이미지 데이터 없음');
 }
 
+// ----- 업로드 이미지 → "스타일만" 텍스트 추출 (GPT-4o 비전) -----
+// 얼굴/신원이 아니라 아트 기법·색감·조명·분위기·질감만 뽑아 텍스트-투-이미지 프롬프트에 사용.
+// 이렇게 하면 실제 얼굴 사진을 edits로 보내 안전 시스템에 거부당하는 문제를 피한다.
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+}
+async function describeStyleFromImages(apiKey, files) {
+  const imgs = [];
+  for (const f of files.slice(0, 4)) {   // 비용·속도 위해 최대 4장
+    imgs.push({ type: 'image_url', image_url: { url: await fileToDataURL(f), detail: 'low' } });
+  }
+  const body = {
+    model: 'gpt-4o',
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Describe ONLY the visual ART STYLE shared by these reference images, as one concise English phrase to guide an image generator: medium/technique, color palette, lighting, mood, texture, brushwork, composition. Do NOT describe, identify, or reproduce any specific person, face, or identity. Style only.' },
+        ...imgs,
+      ],
+    }],
+    max_tokens: 160,
+  };
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    let m = t.slice(0, 140);
+    try { m = JSON.parse(t).error?.message || m; } catch (_) {}
+    throw new Error(`스타일 분석 실패 ${r.status}: ${m}`);
+  }
+  const j = await r.json();
+  return (j.choices?.[0]?.message?.content || '').trim();
+}
+
+// ----- Higgsfield 이미지 생성 (GPT Image 2) -----
+// Higgsfield는 인증에 키 2개(Key ID + Key Secret)가 필요하다.
+// 공식 SDK 형식: `Authorization: Key KEY_ID:KEY_SECRET` (단일 Bearer 토큰 아님).
+// 생성 API는 서버용 비동기 API다. POST → { id } → GET 폴링 → 이미지 URL.
+// ⚠️ 정적 브라우저 앱에서 직접 호출 시 CORS로 차단될 수 있다(이 경우 명확한 에러 표시).
+const HF_API_BASE = 'https://platform.higgsfield.ai';
+const ASPECT_TO_WH = {
+  '9:16': { width: 1080, height: 1920 },
+  '16:9': { width: 1920, height: 1080 },
+  '1:1':  { width: 1024, height: 1024 },
+};
+const HF_CORS_MSG = 'Higgsfield 직접 호출이 브라우저에서 차단됨(CORS). 정적 앱에서는 프록시 서버가 필요합니다 — OpenAI 모델을 쓰거나 프록시를 붙여주세요.';
+
+// Key ID + Secret → 공식 인증 헤더 값
+function hfAuthHeader(id, secret) {
+  return `Key ${id}:${secret}`;
+}
+// localStorage 또는 입력칸에서 두 자격증명을 읽어온다
+function getHfCreds() {
+  const id = (localStorage.getItem('ssc-hf-id') || document.getElementById('lg-hf-id')?.value || '').trim();
+  const secret = (localStorage.getItem('ssc-hf-secret') || document.getElementById('lg-hf-secret')?.value || '').trim();
+  return { id, secret };
+}
+
+async function hfFetch(url, opts) {
+  try {
+    return await fetch(url, opts);
+  } catch (e) {
+    throw new Error(HF_CORS_MSG);
+  }
+}
+async function generateImageViaHiggsfield(creds, prompt, aspect) {
+  const wh = ASPECT_TO_WH[aspect] || ASPECT_TO_WH['9:16'];
+  const authHeaders = { 'Authorization': hfAuthHeader(creds.id, creds.secret) };
+  const postRes = await hfFetch(`${HF_API_BASE}/v1/generations`, {
+    method: 'POST',
+    headers: { ...authHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: 'text-to-image', model: 'gpt-image-2', prompt, width: wh.width, height: wh.height }),
+  });
+  if (!postRes.ok) {
+    const t = await postRes.text().catch(() => '');
+    throw new Error(`Higgsfield ${postRes.status}: ${t.slice(0, 160)}`);
+  }
+  const j = await postRes.json();
+  const pickUrl = o => o?.url || o?.image_url || o?.result?.url || o?.output?.[0]?.url || o?.output?.[0] || o?.data?.[0]?.url || o?.images?.[0]?.url || o?.images?.[0];
+  const id = j.id || j.request_id || j.generation_id || j.data?.id;
+  const immediate = pickUrl(j);
+  if (immediate) return await (await hfFetch(immediate)).blob();
+  if (!id) throw new Error('Higgsfield 응답에 작업 ID/이미지가 없습니다');
+  // 폴링 (최대 ~90초)
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 1500));
+    const sres = await hfFetch(`${HF_API_BASE}/v1/generations/${id}`, { headers: authHeaders });
+    if (!sres.ok) continue;
+    const sj = await sres.json();
+    const status = String(sj.status || sj.state || '').toLowerCase();
+    const url = pickUrl(sj);
+    if (url) return await (await hfFetch(url)).blob();
+    if (['failed', 'error', 'canceled', 'cancelled'].includes(status)) {
+      throw new Error('Higgsfield 생성 실패: ' + (sj.error || status));
+    }
+  }
+  throw new Error('Higgsfield 생성 시간 초과 (90초)');
+}
+
+// 모델에 따라 OpenAI / Higgsfield로 라우팅
+async function generateImageDispatch(model, prompt, aspect, styleFiles) {
+  if (model === 'hf-gpt-image-2') {
+    const creds = getHfCreds();
+    if (!creds.id || !creds.secret) throw new Error('Higgsfield 키 ID와 비밀 키 2개가 모두 필요합니다 (저장 후 사용)');
+    return generateImageViaHiggsfield(creds, prompt, aspect);
+  }
+  const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
+  if (!oaKey) throw new Error('OpenAI API 키가 필요합니다');
+  return generateImageViaOpenAI(oaKey, model, prompt, aspect, styleFiles);
+}
+
 // ----- UI 바인딩 -----
 const _lg = {
   styleHints: '',           // 업로드 스타일 이미지에서 추출한 텍스트 (현재는 사용자가 지정 가능; 추후 vision API)
@@ -3433,12 +3607,89 @@ function bindLyricImageGen() {
   const $L = id => document.getElementById(id);
   if (!$L('lg-apikey')) return;
 
-  // API 키 영속
+  // ===== API 키: 저장 + 검증 + 상태 배지 =====
+  const setKeyStatus = (elId, st, text) => {
+    const el = $L(elId);
+    if (!el) return;
+    el.dataset.state = st;
+    el.textContent = text;
+  };
+
+  // --- OpenAI 키 ---
   const savedKey = localStorage.getItem('ssc-openai-key');
-  if (savedKey) $L('lg-apikey').value = savedKey;
+  if (savedKey) {
+    $L('lg-apikey').value = savedKey;
+    setKeyStatus('lg-apikey-status', 'saved', '● 저장된 키 (미검증)');
+  }
+  // 입력 즉시 localStorage에 자동 저장(새로고침해도 유지) + 검증 상태 초기화
   $L('lg-apikey').addEventListener('input', e => {
-    localStorage.setItem('ssc-openai-key', e.target.value.trim());
+    const v = e.target.value.trim();
+    if (v) localStorage.setItem('ssc-openai-key', v);
+    else localStorage.removeItem('ssc-openai-key');
+    setKeyStatus('lg-apikey-status', v ? 'saved' : 'idle', v ? '● 자동 저장됨 (미검증 — 저장 눌러 확인)' : '● 키 미확인');
   });
+  async function validateOpenAIKey(key) {
+    if (!key.startsWith('sk-')) return { ok: false, msg: '형식 오류 (sk-로 시작해야 함)' };
+    try {
+      const r = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${key}` },
+      });
+      if (r.ok) return { ok: true, msg: '활성화됨 ✓' };
+      if (r.status === 401) return { ok: false, msg: '인증 실패 (키가 틀림)' };
+      return { ok: true, msg: '저장됨 (검증 불가: ' + r.status + ')', soft: true };
+    } catch (e) {
+      // CORS/네트워크 — 키 형식은 맞으므로 저장만
+      return { ok: true, msg: '저장됨 (브라우저에서 검증 불가)', soft: true };
+    }
+  }
+  $L('lg-apikey-save').addEventListener('click', async () => {
+    const key = $L('lg-apikey').value.trim();
+    if (!key) { setKeyStatus('lg-apikey-status', 'bad', '● 키를 입력하세요'); return; }
+    localStorage.setItem('ssc-openai-key', key);
+    setKeyStatus('lg-apikey-status', 'checking', '● 검증 중…');
+    const res = await validateOpenAIKey(key);
+    setKeyStatus('lg-apikey-status', res.ok ? (res.soft ? 'saved' : 'ok') : 'bad', '● ' + res.msg);
+  });
+
+  // --- Higgsfield 키 (Key ID + Key Secret 2개) ---
+  const savedHfId = localStorage.getItem('ssc-hf-id');
+  const savedHfSecret = localStorage.getItem('ssc-hf-secret');
+  if (savedHfId && $L('lg-hf-id')) $L('lg-hf-id').value = savedHfId;
+  if (savedHfSecret && $L('lg-hf-secret')) $L('lg-hf-secret').value = savedHfSecret;
+  if (savedHfId && savedHfSecret) setKeyStatus('lg-hf-key-status', 'saved', '● 저장된 키 2개 (미검증)');
+  // 두 입력칸 모두 입력 즉시 자동 저장 (새로고침해도 유지)
+  const hfAutoSave = () => {
+    const id = ($L('lg-hf-id')?.value || '').trim();
+    const sec = ($L('lg-hf-secret')?.value || '').trim();
+    if (id) localStorage.setItem('ssc-hf-id', id); else localStorage.removeItem('ssc-hf-id');
+    if (sec) localStorage.setItem('ssc-hf-secret', sec); else localStorage.removeItem('ssc-hf-secret');
+    if (id && sec) setKeyStatus('lg-hf-key-status', 'saved', '● 자동 저장됨 (미검증 — 저장 눌러 확인)');
+    else if (id || sec) setKeyStatus('lg-hf-key-status', 'idle', '● ID·비밀 키 2개 모두 입력하세요');
+    else setKeyStatus('lg-hf-key-status', 'idle', '● 키 미확인');
+  };
+  if ($L('lg-hf-id')) $L('lg-hf-id').addEventListener('input', hfAutoSave);
+  if ($L('lg-hf-secret')) $L('lg-hf-secret').addEventListener('input', hfAutoSave);
+  if ($L('lg-hf-key-save')) {
+    $L('lg-hf-key-save').addEventListener('click', async () => {
+      const id = ($L('lg-hf-id')?.value || '').trim();
+      const sec = ($L('lg-hf-secret')?.value || '').trim();
+      if (!id || !sec) { setKeyStatus('lg-hf-key-status', 'bad', '● ID·비밀 키 2개 모두 입력하세요'); return; }
+      localStorage.setItem('ssc-hf-id', id);
+      localStorage.setItem('ssc-hf-secret', sec);
+      setKeyStatus('lg-hf-key-status', 'checking', '● 검증 중…');
+      // Higgsfield는 서버용 API라 브라우저에서 직접 검증 시 CORS로 막힐 가능성이 큼.
+      try {
+        const r = await fetch(`${HF_API_BASE}/v1/models`, {
+          headers: { 'Authorization': hfAuthHeader(id, sec) },
+        });
+        if (r.ok) setKeyStatus('lg-hf-key-status', 'ok', '● 활성화됨 ✓');
+        else if (r.status === 401 || r.status === 403) setKeyStatus('lg-hf-key-status', 'bad', '● 인증 실패 (ID/비밀 키 확인)');
+        else setKeyStatus('lg-hf-key-status', 'saved', '● 저장됨 (검증 불가: ' + r.status + ')');
+      } catch (e) {
+        setKeyStatus('lg-hf-key-status', 'saved', '● 저장됨 (브라우저 검증 불가 — CORS)');
+      }
+    });
+  }
 
   // 곡 제목 자동 채움 (state.title.text)
   if ($L('lg-title') && !$L('lg-title').value) {
@@ -3466,6 +3717,7 @@ function bindLyricImageGen() {
       x.addEventListener('click', e => {
         e.stopPropagation();
         _lg.styleFiles.splice(i, 1);
+        _lg.styleHints = '';   // 이미지 바뀌면 스타일 캐시 무효화 → 다시 분석
         renderStyleThumbs();
       });
       t.appendChild(x);
@@ -3476,8 +3728,11 @@ function bindLyricImageGen() {
     const accepted = files.filter(f => f.type.startsWith('image/'));
     const remaining = 10 - _lg.styleFiles.length;
     _lg.styleFiles.push(...accepted.slice(0, Math.max(0, remaining)));
+    _lg.styleHints = '';   // 새 이미지 추가 → 스타일 캐시 무효화
     renderStyleThumbs();
   });
+  // 프리셋을 바꾸면 업로드-스타일 캐시 무효화
+  if ($L('lg-preset')) $L('lg-preset').addEventListener('change', () => { _lg.styleHints = ''; });
 
   // 자동 카운트 토글
   const updateFramesUI = () => {
@@ -3551,57 +3806,122 @@ function renderScenePlan() {
 }
 
 async function generateAllFrames() {
-  const apiKey = (document.getElementById('lg-apikey').value || '').trim();
-  if (!apiKey || !apiKey.startsWith('sk-')) {
-    alert('OpenAI API 키를 먼저 입력하세요 (sk-…)');
-    return;
+  const model = document.getElementById('lg-model').value;
+  const isHF = model === 'hf-gpt-image-2';
+  const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
+  if (isHF) {
+    const creds = getHfCreds();
+    if (!creds.id || !creds.secret) { alert('Higgsfield 키 ID와 비밀 키 2개를 먼저 저장하세요'); return; }
+  } else {
+    if (!oaKey || !oaKey.startsWith('sk-')) {
+      alert('OpenAI API 키를 먼저 입력하세요 (sk-…)');
+      return;
+    }
   }
   if (!_lg.scenePlan) return;
   _lg.projectId = _lg.projectId || `proj-${Date.now()}`;
   _lg.frames = [];
-  const model = document.getElementById('lg-model').value;
   const aspect = document.getElementById('lg-aspect').value;
   const total = _lg.scenePlan.scenes.length;
   const btn = document.getElementById('lg-gen-all');
   btn.disabled = true;
-  // 프리셋 없으면 업로드 이미지를 reference로 사용 (gpt-image-1 edits)
+  // 프리셋 "없음(업로드 이미지대로)" + 업로드 이미지 있음 → 업로드 이미지를 reference로 사용
+  //  • gpt-image-1: edits 엔드포인트로 업로드 이미지를 직접 넣어 인물/얼굴+스타일을 유지(복제)
+  //  • dall-e-3: reference 미지원 → 비전으로 "스타일"만 추출해 프롬프트에 반영(얼굴 복제 불가)
   const preset = document.getElementById('lg-preset').value;
-  const useStyleAsRef = !preset && _lg.styleFiles && _lg.styleFiles.length > 0 && model === 'gpt-image-1';
-  const styleFiles = useStyleAsRef ? _lg.styleFiles : null;
+  const hasUpload = _lg.styleFiles && _lg.styleFiles.length > 0;
+  const useUpload = !preset && hasUpload && !isHF;
+  const useRefEdits   = useUpload && model === 'gpt-image-1';   // 얼굴·인물 복제 경로
+  const useStyleVision = useUpload && model === 'dall-e-3';      // 스타일만(폴백)
+  if (useStyleVision && !_lg.styleHints) {
+    document.getElementById('lg-progress').textContent = '🎨 업로드 이미지에서 스타일 분석 중… (DALL·E 3은 얼굴 복제 미지원 — 스타일만)';
+    try {
+      _lg.styleHints = await describeStyleFromImages(oaKey, _lg.styleFiles);
+    } catch (e) {
+      document.getElementById('lg-progress').textContent = `❌ 스타일 분석 실패: ${e.message}`;
+      btn.disabled = false;
+      return;
+    }
+  }
+  // 프롬프트 재구성 (분석 시점엔 styleHints가 비어 있었으므로)
+  const theme = document.getElementById('lg-theme').value.trim();
+  const appliedHints = useStyleVision ? _lg.styleHints : '';
+  _lg.prompts = _lg.scenePlan.scenes.map(s => ({
+    idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints),
+  }));
+  const refFiles = useRefEdits ? _lg.styleFiles : null;   // edits로 보낼 업로드 이미지
+  const modeTag = useRefEdits ? ' (업로드 이미지로 인물 유지)' : (appliedHints ? ' (업로드 스타일 적용)' : '');
+  const fails = [];
+  let lastErr = '';
   for (let i = 0; i < total; i++) {
     const s = _lg.scenePlan.scenes[i];
     const prompt = _lg.prompts[i].prompt;
-    document.getElementById('lg-progress').textContent = `생성 중 ${i+1}/${total} — 장면 ${s.idx}${useStyleAsRef ? ' (스타일 reference 사용)' : ''}`;
+    document.getElementById('lg-progress').textContent = `생성 중 ${i+1}/${total} — 장면 ${s.idx}${modeTag}`;
     try {
-      const blob = await generateImageViaOpenAI(apiKey, model, prompt, aspect, styleFiles);
+      const blob = await generateImageDispatch(model, prompt, aspect, refFiles);
       const url = URL.createObjectURL(blob);
       _lg.frames.push({ idx: s.idx, blob, url, prompt });
       renderScenePlan();
     } catch (e) {
       console.error('frame gen err', e);
-      document.getElementById('lg-progress').textContent = `❌ ${i+1}번 실패: ${e.message}`;
-      btn.disabled = false;
-      return;
+      fails.push(s.idx);
+      lastErr = e.message;
+      // 안전 시스템 거부/인증 오류는 모든 프레임에 동일하게 적용 → 즉시 중단
+      if (/안전 시스템|API 401|API 키/.test(e.message)) {
+        document.getElementById('lg-progress').textContent = `❌ 중단: ${e.message}`;
+        btn.disabled = false;
+        return;
+      }
+      // 그 외(일시적 오류 등)는 계속 진행
+      document.getElementById('lg-progress').textContent = `⚠️ ${i+1}번 실패(계속): ${e.message}`;
     }
   }
-  document.getElementById('lg-progress').textContent = `✅ ${total}개 생성 완료`;
-  document.getElementById('lg-to-bgs').disabled = false;
-  document.getElementById('lg-download-zip').disabled = false;
+  const ok = _lg.frames.length;
+  if (ok === 0) {
+    document.getElementById('lg-progress').textContent = `❌ 전부 실패: ${lastErr}`;
+  } else if (fails.length) {
+    document.getElementById('lg-progress').textContent = `✅ ${ok}개 완료 / ⚠️ ${fails.length}개 실패(#${fails.join(', #')}) — 실패분은 재생성 버튼으로 다시 시도`;
+    document.getElementById('lg-to-bgs').disabled = false;
+    document.getElementById('lg-download-zip').disabled = false;
+  } else {
+    document.getElementById('lg-progress').textContent = `✅ ${total}개 생성 완료`;
+    document.getElementById('lg-to-bgs').disabled = false;
+    document.getElementById('lg-download-zip').disabled = false;
+  }
   btn.disabled = false;
 }
 
 async function regenerateFrame(idx) {
-  const apiKey = (document.getElementById('lg-apikey').value || '').trim();
-  if (!apiKey) { alert('API 키 필요'); return; }
   const model = document.getElementById('lg-model').value;
+  const isHF = model === 'hf-gpt-image-2';
+  const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
+  if (isHF) {
+    const creds = getHfCreds();
+    if (!creds.id || !creds.secret) { alert('Higgsfield 키 ID·비밀 키 2개 필요 (저장 후 사용)'); return; }
+  } else {
+    if (!oaKey) { alert('OpenAI API 키 필요'); return; }
+  }
   const aspect = document.getElementById('lg-aspect').value;
   const promptObj = _lg.prompts.find(p => p.idx === idx);
   if (!promptObj) return;
   const preset = document.getElementById('lg-preset').value;
-  const useStyleAsRef = !preset && _lg.styleFiles && _lg.styleFiles.length > 0 && model === 'gpt-image-1';
+  const hasUpload = _lg.styleFiles && _lg.styleFiles.length > 0;
+  const useUpload = !preset && hasUpload && !isHF;
+  const useRefEdits = useUpload && model === 'gpt-image-1';
+  const useStyleVision = useUpload && model === 'dall-e-3';
   document.getElementById('lg-progress').textContent = `재생성 중 #${idx}…`;
   try {
-    const blob = await generateImageViaOpenAI(apiKey, model, promptObj.prompt, aspect, useStyleAsRef ? _lg.styleFiles : null);
+    // DALL·E 3 스타일 모드인데 아직 스타일 미분석이면 먼저 분석
+    if (useStyleVision && !_lg.styleHints) {
+      document.getElementById('lg-progress').textContent = `🎨 #${idx} — 업로드 스타일 분석 중…`;
+      _lg.styleHints = await describeStyleFromImages(oaKey, _lg.styleFiles);
+      const theme = document.getElementById('lg-theme').value.trim();
+      const scene = _lg.scenePlan?.scenes.find(s => s.idx === idx);
+      if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints);
+    }
+    // gpt-image-1 + 업로드 = edits(인물 유지), 그 외 = 텍스트-투-이미지
+    const refFiles = useRefEdits ? _lg.styleFiles : null;
+    const blob = await generateImageDispatch(model, promptObj.prompt, aspect, refFiles);
     const url = URL.createObjectURL(blob);
     const existing = _lg.frames.find(f => f.idx === idx);
     if (existing) {

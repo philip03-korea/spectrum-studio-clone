@@ -124,12 +124,43 @@
             <p class="panel-desc">가사를 분석해서 장면별 이미지를 자동 생성합니다. (필요한 경우만 사용 — Stage 2로 바로 이동해도 됩니다)</p>
 
             <div class="sub-title">🔑 OpenAI API 키</div>
-            <input type="password" class="text-input" id="lg-apikey" placeholder="sk-..." autocomplete="off" />
-            <div class="hint-text" style="margin-top: 2px;">이 브라우저에만 저장 (localStorage)</div>
+            <div class="apikey-row">
+              <input type="password" class="text-input" id="lg-apikey" placeholder="sk-..." autocomplete="off" />
+              <button class="btn-key-save" id="lg-apikey-save">저장</button>
+            </div>
+            <div class="key-status" id="lg-apikey-status" data-state="idle">● 키 미확인</div>
+
+            <div class="sub-title">🔑 Higgsfield API 키 <span class="sub-tag">GPT Image 2 · 키 2개</span></div>
+            <div class="apikey-row">
+              <input type="text" class="text-input" id="lg-hf-id" placeholder="Key ID (공개 ID)" autocomplete="off" />
+            </div>
+            <div class="apikey-row" style="margin-top: 6px;">
+              <input type="password" class="text-input" id="lg-hf-secret" placeholder="Key Secret (비밀 키)" autocomplete="off" />
+              <button class="btn-key-save" id="lg-hf-key-save">저장</button>
+            </div>
+            <div class="key-status" id="lg-hf-key-status" data-state="idle">● 키 미확인</div>
+            <div class="hint-text" style="margin-top: 2px;">Higgsfield는 <b>ID + 비밀 키 2개</b>가 필요합니다 · 이 브라우저에만 저장 (localStorage)</div>
 
             <div class="sub-title">📋 기본 정보</div>
             <input type="text" class="text-input" id="lg-title" placeholder="곡 제목" style="margin-bottom: 6px;" />
             <input type="text" class="text-input" id="lg-theme" placeholder="성경 인물/주제 (예: 아브라함의 연대기)" />
+
+            <div class="sub-title">🎤 LRC 가사 업로드</div>
+            <div class="drop-area drop-mini" id="lyrics-drop-ig">
+              <input type="file" id="file-lrc-ig" accept=".lrc,.txt,.srt" hidden />
+              <label for="file-lrc-ig" class="drop-label">
+                <div class="drop-icon">🎤</div>
+                <div class="drop-text">LRC / TXT / SRT 드롭 · 클릭</div>
+                <div class="drop-hint">드래그해서 넣거나 아래에 붙여넣기 → 미디어 준비 자동 등록</div>
+              </label>
+            </div>
+            <div class="lyrics-mode" style="margin-top:6px;">
+              <button class="btn-mini" id="lyrics-clear-ig">비우기</button>
+              <span class="lyrics-stats" id="lyrics-stats-ig" style="margin-left:auto;">0줄</span>
+            </div>
+            <textarea class="text-area" id="lyrics-text-ig" rows="4"
+              placeholder="여기에 LRC/TXT 가사를 붙여넣어도 됩니다 → 미디어 준비에도 자동 등록"></textarea>
+            <div class="hint-text" id="trans-status-ig" style="margin-top: 4px;">업로드 시 자동으로 한글+영어 모드로 설정 · 미디어 준비/비주얼 편집과 동기화</div>
 
             <div class="sub-title">🎭 스타일 이미지 (최대 10장)</div>
             <div class="drop-area drop-mini" id="lg-style-drop">
@@ -144,7 +175,7 @@
 
             <div class="sub-title">🖌️ 스타일 프리셋</div>
             <select class="text-input" id="lg-preset">
-              <option value="">없음 (업로드 이미지가 reference)</option>
+              <option value="">📤 업로드 이미지대로 (인물·얼굴·스타일 유지)</option>
               <option value="ghibli">지브리풍</option>
               <option value="cinematic">시네마틱 사실주의</option>
               <option value="oil-painting">오일 페인팅</option>
@@ -159,8 +190,9 @@
             <label class="slider-row" style="grid-template-columns: 60px 1fr;">
               <span>모델</span>
               <select class="text-input" id="lg-model">
-                <option value="gpt-image-1" selected>gpt-image-1 (최신)</option>
-                <option value="dall-e-3">DALL-E 3</option>
+                <option value="gpt-image-1" selected>gpt-image-1 (OpenAI)</option>
+                <option value="dall-e-3">DALL-E 3 (OpenAI)</option>
+                <option value="hf-gpt-image-2">GPT Image 2 (Higgsfield)</option>
               </select>
             </label>
             <label class="slider-row" style="grid-template-columns: 60px 1fr;">
@@ -201,7 +233,7 @@
             <h3 style="margin-top:0;">🎬 장면 플랜 & 생성 결과</h3>
             <div id="lg-scenes" class="ig-scenes">
               <div class="hint-text" style="padding: 24px; text-align: center;">
-                먼저 Stage 2 가사 영역(또는 Stage 1 LRC)에 가사를 넣은 뒤<br>
+                먼저 좌측 🎤 LRC 가사 업로드(또는 미디어 준비 가사 영역)에 가사를 넣은 뒤<br>
                 좌측에서 ① 가사 분석 버튼을 누르세요
               </div>
             </div>
@@ -1026,6 +1058,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v2_2_stage1promo"></script>
+  <script type="module" src="app.js?v=v2_9_hf_two_keys"></script>
 </body>
 </html>

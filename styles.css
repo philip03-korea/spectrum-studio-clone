@@ -841,6 +841,7 @@ body {
   min-height: 90px;
 }
 .text-area:focus { outline: none; border-color: var(--accent); }
+.text-area.dragover { border-color: var(--accent); background: var(--accent-dim); box-shadow: 0 0 0 2px var(--accent-dim) inset; }
 .lyrics-stats {
   font-size: 10px;
   color: var(--text-2);
@@ -956,6 +957,50 @@ body {
   margin: 14px 0 6px;
   text-transform: uppercase;
 }
+.sub-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+  vertical-align: middle;
+}
+
+/* API 키 입력 + 저장 버튼 + 상태 배지 */
+.apikey-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.apikey-row .text-input { flex: 1; margin-bottom: 0; }
+.btn-key-save {
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter .15s;
+}
+.btn-key-save:hover { filter: brightness(1.12); }
+.btn-key-save:disabled { opacity: .55; cursor: default; }
+.key-status {
+  font-size: 11px;
+  font-weight: 600;
+  margin: 4px 0 2px;
+  color: var(--text-2);
+}
+.key-status[data-state="ok"]      { color: #34d399; }
+.key-status[data-state="bad"]     { color: var(--danger); }
+.key-status[data-state="checking"]{ color: #fbbf24; }
+.key-status[data-state="saved"]   { color: #60a5fa; }
 
 .rainbow-toggle {
   display: flex;
