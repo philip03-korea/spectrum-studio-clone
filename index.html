@@ -192,7 +192,11 @@
               <select class="text-input" id="lg-model">
                 <option value="gpt-image-1" selected>gpt-image-1 (OpenAI)</option>
                 <option value="dall-e-3">DALL-E 3 (OpenAI)</option>
-                <option value="hf-gpt-image-2">GPT Image 2 (Higgsfield)</option>
+                <option value="hf-nano_banana_pro">Nano Banana Pro (Higgsfield · 추천)</option>
+                <option value="hf-z_image">Z Image (Higgsfield · 빠름)</option>
+                <option value="hf-recraft-v4-1">Recraft 4.1 (Higgsfield)</option>
+                <option value="hf-soul_cast">Soul Cast (Higgsfield · 캐릭터)</option>
+                <option value="hf-soul_location">Soul Location (Higgsfield · 배경)</option>
               </select>
             </label>
             <label class="slider-row" style="grid-template-columns: 60px 1fr;">
@@ -1058,6 +1062,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v2_9_hf_two_keys"></script>
+  <!-- 이미지 생성 모델/엔드포인트 설정(환경변수 대체). config.js가 window.SSC_CONFIG를 주입. -->
+  <script src="config.js"></script>
+  <script type="module" src="app.js?v=v3_0_hf_model_fix"></script>
 </body>
 </html>

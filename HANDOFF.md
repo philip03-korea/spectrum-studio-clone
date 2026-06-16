@@ -101,7 +101,10 @@ Stage 1~4 핵심 기능 + 원본 Spectrum Studio PRO 격차 보완까지 완료.
    실제 생성이 막힐 수 있고, 그땐 `HF_CORS_MSG` 안내가 뜸. → 실제 사용하려면 **프록시 서버 필요**.
    당장은 **OpenAI 모델(gpt-image-1 / DALL·E 3)** 사용을 권장.
    - 참고: Higgsfield는 별도 CLI 스킬(`higgsfield-generate` 등)이 설치돼 있음 — 브라우저 대신 그쪽 경로가 더 안정적.
-   - Higgsfield의 "gpt-image-2" 모델 슬러그는 미확정(공식 슬러그는 `flux-pro/kontext/max/text-to-image` 류).
+   - ✅ **(해결) 404 "Model not found"**: 존재하지 않던 `gpt-image-2` 하드코딩이 원인이었음.
+     실제 모델 ID(`nano_banana_pro`/`z_image`/`recraft-v4-1`/`soul_cast`/`soul_location`)로 교체하고,
+     `HF_IMAGE_MODELS` 레지스트리로 존재 검증 + `config.js`(window.SSC_CONFIG)로 모델 선택 가능하게 함.
+     실패 시 model·endpoint·provider·status를 콘솔/UI에 표시하고, OpenAI 또는 mock 이미지로 폴백.
 
 2. **OpenAI 안전 시스템**: 실제 식별 가능한 인물 사진을 `/v1/images/edits` reference로 보내면
    딥페이크/초상권 정책으로 **서버에서 거부**됨(우회 불가). 얼굴 복제가 필요하면 AI 생성/일러스트
@@ -114,7 +117,7 @@ Stage 1~4 핵심 기능 + 원본 Spectrum Studio PRO 격차 보완까지 완료.
 ## 7. 다음에 할 만한 것 (TODO 후보)
 
 - [ ] Higgsfield 실제 생성 검증 — 프록시 서버 붙이거나 CLI 스킬 경로로 전환
-- [ ] Higgsfield "GPT Image 2" 모델 슬러그/엔드포인트 확정
+- [x] Higgsfield 모델 슬러그 확정 + 존재 검증/폴백 (`gpt-image-2` 404 해결)
 - [ ] 생성된 프레임을 Stage 2 배경 슬라이드쇼로 자동 등록하는 연결 강화
 - [ ] 모바일/Safari 폴백 (WebCodecs 미지원 시 안내)
 

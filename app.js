@@ -3530,6 +3530,127 @@ const ASPECT_TO_WH = {
 };
 const HF_CORS_MSG = 'Higgsfield 직접 호출이 브라우저에서 차단됨(CORS). 정적 앱에서는 프록시 서버가 필요합니다 — OpenAI 모델을 쓰거나 프록시를 붙여주세요.';
 
+// ===========================================================================
+//  이미지 생성 provider/model 설정 (환경변수/설정 파일 대체)
+// ---------------------------------------------------------------------------
+//  ⚠️ 404 "Model not found" 원인: 과거 코드가 존재하지 않는 모델 슬러그
+//     `gpt-image-2` 를 Higgsfield에 하드코딩해 보냈다(공식 카탈로그에 없음).
+//  → 아래 HF_IMAGE_MODELS 레지스트리에 "실제 존재하는" 모델 ID만 등록하고,
+//     요청 모델이 레지스트리에 없으면 fallbackModel 로 교체한다(존재 검증).
+//
+//  정적 브라우저 앱이라 .env 를 읽을 수 없으므로, "환경변수"는
+//   1) window.SSC_CONFIG (config.js 같은 설정 파일에서 주입)  — 권장
+//   2) localStorage('ssc-config-<key>')                        — UI/콘솔에서 변경
+//  순서로 읽는다. (config.example.js 참고)
+// ===========================================================================
+
+// Higgsfield가 실제로 제공하는 text-to-image 모델 ID만 등록한다.
+// (여기 없는 슬러그를 보내면 Higgsfield가 404 Model not found 를 돌려준다)
+const HF_IMAGE_MODELS = {
+  'nano_banana_pro': { label: 'Nano Banana Pro (Google · 고품질)', provider: 'higgsfield' },
+  'z_image':         { label: 'Z Image (빠름·저비용)',             provider: 'higgsfield' },
+  'recraft-v4-1':    { label: 'Recraft 4.1',                       provider: 'higgsfield' },
+  'soul_cast':       { label: 'Soul Cast (캐릭터 일관성)',          provider: 'higgsfield' },
+  'soul_location':   { label: 'Soul Location (배경/장소)',          provider: 'higgsfield' },
+};
+
+const IMAGE_GEN_CONFIG = {
+  provider: 'higgsfield',
+  // 이미지 생성용 기본/폴백 모델 — 알 수 없는 모델 요청 시 이 값으로 교체된다
+  fallbackModel: 'nano_banana_pro',
+  // Higgsfield 생성 엔드포인트 (설정으로 덮어쓰기 가능)
+  endpoint: `${HF_API_BASE}/v1/generations`,
+  // 모든 provider 실패 시 mock 이미지로 폴백할지 ('0'이면 비활성)
+  allowMockFallback: '1',
+};
+
+// 설정 값 읽기: window.SSC_CONFIG → localStorage → 기본값 순
+function getConfigValue(key, fallback) {
+  try {
+    if (typeof window !== 'undefined' && window.SSC_CONFIG && window.SSC_CONFIG[key] != null) {
+      return window.SSC_CONFIG[key];
+    }
+    const ls = localStorage.getItem('ssc-config-' + key);
+    if (ls != null && ls !== '') return ls;
+  } catch (_) {}
+  return fallback;
+}
+
+// 요청 모델이 Higgsfield 라우팅 대상인지 (UI 값 'hf-...' 또는 알려진 HF 모델 ID)
+function isHfModel(model) {
+  return !!model && (model.startsWith('hf-') || !!HF_IMAGE_MODELS[model]);
+}
+
+// 요청 모델이 실제 존재하는 Higgsfield 모델 ID인지 검증 → 없으면 fallbackModel
+function resolveHfModel(requested) {
+  const fallback = getConfigValue('hfImageModel', IMAGE_GEN_CONFIG.fallbackModel);
+  const candidate = requested || fallback;
+  if (HF_IMAGE_MODELS[candidate]) return candidate;
+  console.warn(`[image-gen] 알 수 없는 Higgsfield 모델 "${candidate}" → 폴백 "${fallback}" 사용 ` +
+    `(사용 가능: ${Object.keys(HF_IMAGE_MODELS).join(', ')})`);
+  return HF_IMAGE_MODELS[fallback] ? fallback : 'nano_banana_pro';
+}
+
+// UI 드롭다운 값('hf-z_image', 레거시 'hf-gpt-image-2' 등) → 실제 HF 모델 ID
+function uiModelToHf(uiModel) {
+  // 레거시 별칭: 존재하지 않던 'hf-gpt-image-2'(=gpt-image-2)는 기본 모델로 매핑
+  const aliases = { 'hf-gpt-image-2': IMAGE_GEN_CONFIG.fallbackModel };
+  const raw = aliases[uiModel] || (uiModel || '').replace(/^hf-/, '');
+  return resolveHfModel(raw);
+}
+
+// 생성 실패 시 콘솔/UI에 함께 띄울 상세 메시지 — model·endpoint·provider·status 포함
+function describeGenError(info) {
+  const parts = [
+    `${info.provider || '?'} ${info.status != null ? info.status : 'ERR'}`,
+    `model="${info.model}"`,
+    `provider=${info.provider}`,
+    `endpoint=${info.endpoint}`,
+  ];
+  let msg = parts.join(' · ');
+  if (info.body) msg += ` :: ${String(info.body).slice(0, 160)}`;
+  return msg;
+}
+
+// 모든 provider 실패 시: 앱이 멈추지 않도록 placeholder(mock) 이미지를 캔버스로 생성
+function generateMockImage(prompt, aspect, reason) {
+  const wh = ASPECT_TO_WH[aspect] || ASPECT_TO_WH['9:16'];
+  const canvas = document.createElement('canvas');
+  canvas.width = wh.width; canvas.height = wh.height;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, wh.width, wh.height);
+  g.addColorStop(0, '#1f2937'); g.addColorStop(1, '#4c1d95');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, wh.width, wh.height);
+  ctx.textAlign = 'center';
+  // 프롬프트(가사) 텍스트를 줄바꿈해 표시
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.font = `${Math.round(wh.width * 0.05)}px sans-serif`;
+  const maxW = wh.width * 0.84, lh = wh.width * 0.07;
+  const words = String(prompt || '').split(/\s+/);
+  let line = '', y = wh.height * 0.34;
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) {
+      ctx.fillText(line, wh.width / 2, y); line = w; y += lh;
+      if (y > wh.height * 0.7) break;
+    } else { line = test; }
+  }
+  if (line) ctx.fillText(line, wh.width / 2, y);
+  // 폴백 안내 배지
+  ctx.fillStyle = 'rgba(255,196,196,0.95)';
+  ctx.font = `${Math.round(wh.width * 0.032)}px sans-serif`;
+  ctx.fillText('⚠ mock 이미지 (생성 실패 폴백)', wh.width / 2, wh.height * 0.9);
+  if (reason) {
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = `${Math.round(wh.width * 0.022)}px sans-serif`;
+    ctx.fillText(String(reason).slice(0, 60), wh.width / 2, wh.height * 0.94);
+  }
+  return new Promise(res => canvas.toBlob(b => res(b), 'image/png'));
+}
+
+// 폴백 사용 여부를 호출부(progress UI)에 전달하기 위한 공유 노트
+const _imgGen = { fallbackNote: '' };
+
 // Key ID + Secret → 공식 인증 헤더 값
 function hfAuthHeader(id, secret) {
   return `Key ${id}:${secret}`;
@@ -3548,17 +3669,27 @@ async function hfFetch(url, opts) {
     throw new Error(HF_CORS_MSG);
   }
 }
-async function generateImageViaHiggsfield(creds, prompt, aspect) {
+async function generateImageViaHiggsfield(creds, prompt, aspect, model) {
   const wh = ASPECT_TO_WH[aspect] || ASPECT_TO_WH['9:16'];
+  // 실제 존재하는 모델 ID로 확정 (없는 슬러그면 fallbackModel로 교체됨)
+  const hfModel = resolveHfModel(model);
+  const endpoint = getConfigValue('hfEndpoint', IMAGE_GEN_CONFIG.endpoint);
+  console.info('[image-gen] Higgsfield 요청', { provider: 'higgsfield', model: hfModel, endpoint, aspect });
   const authHeaders = { 'Authorization': hfAuthHeader(creds.id, creds.secret) };
-  const postRes = await hfFetch(`${HF_API_BASE}/v1/generations`, {
+  const postRes = await hfFetch(endpoint, {
     method: 'POST',
     headers: { ...authHeaders, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ task: 'text-to-image', model: 'gpt-image-2', prompt, width: wh.width, height: wh.height }),
+    body: JSON.stringify({ task: 'text-to-image', model: hfModel, prompt, aspect_ratio: aspect, width: wh.width, height: wh.height }),
   });
   if (!postRes.ok) {
     const t = await postRes.text().catch(() => '');
-    throw new Error(`Higgsfield ${postRes.status}: ${t.slice(0, 160)}`);
+    const info = { provider: 'higgsfield', model: hfModel, endpoint, status: postRes.status, body: t };
+    console.error('[image-gen] Higgsfield 요청 실패', info);
+    let hint = '';
+    if (postRes.status === 404) {
+      hint = ` — 모델 "${hfModel}"이(가) Higgsfield에 없습니다. 사용 가능: ${Object.keys(HF_IMAGE_MODELS).join(', ')}`;
+    }
+    throw new Error(describeGenError(info) + hint);
   }
   const j = await postRes.json();
   const pickUrl = o => o?.url || o?.image_url || o?.result?.url || o?.output?.[0]?.url || o?.output?.[0] || o?.data?.[0]?.url || o?.images?.[0]?.url || o?.images?.[0];
@@ -3569,7 +3700,7 @@ async function generateImageViaHiggsfield(creds, prompt, aspect) {
   // 폴링 (최대 ~90초)
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 1500));
-    const sres = await hfFetch(`${HF_API_BASE}/v1/generations/${id}`, { headers: authHeaders });
+    const sres = await hfFetch(`${endpoint}/${id}`, { headers: authHeaders });
     if (!sres.ok) continue;
     const sj = await sres.json();
     const status = String(sj.status || sj.state || '').toLowerCase();
@@ -3584,12 +3715,39 @@ async function generateImageViaHiggsfield(creds, prompt, aspect) {
 
 // 모델에 따라 OpenAI / Higgsfield로 라우팅
 async function generateImageDispatch(model, prompt, aspect, styleFiles) {
-  if (model === 'hf-gpt-image-2') {
+  _imgGen.fallbackNote = '';
+  const oaKey = ((document.getElementById('lg-apikey')?.value) || localStorage.getItem('ssc-openai-key') || '').trim();
+
+  if (isHfModel(model)) {
     const creds = getHfCreds();
     if (!creds.id || !creds.secret) throw new Error('Higgsfield 키 ID와 비밀 키 2개가 모두 필요합니다 (저장 후 사용)');
-    return generateImageViaHiggsfield(creds, prompt, aspect);
+    const hfModel = uiModelToHf(model);
+    try {
+      return await generateImageViaHiggsfield(creds, prompt, aspect, hfModel);
+    } catch (e) {
+      // ─ Higgsfield 실패 → 앱이 멈추지 않게 다른 provider / mock 으로 폴백 ─
+      console.error('[image-gen] Higgsfield 실패, 폴백 시도', e.message);
+      // 폴백 1: OpenAI 키가 있으면 OpenAI(gpt-image-1)로
+      if (oaKey && oaKey.startsWith('sk-')) {
+        try {
+          const blob = await generateImageViaOpenAI(oaKey, 'gpt-image-1', prompt, aspect, styleFiles);
+          _imgGen.fallbackNote = `Higgsfield 실패 → OpenAI(gpt-image-1)로 대체 생성 (${e.message})`;
+          console.warn('[image-gen] ' + _imgGen.fallbackNote);
+          return blob;
+        } catch (e2) {
+          console.error('[image-gen] OpenAI 폴백도 실패', e2.message);
+        }
+      }
+      // 폴백 2: mock 이미지 (설정으로 끌 수 있음)
+      if (String(getConfigValue('allowMockFallback', IMAGE_GEN_CONFIG.allowMockFallback)) !== '0') {
+        _imgGen.fallbackNote = `Higgsfield 실패 → mock 이미지로 대체 (${e.message})`;
+        console.warn('[image-gen] ' + _imgGen.fallbackNote);
+        return await generateMockImage(prompt, aspect, e.message);
+      }
+      throw e;   // mock 비활성 + 폴백 불가 → 원래 상세 에러 전달
+    }
   }
-  const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
+
   if (!oaKey) throw new Error('OpenAI API 키가 필요합니다');
   return generateImageViaOpenAI(oaKey, model, prompt, aspect, styleFiles);
 }
@@ -3807,7 +3965,7 @@ function renderScenePlan() {
 
 async function generateAllFrames() {
   const model = document.getElementById('lg-model').value;
-  const isHF = model === 'hf-gpt-image-2';
+  const isHF = isHfModel(model);
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
     const creds = getHfCreds();
@@ -3862,6 +4020,9 @@ async function generateAllFrames() {
       const url = URL.createObjectURL(blob);
       _lg.frames.push({ idx: s.idx, blob, url, prompt });
       renderScenePlan();
+      if (_imgGen.fallbackNote) {
+        document.getElementById('lg-progress').textContent = `⚠️ ${i+1}/${total} ${_imgGen.fallbackNote}`;
+      }
     } catch (e) {
       console.error('frame gen err', e);
       fails.push(s.idx);
@@ -3893,7 +4054,7 @@ async function generateAllFrames() {
 
 async function regenerateFrame(idx) {
   const model = document.getElementById('lg-model').value;
-  const isHF = model === 'hf-gpt-image-2';
+  const isHF = isHfModel(model);
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
     const creds = getHfCreds();
@@ -3931,7 +4092,9 @@ async function regenerateFrame(idx) {
       _lg.frames.push({ idx, blob, url, prompt: promptObj.prompt });
     }
     renderScenePlan();
-    document.getElementById('lg-progress').textContent = `✅ #${idx} 재생성 완료`;
+    document.getElementById('lg-progress').textContent = _imgGen.fallbackNote
+      ? `⚠️ #${idx} ${_imgGen.fallbackNote}`
+      : `✅ #${idx} 재생성 완료`;
   } catch (e) {
     document.getElementById('lg-progress').textContent = `❌ #${idx} 실패: ${e.message}`;
   }
