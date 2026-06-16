@@ -3383,8 +3383,12 @@ function buildScenePlan(lyrics, theme, N) {
   return { theme, character: arc?.name || null, scenes };
 }
 
-function buildPromptForScene(scene, theme, preset, styleHints) {
+function buildPromptForScene(scene, theme, preset, styleHints, keepSubject) {
   const parts = [];
+  // 업로드 이미지를 베이스로 인물/스타일을 유지하는 경우 — 가장 앞에 강한 지시
+  if (keepSubject) {
+    parts.push('Use the uploaded reference image as the base. Keep the SAME person/character — same face, identity, hairstyle, body, and clothing as the reference. Only change the scene, background, pose, and lighting to match the following:');
+  }
   // 성경 사건이 있으면 우선
   if (scene.biblicalEvent) {
     parts.push(`Biblical scene: ${scene.biblicalEvent}.`);
@@ -3953,7 +3957,7 @@ function renderScenePlan() {
       ${s.biblicalEvent ? `<div style="color: var(--warn); font-weight:600;">📖 ${s.biblicalEvent}</div>` : ''}
       <div style="color: var(--text-2); margin-top: 2px;">🎵 ${s.lyricSummary || '(가사 없음)'}</div>
       <div style="color: var(--text-2); font-size: 10px;">감정: ${s.emotion}</div>
-      ${frame ? `<img src="${frame.url}" style="margin-top:6px; width:100%; max-height:120px; object-fit:cover; border-radius:4px;" />` : ''}
+      ${frame ? `<img class="lg-frame-img" data-idx="${s.idx}" src="${frame.url}" title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;" />` : ''}
     `;
     wrap.appendChild(row);
   });
@@ -3961,20 +3965,86 @@ function renderScenePlan() {
   wrap.querySelectorAll('.lg-regen-btn').forEach(b => {
     b.addEventListener('click', () => regenerateFrame(Number(b.dataset.idx)));
   });
+  // 이미지 클릭 → 라이트박스(크게 보기 + 좌우 이동)
+  wrap.querySelectorAll('.lg-frame-img').forEach(img => {
+    img.addEventListener('click', () => openFrameLightbox(Number(img.dataset.idx)));
+  });
+}
+
+// 생성 이미지 라이트박스 — 클릭하면 크게 보고 ‹ › 또는 ←/→ 로 다른 이미지 이동
+function openFrameLightbox(startIdx) {
+  const frames = [..._lg.frames].sort((a, b) => a.idx - b.idx);
+  if (!frames.length) return;
+  let ov = document.getElementById('lg-lightbox');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'lg-lightbox';
+    ov.innerHTML =
+      '<button class="lgbx-btn lgbx-close" title="닫기 (Esc)">✕</button>' +
+      '<button class="lgbx-btn lgbx-prev" title="이전 (←)">‹</button>' +
+      '<img class="lgbx-img" alt="생성 이미지" />' +
+      '<button class="lgbx-btn lgbx-next" title="다음 (→)">›</button>' +
+      '<div class="lgbx-cap"></div>';
+    document.body.appendChild(ov);
+    const render = () => {
+      const st = ov._state; if (!st) return;
+      const f = st.frames[st.pos];
+      ov.querySelector('.lgbx-img').src = f.url;
+      ov.querySelector('.lgbx-cap').textContent =
+        `#${String(f.idx).padStart(2, '0')} · ${st.pos + 1}/${st.frames.length}` +
+        (f.prompt ? ` — ${f.prompt.slice(0, 90)}` : '');
+    };
+    const move = d => { const st = ov._state; if (!st) return; st.pos = (st.pos + d + st.frames.length) % st.frames.length; render(); };
+    const close = () => ov.classList.remove('open');
+    ov._render = render; ov._move = move;
+    ov.querySelector('.lgbx-close').addEventListener('click', close);
+    ov.querySelector('.lgbx-prev').addEventListener('click', e => { e.stopPropagation(); move(-1); });
+    ov.querySelector('.lgbx-next').addEventListener('click', e => { e.stopPropagation(); move(1); });
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });   // 배경 클릭 시 닫기
+    document.addEventListener('keydown', e => {
+      if (!ov.classList.contains('open')) return;
+      if (e.key === 'Escape') close();
+      else if (e.key === 'ArrowLeft') move(-1);
+      else if (e.key === 'ArrowRight') move(1);
+    });
+  }
+  const pos = Math.max(0, frames.findIndex(f => f.idx === startIdx));
+  ov._state = { frames, pos };
+  ov.classList.add('open');
+  ov._render();
+}
+
+// 실제 호출 모델/참조 계산 — "업로드 이미지대로"(프리셋 없음 + 업로드 있음)면
+// 브라우저에서 진짜 image-to-image가 되는 OpenAI gpt-image-1(edits)로 보낸다.
+// (다른 모델을 골랐더라도 업로드 이미지를 베이스로 살리기 위함 — 전혀 다른 이미지 방지)
+function resolveGenPlan() {
+  const selModel = document.getElementById('lg-model').value;
+  const oaKey = (document.getElementById('lg-apikey')?.value || localStorage.getItem('ssc-openai-key') || '').trim();
+  const hasOA = !!oaKey && oaKey.startsWith('sk-');
+  const preset = document.getElementById('lg-preset').value;
+  const hasUpload = _lg.styleFiles && _lg.styleFiles.length > 0;
+  const wantUploadCentered = !preset && hasUpload;   // "📤 업로드 이미지대로"
+  let model = selModel, useRefEdits = false, blockReason = '';
+  if (wantUploadCentered) {
+    if (hasOA) { model = 'gpt-image-1'; useRefEdits = true; }   // 업로드를 베이스로 edits
+    else {
+      blockReason = '업로드 이미지를 베이스로 생성하려면 OpenAI gpt-image-1 키가 필요합니다.\n① OpenAI 키를 입력하거나 ② 스타일 프리셋을 선택하세요.\n(Higgsfield는 브라우저에서 업로드 이미지 참조가 불가합니다)';
+    }
+  }
+  return { selModel, model, oaKey, hasOA, preset, hasUpload, wantUploadCentered, useRefEdits, blockReason };
 }
 
 async function generateAllFrames() {
-  const model = document.getElementById('lg-model').value;
+  const plan = resolveGenPlan();
+  if (plan.blockReason) { alert(plan.blockReason); return; }
+  const model = plan.model;
   const isHF = isHfModel(model);
-  const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
     const creds = getHfCreds();
     if (!creds.id || !creds.secret) { alert('Higgsfield 키 ID와 비밀 키 2개를 먼저 저장하세요'); return; }
-  } else {
-    if (!oaKey || !oaKey.startsWith('sk-')) {
-      alert('OpenAI API 키를 먼저 입력하세요 (sk-…)');
-      return;
-    }
+  } else if (!plan.hasOA) {
+    alert('OpenAI API 키를 먼저 입력하세요 (sk-…)');
+    return;
   }
   if (!_lg.scenePlan) return;
   _lg.projectId = _lg.projectId || `proj-${Date.now()}`;
@@ -3983,32 +4053,14 @@ async function generateAllFrames() {
   const total = _lg.scenePlan.scenes.length;
   const btn = document.getElementById('lg-gen-all');
   btn.disabled = true;
-  // 프리셋 "없음(업로드 이미지대로)" + 업로드 이미지 있음 → 업로드 이미지를 reference로 사용
-  //  • gpt-image-1: edits 엔드포인트로 업로드 이미지를 직접 넣어 인물/얼굴+스타일을 유지(복제)
-  //  • dall-e-3: reference 미지원 → 비전으로 "스타일"만 추출해 프롬프트에 반영(얼굴 복제 불가)
-  const preset = document.getElementById('lg-preset').value;
-  const hasUpload = _lg.styleFiles && _lg.styleFiles.length > 0;
-  const useUpload = !preset && hasUpload && !isHF;
-  const useRefEdits   = useUpload && model === 'gpt-image-1';   // 얼굴·인물 복제 경로
-  const useStyleVision = useUpload && model === 'dall-e-3';      // 스타일만(폴백)
-  if (useStyleVision && !_lg.styleHints) {
-    document.getElementById('lg-progress').textContent = '🎨 업로드 이미지에서 스타일 분석 중… (DALL·E 3은 얼굴 복제 미지원 — 스타일만)';
-    try {
-      _lg.styleHints = await describeStyleFromImages(oaKey, _lg.styleFiles);
-    } catch (e) {
-      document.getElementById('lg-progress').textContent = `❌ 스타일 분석 실패: ${e.message}`;
-      btn.disabled = false;
-      return;
-    }
-  }
-  // 프롬프트 재구성 (분석 시점엔 styleHints가 비어 있었으므로)
+  const useRefEdits = plan.useRefEdits;   // gpt-image-1 edits(업로드 이미지 베이스, 인물·스타일 유지)
+  // 프롬프트 구성 — 업로드 베이스면 인물/스타일 유지 지시를 프롬프트 앞에 넣는다
   const theme = document.getElementById('lg-theme').value.trim();
-  const appliedHints = useStyleVision ? _lg.styleHints : '';
   _lg.prompts = _lg.scenePlan.scenes.map(s => ({
-    idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints),
+    idx: s.idx, prompt: buildPromptForScene(s, theme, plan.preset, '', useRefEdits),
   }));
   const refFiles = useRefEdits ? _lg.styleFiles : null;   // edits로 보낼 업로드 이미지
-  const modeTag = useRefEdits ? ' (업로드 이미지로 인물 유지)' : (appliedHints ? ' (업로드 스타일 적용)' : '');
+  const modeTag = useRefEdits ? ' (업로드 이미지 기반 — 인물·스타일 유지)' : '';
   const fails = [];
   let lastErr = '';
   for (let i = 0; i < total; i++) {
@@ -4053,32 +4105,27 @@ async function generateAllFrames() {
 }
 
 async function regenerateFrame(idx) {
-  const model = document.getElementById('lg-model').value;
+  const plan = resolveGenPlan();
+  if (plan.blockReason) { alert(plan.blockReason); return; }
+  const model = plan.model;
   const isHF = isHfModel(model);
-  const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
     const creds = getHfCreds();
     if (!creds.id || !creds.secret) { alert('Higgsfield 키 ID·비밀 키 2개 필요 (저장 후 사용)'); return; }
-  } else {
-    if (!oaKey) { alert('OpenAI API 키 필요'); return; }
+  } else if (!plan.hasOA) {
+    alert('OpenAI API 키 필요'); return;
   }
   const aspect = document.getElementById('lg-aspect').value;
   const promptObj = _lg.prompts.find(p => p.idx === idx);
   if (!promptObj) return;
-  const preset = document.getElementById('lg-preset').value;
-  const hasUpload = _lg.styleFiles && _lg.styleFiles.length > 0;
-  const useUpload = !preset && hasUpload && !isHF;
-  const useRefEdits = useUpload && model === 'gpt-image-1';
-  const useStyleVision = useUpload && model === 'dall-e-3';
+  const useRefEdits = plan.useRefEdits;
   document.getElementById('lg-progress').textContent = `재생성 중 #${idx}…`;
   try {
-    // DALL·E 3 스타일 모드인데 아직 스타일 미분석이면 먼저 분석
-    if (useStyleVision && !_lg.styleHints) {
-      document.getElementById('lg-progress').textContent = `🎨 #${idx} — 업로드 스타일 분석 중…`;
-      _lg.styleHints = await describeStyleFromImages(oaKey, _lg.styleFiles);
+    // 업로드 베이스면 인물·스타일 유지 지시를 반영해 프롬프트 재구성
+    if (useRefEdits) {
       const theme = document.getElementById('lg-theme').value.trim();
       const scene = _lg.scenePlan?.scenes.find(s => s.idx === idx);
-      if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints);
+      if (scene) promptObj.prompt = buildPromptForScene(scene, theme, plan.preset, '', true);
     }
     // gpt-image-1 + 업로드 = edits(인물 유지), 그 외 = 텍스트-투-이미지
     const refFiles = useRefEdits ? _lg.styleFiles : null;
