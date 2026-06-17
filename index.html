@@ -130,16 +130,24 @@
             </div>
             <div class="key-status" id="lg-apikey-status" data-state="idle">● 키 미확인</div>
 
-            <div class="sub-title">🔑 Higgsfield API 키 <span class="sub-tag">GPT Image 2 · 키 2개</span></div>
+            <div class="sub-title">🛰️ Higgsfield 프록시 <span class="sub-tag">GPT Image 2 · 0.5크레딧</span></div>
             <div class="apikey-row">
-              <input type="text" class="text-input" id="lg-hf-id" placeholder="Key ID (공개 ID)" autocomplete="off" />
+              <input type="text" class="text-input" id="lg-hf-proxy" placeholder="https://....workers.dev (프록시 URL)" autocomplete="off" />
+              <button class="btn-key-save" id="lg-hf-proxy-save">저장</button>
             </div>
-            <div class="apikey-row" style="margin-top: 6px;">
-              <input type="password" class="text-input" id="lg-hf-secret" placeholder="Key Secret (비밀 키)" autocomplete="off" />
-              <button class="btn-key-save" id="lg-hf-key-save">저장</button>
-            </div>
-            <div class="key-status" id="lg-hf-key-status" data-state="idle">● 키 미확인</div>
-            <div class="hint-text" style="margin-top: 2px;">Higgsfield는 <b>ID + 비밀 키 2개</b>가 필요합니다 · 이 브라우저에만 저장 (localStorage)</div>
+            <div class="key-status" id="lg-hf-proxy-status" data-state="idle">● 프록시 미설정</div>
+            <div class="hint-text" style="margin-top: 2px;">GPT Image 2는 <b>Cloudflare Worker 프록시</b> 경유로 동작합니다(키는 Worker에 안전 보관). 배포법 → <code>proxy/README.md</code></div>
+            <details style="margin-top: 6px;">
+              <summary class="hint-text" style="cursor:pointer;">고급: 브라우저에 Higgsfield 키 보관 (선택 · 보통 불필요)</summary>
+              <div class="apikey-row" style="margin-top: 6px;">
+                <input type="text" class="text-input" id="lg-hf-id" placeholder="Key ID (선택)" autocomplete="off" />
+              </div>
+              <div class="apikey-row" style="margin-top: 6px;">
+                <input type="password" class="text-input" id="lg-hf-secret" placeholder="Key Secret (선택)" autocomplete="off" />
+                <button class="btn-key-save" id="lg-hf-key-save">저장</button>
+              </div>
+              <div class="key-status" id="lg-hf-key-status" data-state="idle">● 키 미확인</div>
+            </details>
 
             <div class="sub-title">📋 기본 정보</div>
             <input type="text" class="text-input" id="lg-title" placeholder="곡 제목" style="margin-bottom: 6px;" />
@@ -192,7 +200,7 @@
               <select class="text-input" id="lg-model">
                 <option value="gpt-image-1" selected>gpt-image-1 (OpenAI)</option>
                 <option value="dall-e-3">DALL-E 3 (OpenAI)</option>
-                <option value="hf-gpt-image-2">GPT Image 2 (Higgsfield)</option>
+                <option value="hf-gpt-image-2">GPT Image 2 (Higgsfield · 0.5크레딧 · 프록시)</option>
               </select>
             </label>
             <label class="slider-row" style="grid-template-columns: 60px 1fr;">
@@ -1058,6 +1066,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v2_9_hf_two_keys"></script>
+  <script type="module" src="app.js?v=v3_1_hf_proxy"></script>
 </body>
 </html>

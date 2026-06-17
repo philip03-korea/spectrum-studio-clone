@@ -3548,46 +3548,53 @@ async function hfFetch(url, opts) {
     throw new Error(HF_CORS_MSG);
   }
 }
-async function generateImageViaHiggsfield(creds, prompt, aspect) {
-  const wh = ASPECT_TO_WH[aspect] || ASPECT_TO_WH['9:16'];
-  const authHeaders = { 'Authorization': hfAuthHeader(creds.id, creds.secret) };
-  const postRes = await hfFetch(`${HF_API_BASE}/v1/generations`, {
-    method: 'POST',
-    headers: { ...authHeaders, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ task: 'text-to-image', model: 'gpt-image-2', prompt, width: wh.width, height: wh.height }),
-  });
-  if (!postRes.ok) {
-    const t = await postRes.text().catch(() => '');
-    throw new Error(`Higgsfield ${postRes.status}: ${t.slice(0, 160)}`);
-  }
-  const j = await postRes.json();
-  const pickUrl = o => o?.url || o?.image_url || o?.result?.url || o?.output?.[0]?.url || o?.output?.[0] || o?.data?.[0]?.url || o?.images?.[0]?.url || o?.images?.[0];
-  const id = j.id || j.request_id || j.generation_id || j.data?.id;
-  const immediate = pickUrl(j);
-  if (immediate) return await (await hfFetch(immediate)).blob();
-  if (!id) throw new Error('Higgsfield 응답에 작업 ID/이미지가 없습니다');
-  // 폴링 (최대 ~90초)
-  for (let i = 0; i < 60; i++) {
-    await new Promise(r => setTimeout(r, 1500));
-    const sres = await hfFetch(`${HF_API_BASE}/v1/generations/${id}`, { headers: authHeaders });
-    if (!sres.ok) continue;
-    const sj = await sres.json();
-    const status = String(sj.status || sj.state || '').toLowerCase();
-    const url = pickUrl(sj);
-    if (url) return await (await hfFetch(url)).blob();
-    if (['failed', 'error', 'canceled', 'cancelled'].includes(status)) {
-      throw new Error('Higgsfield 생성 실패: ' + (sj.error || status));
-    }
-  }
-  throw new Error('Higgsfield 생성 시간 초과 (90초)');
+// 프록시 URL 읽기 (localStorage 또는 입력칸). Higgsfield는 브라우저 직접호출 불가 → 프록시 경유.
+function getHfProxyUrl() {
+  return (localStorage.getItem('ssc-hf-proxy-url') || document.getElementById('lg-hf-proxy')?.value || '').trim();
 }
 
-// 모델에 따라 OpenAI / Higgsfield로 라우팅
+// GPT Image 2 (Higgsfield) — Cloudflare Worker 프록시 경유로 생성.
+//  • resolution=1k + quality=low = 약 0.5 크레딧/장 (유튜브 저용량용)
+//  • refDataUrls: 업로드한 캐릭터/스타일 이미지(data:URL) → 참조로 전달
+async function generateImageViaHiggsfield(proxyUrl, prompt, aspect, refDataUrls) {
+  const base = proxyUrl.replace(/\/+$/, '');
+  let res;
+  try {
+    res = await fetch(`${base}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        aspect_ratio: aspect,
+        resolution: '1k',
+        quality: 'low',
+        references: refDataUrls || [],
+      }),
+    });
+  } catch (e) {
+    throw new Error('프록시에 연결할 수 없습니다 — 프록시 URL과 배포 상태를 확인하세요');
+  }
+  if (!res.ok) {
+    let msg = `프록시 오류 ${res.status}`;
+    try { const j = await res.json(); if (j && j.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
+  return await res.blob();
+}
+
+// 모델에 따라 OpenAI / Higgsfield(프록시)로 라우팅
 async function generateImageDispatch(model, prompt, aspect, styleFiles) {
   if (model === 'hf-gpt-image-2') {
-    const creds = getHfCreds();
-    if (!creds.id || !creds.secret) throw new Error('Higgsfield 키 ID와 비밀 키 2개가 모두 필요합니다 (저장 후 사용)');
-    return generateImageViaHiggsfield(creds, prompt, aspect);
+    const proxyUrl = getHfProxyUrl();
+    if (!proxyUrl) throw new Error('Higgsfield 프록시 URL이 필요합니다 (Stage 1에서 입력)');
+    // 업로드한 캐릭터/스타일 이미지를 참조로 전달 + 프롬프트에 스타일 유지 지시 추가
+    let refs = [];
+    let p = prompt;
+    if (styleFiles && styleFiles.length) {
+      refs = await Promise.all(styleFiles.slice(0, 10).map(f => fileToDataURL(f)));
+      p += ' — Keep the same main character, outfit, and overall art style as the reference image(s).';
+    }
+    return generateImageViaHiggsfield(proxyUrl, p, aspect, refs);
   }
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (!oaKey) throw new Error('OpenAI API 키가 필요합니다');
@@ -3652,11 +3659,19 @@ function bindLyricImageGen() {
   });
 
   // --- Higgsfield 키 (Key ID + Key Secret 2개) ---
+  // 저장된 ID/비밀 키는 노출되지 않도록 마스킹(●). 편집하려고 칸을 클릭(focus)하면 잠깐 보임.
+  const maskHfFields = () => {
+    if ($L('lg-hf-id')) $L('lg-hf-id').type = 'password';
+    if ($L('lg-hf-secret')) $L('lg-hf-secret').type = 'password';
+  };
+  // ID 칸: 클릭하면 편집용으로 보이고, 칸을 벗어나면 다시 가려짐(값이 있을 때만)
+  $L('lg-hf-id')?.addEventListener('focus', () => { if ($L('lg-hf-id')) $L('lg-hf-id').type = 'text'; });
+  $L('lg-hf-id')?.addEventListener('blur', () => { if ($L('lg-hf-id') && $L('lg-hf-id').value.trim()) $L('lg-hf-id').type = 'password'; });
   const savedHfId = localStorage.getItem('ssc-hf-id');
   const savedHfSecret = localStorage.getItem('ssc-hf-secret');
   if (savedHfId && $L('lg-hf-id')) $L('lg-hf-id').value = savedHfId;
   if (savedHfSecret && $L('lg-hf-secret')) $L('lg-hf-secret').value = savedHfSecret;
-  if (savedHfId && savedHfSecret) setKeyStatus('lg-hf-key-status', 'saved', '● 저장된 키 2개 (미검증)');
+  if (savedHfId && savedHfSecret) { setKeyStatus('lg-hf-key-status', 'saved', '● 저장된 키 2개 ✓'); maskHfFields(); }
   // 두 입력칸 모두 입력 즉시 자동 저장 (새로고침해도 유지)
   const hfAutoSave = () => {
     const id = ($L('lg-hf-id')?.value || '').trim();
@@ -3676,20 +3691,51 @@ function bindLyricImageGen() {
       if (!id || !sec) { setKeyStatus('lg-hf-key-status', 'bad', '● ID·비밀 키 2개 모두 입력하세요'); return; }
       localStorage.setItem('ssc-hf-id', id);
       localStorage.setItem('ssc-hf-secret', sec);
-      setKeyStatus('lg-hf-key-status', 'checking', '● 검증 중…');
-      // Higgsfield는 서버용 API라 브라우저에서 직접 검증 시 CORS로 막힐 가능성이 큼.
+      maskHfFields();   // 저장 즉시 노출 방지(마스킹)
+      setKeyStatus('lg-hf-key-status', 'checking', '● 저장 중…');
+      // Higgsfield는 서버용 API라 브라우저에서 GET 검증을 지원하지 않음(405 Method Not Allowed) + CORS 가능성.
+      // → 인증 오류(401/403)만 실패로 처리하고, 그 외 응답은 모두 "저장 완료"로 간주. 실제 유효성은 이미지 생성 시 확인됨.
       try {
         const r = await fetch(`${HF_API_BASE}/v1/models`, {
           headers: { 'Authorization': hfAuthHeader(id, sec) },
         });
-        if (r.ok) setKeyStatus('lg-hf-key-status', 'ok', '● 활성화됨 ✓');
-        else if (r.status === 401 || r.status === 403) setKeyStatus('lg-hf-key-status', 'bad', '● 인증 실패 (ID/비밀 키 확인)');
-        else setKeyStatus('lg-hf-key-status', 'saved', '● 저장됨 (검증 불가: ' + r.status + ')');
+        if (r.status === 401 || r.status === 403) {
+          setKeyStatus('lg-hf-key-status', 'bad', '● 인증 실패 (ID/비밀 키 확인)');
+        } else {
+          // 200·405 등 어떤 응답이든 서버에 도달함 → 저장 완료 (브라우저에서 키 유효성 확인은 불가)
+          setKeyStatus('lg-hf-key-status', 'ok', '● 저장됨 ✓ (유효성은 생성 시 확인)');
+        }
       } catch (e) {
-        setKeyStatus('lg-hf-key-status', 'saved', '● 저장됨 (브라우저 검증 불가 — CORS)');
+        // CORS/네트워크 — 키 저장 자체는 정상
+        setKeyStatus('lg-hf-key-status', 'ok', '● 저장됨 ✓ (브라우저 검증 생략)');
       }
     });
   }
+
+  // --- Higgsfield 프록시 URL (GPT Image 2 경유) ---
+  const savedProxy = localStorage.getItem('ssc-hf-proxy-url');
+  if (savedProxy && $L('lg-hf-proxy')) {
+    $L('lg-hf-proxy').value = savedProxy;
+    setKeyStatus('lg-hf-proxy-status', 'saved', '● 저장된 프록시 (저장 눌러 연결 확인)');
+  }
+  $L('lg-hf-proxy')?.addEventListener('input', e => {
+    const v = e.target.value.trim();
+    if (v) localStorage.setItem('ssc-hf-proxy-url', v); else localStorage.removeItem('ssc-hf-proxy-url');
+    setKeyStatus('lg-hf-proxy-status', v ? 'saved' : 'idle', v ? '● 자동 저장됨 (저장 눌러 연결 확인)' : '● 프록시 미설정');
+  });
+  $L('lg-hf-proxy-save')?.addEventListener('click', async () => {
+    const v = ($L('lg-hf-proxy')?.value || '').trim();
+    if (!v) { setKeyStatus('lg-hf-proxy-status', 'bad', '● 프록시 URL을 입력하세요'); return; }
+    localStorage.setItem('ssc-hf-proxy-url', v);
+    setKeyStatus('lg-hf-proxy-status', 'checking', '● 연결 확인 중…');
+    try {
+      const r = await fetch(v.replace(/\/+$/, '') + '/', { method: 'GET' });
+      if (r.ok) setKeyStatus('lg-hf-proxy-status', 'ok', '● 프록시 연결됨 ✓');
+      else setKeyStatus('lg-hf-proxy-status', 'saved', '● 저장됨 (응답 ' + r.status + ')');
+    } catch (e) {
+      setKeyStatus('lg-hf-proxy-status', 'bad', '● 연결 실패 — URL/배포 상태 확인');
+    }
+  });
 
   // 곡 제목 자동 채움 (state.title.text)
   if ($L('lg-title') && !$L('lg-title').value) {
@@ -3810,8 +3856,7 @@ async function generateAllFrames() {
   const isHF = model === 'hf-gpt-image-2';
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
-    const creds = getHfCreds();
-    if (!creds.id || !creds.secret) { alert('Higgsfield 키 ID와 비밀 키 2개를 먼저 저장하세요'); return; }
+    if (!getHfProxyUrl()) { alert('Higgsfield 프록시 URL을 먼저 입력하세요 (Stage 1) — proxy/README.md 참고'); return; }
   } else {
     if (!oaKey || !oaKey.startsWith('sk-')) {
       alert('OpenAI API 키를 먼저 입력하세요 (sk-…)');
@@ -3849,8 +3894,11 @@ async function generateAllFrames() {
   _lg.prompts = _lg.scenePlan.scenes.map(s => ({
     idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints),
   }));
-  const refFiles = useRefEdits ? _lg.styleFiles : null;   // edits로 보낼 업로드 이미지
-  const modeTag = useRefEdits ? ' (업로드 이미지로 인물 유지)' : (appliedHints ? ' (업로드 스타일 적용)' : '');
+  // HF: 업로드 이미지가 있으면 참조로 전달 / gpt-image-1: edits 경로 / dall-e-3: 스타일 비전
+  const refFiles = isHF ? (hasUpload ? _lg.styleFiles : null) : (useRefEdits ? _lg.styleFiles : null);
+  const modeTag = isHF
+    ? (hasUpload ? ' (업로드 이미지 참조)' : '')
+    : (useRefEdits ? ' (업로드 이미지로 인물 유지)' : (appliedHints ? ' (업로드 스타일 적용)' : ''));
   const fails = [];
   let lastErr = '';
   for (let i = 0; i < total; i++) {
@@ -3866,8 +3914,8 @@ async function generateAllFrames() {
       console.error('frame gen err', e);
       fails.push(s.idx);
       lastErr = e.message;
-      // 안전 시스템 거부/인증 오류는 모든 프레임에 동일하게 적용 → 즉시 중단
-      if (/안전 시스템|API 401|API 키/.test(e.message)) {
+      // 안전 시스템 거부/인증/프록시 오류는 모든 프레임에 동일하게 적용 → 즉시 중단
+      if (/안전 시스템|API 401|API 키|프록시|키 미설정|크레딧/.test(e.message)) {
         document.getElementById('lg-progress').textContent = `❌ 중단: ${e.message}`;
         btn.disabled = false;
         return;
@@ -3896,8 +3944,7 @@ async function regenerateFrame(idx) {
   const isHF = model === 'hf-gpt-image-2';
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
-    const creds = getHfCreds();
-    if (!creds.id || !creds.secret) { alert('Higgsfield 키 ID·비밀 키 2개 필요 (저장 후 사용)'); return; }
+    if (!getHfProxyUrl()) { alert('Higgsfield 프록시 URL 필요 (Stage 1에서 입력)'); return; }
   } else {
     if (!oaKey) { alert('OpenAI API 키 필요'); return; }
   }
@@ -3919,8 +3966,8 @@ async function regenerateFrame(idx) {
       const scene = _lg.scenePlan?.scenes.find(s => s.idx === idx);
       if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints);
     }
-    // gpt-image-1 + 업로드 = edits(인물 유지), 그 외 = 텍스트-투-이미지
-    const refFiles = useRefEdits ? _lg.styleFiles : null;
+    // HF = 업로드 이미지 참조 / gpt-image-1 + 업로드 = edits(인물 유지) / 그 외 = 텍스트-투-이미지
+    const refFiles = isHF ? (hasUpload ? _lg.styleFiles : null) : (useRefEdits ? _lg.styleFiles : null);
     const blob = await generateImageDispatch(model, promptObj.prompt, aspect, refFiles);
     const url = URL.createObjectURL(blob);
     const existing = _lg.frames.find(f => f.idx === idx);

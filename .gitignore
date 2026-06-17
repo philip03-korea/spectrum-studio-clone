@@ -25,3 +25,13 @@ desktop.ini
 dist/
 build/
 node_modules/
+
+# Cloudflare Worker 로컬 시크릿 (절대 커밋 금지)
+proxy/.dev.vars
+.wrangler/
+
+# 에디터/미리보기 로컬 설정
+.claude/
+
+# Suno 다운로더 프로브 덤프 (개인 데이터)
+tools/probe_dump.json

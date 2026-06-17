@@ -1,0 +1,12 @@
+name = "hf-gpt-image-proxy"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# CORS 허용 출처. 보안을 위해 본인 GitHub Pages 주소로 바꾸는 것을 권장.
+# 예: "https://philip03-korea.github.io"  ("*" 는 아무 사이트나 허용)
+[vars]
+ALLOW_ORIGIN = "*"
+
+# 비밀키(HF_KEY_ID / HF_KEY_SECRET)는 wrangler.toml 에 적지 말고 시크릿으로 등록:
+#   wrangler secret put HF_KEY_ID
+#   wrangler secret put HF_KEY_SECRET
