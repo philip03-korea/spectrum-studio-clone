@@ -3856,7 +3856,30 @@ async function generateAllFrames() {
   const isHF = model === 'hf-gpt-image-2';
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
-    if (!getHfProxyUrl()) { alert('Higgsfield 프록시 URL을 먼저 입력하세요 (Stage 1) — proxy/README.md 참고'); return; }
+    if (!getHfProxyUrl()) {
+      alert(
+        'GPT Image 2를 쓰려면 Higgsfield 프록시 URL이 필요합니다.\n' +
+        '(브라우저는 platform.higgsfield.ai 직접 호출이 차단됨 — 프록시 우회 필수)\n\n' +
+        '〔A. Cloudflare Worker 배포 — 영구·어디서나 작동, 5~10분〕\n' +
+        '1) Cloudflare 가입: https://dash.cloudflare.com/sign-up\n' +
+        '2) Higgsfield Key 발급: https://higgsfield.ai → 계정 → API Keys\n' +
+        '3) PowerShell:\n' +
+        '   npm install -g wrangler\n' +
+        '   cd C:\\dev\\spectrum-studio-clone\\proxy\n' +
+        '   wrangler login\n' +
+        '   wrangler secret put HF_KEY_ID\n' +
+        '   wrangler secret put HF_KEY_SECRET\n' +
+        '   wrangler deploy\n' +
+        '4) 출력된 https://hf-gpt-image-proxy.<...>.workers.dev 를 위 칸에 입력\n\n' +
+        '〔B. 로컬 Node 프록시 — 즉시 가능, PC 켜둔 동안만 작동〕\n' +
+        '1) PowerShell:\n' +
+        '   cd C:\\dev\\spectrum-studio-clone\n' +
+        '   node proxy.cjs\n' +
+        '2) 위 칸에 http://localhost:8766/hf 입력\n\n' +
+        '자세히: proxy/README.md'
+      );
+      return;
+    }
   } else {
     if (!oaKey || !oaKey.startsWith('sk-')) {
       alert('OpenAI API 키를 먼저 입력하세요 (sk-…)');
@@ -3944,7 +3967,10 @@ async function regenerateFrame(idx) {
   const isHF = model === 'hf-gpt-image-2';
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
-    if (!getHfProxyUrl()) { alert('Higgsfield 프록시 URL 필요 (Stage 1에서 입력)'); return; }
+    if (!getHfProxyUrl()) {
+      alert('GPT Image 2 — Higgsfield 프록시 URL이 필요합니다 (Stage 1).\n배포 안내는 "전체 프레임 생성" 버튼을 한 번 누르면 자세히 나옵니다.\n또는 proxy/README.md');
+      return;
+    }
   } else {
     if (!oaKey) { alert('OpenAI API 키 필요'); return; }
   }
