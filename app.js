@@ -29,7 +29,7 @@ const DEFAULT_STATE = () => ({
   title: { text: '벼량끝 On the Brink Studio', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'none', position: 'top-right', xFine: 0, yFine: 0 },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
-  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'dual' },
+  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'dual' },
   slideshow: { enabled: true, interval: 5, crossfade: true },
   frame: { style: 'none', intensity: 50 },
   filter: { preset: 'none' },
@@ -828,6 +828,10 @@ function bindAllSliders() {
   onE('badge-pos',   'change', e => { state.title.badgePos = e.target.value; debouncedSave(); });
   onE('lyrics-show', 'change', e => { state.lyrics.show = e.target.checked; debouncedSave(); });
   onE('lyrics-color','input',  e => { state.lyrics.color = e.target.value; debouncedSave(); });
+  onE('lyrics-font', 'change', e => { state.lyrics.font = e.target.value; debouncedSave(); });
+  onE('lyrics-bg-on','change', e => { state.lyrics.bgOn = e.target.checked; debouncedSave(); });
+  onE('lyrics-bg',   'input',  e => { state.lyrics.bg = e.target.value; debouncedSave(); });
+  onE('lyrics-bg-op','input',  e => { state.lyrics.bgOpacity = +e.target.value; debouncedSave(); });
   onE('lyrics-shadow','change',e => { state.lyrics.shadow = e.target.value; debouncedSave(); });
   onE('lyrics-mode',  'change',e => { state.lyrics.mode = e.target.value; debouncedSave(); });
   onE('lyrics-highlight','change',e => { state.lyrics.highlight = e.target.checked; debouncedSave(); });
@@ -1151,16 +1155,23 @@ function buildFilterString() {
   return f;
 }
 
-function drawSingleBg(c, W, H, bg, alpha = 1) {
+function drawSingleBg(c, W, H, bg, alpha = 1, opts = {}) {
   if (!bg || !bg.el) return false;
   const el = bg.el;
   const r = bg.width / bg.height, R = W / H;
   let dw, dh, dx, dy;
   if (r > R) { dh = H; dw = H * r; dx = (W - dw) / 2; dy = 0; }
   else { dw = W; dh = W / r; dx = 0; dy = (H - dh) / 2; }
+  // 변형(전환/배경효과): 스케일은 중심 기준, 이동은 px
+  const scale = opts.scale || 1;
+  if (scale !== 1) { const nw = dw * scale, nh = dh * scale; dx -= (nw - dw) / 2; dy -= (nh - dh) / 2; dw = nw; dh = nh; }
+  dx += opts.offsetX || 0;
+  dy += opts.offsetY || 0;
   c.save();
   c.globalAlpha = alpha;
-  c.filter = buildFilterString();
+  let f = buildFilterString();
+  if (opts.extraBlur) f += ` blur(${opts.extraBlur}px)`;
+  c.filter = f;
   c.drawImage(el, dx, dy, dw, dh);
   c.restore();
   return true;
@@ -1196,8 +1207,30 @@ function drawBackgrounds(c, W, H, time) {
   } else {
     // media mode
     const { bg, nextBg, fadeAlpha } = getBgForTime(time);
-    let drawn = drawSingleBg(c, W, H, bg, 1);
-    if (nextBg && fadeAlpha > 0) drawn = drawSingleBg(c, W, H, nextBg, fadeAlpha) || drawn;
+    const trans = state.slideshow.transition || 'fade';
+    const fx = state.bgfx || {};
+    // 배경효과(상시): zoom-light = 천천히 줌인+은은한 켄번즈, blur = 약한 배경 블러
+    const baseOpts = {};
+    if (fx['zoom-light']) baseOpts.scale = 1 + 0.06 * (0.5 + 0.5 * Math.sin(time * 0.25));
+    if (fx['blur']) baseOpts.extraBlur = 6;
+    let drawn = drawSingleBg(c, W, H, bg, 1, baseOpts);
+    // 전환: 선택한 방식대로 nextBg를 그림
+    if (nextBg && fadeAlpha > 0) {
+      const o = { ...baseOpts };
+      if (trans === 'slide') {
+        o.offsetX = (1 - fadeAlpha) * W;
+        drawn = drawSingleBg(c, W, H, nextBg, 1, o) || drawn;
+      } else if (trans === 'pan') {
+        o.offsetX = (1 - fadeAlpha) * W * 0.4;
+        drawn = drawSingleBg(c, W, H, nextBg, fadeAlpha, o) || drawn;
+      } else if (trans === 'zoom') {
+        o.scale = (o.scale || 1) * (1.18 - 0.18 * fadeAlpha);
+        drawn = drawSingleBg(c, W, H, nextBg, fadeAlpha, o) || drawn;
+      } else {
+        // fade / dissolve
+        drawn = drawSingleBg(c, W, H, nextBg, fadeAlpha, o) || drawn;
+      }
+    }
     if (!drawn) {
       const g = c.createLinearGradient(0, 0, W, H);
       g.addColorStop(0, '#1a1f3a'); g.addColorStop(1, '#0a0e22');
@@ -1904,7 +1937,7 @@ function drawLyrics(c, W, H, time) {
   const gap = (state.lyrics.gap || 150) / 100;
   const lh = baseSize * gap;
   const color = state.lyrics.color || '#ffffff';
-  const fam = state.title.font || getComputedStyle(document.body).fontFamily;
+  const fam = state.lyrics.font || state.title.font || getComputedStyle(document.body).fontFamily;
   const shadow = state.lyrics.shadow || 'medium';
   const highlight = state.lyrics.highlight !== false;
 
@@ -1918,6 +1951,22 @@ function drawLyrics(c, W, H, time) {
     const wlh = size * 1.25;
     const total = wrapped.length * wlh;
     let yy = y - total/2 + wlh/2;
+    // 가사 배경 박스 (선택)
+    if (state.lyrics.bgOn) {
+      c.save();
+      c.font = `bold ${size}px ${fam}`;
+      let maxW = 0;
+      for (const line of wrapped) maxW = Math.max(maxW, c.measureText(line).width);
+      const padX = size * 0.5, padY = size * 0.28;
+      const boxW = maxW + padX * 2, boxH = total + padY * 2;
+      const bx = x - boxW / 2, by = (y - total / 2) - padY;
+      const rad = Math.min(size * 0.4, boxH / 2);
+      c.globalAlpha = alpha * ((state.lyrics.bgOpacity ?? 55) / 100);
+      c.fillStyle = state.lyrics.bg || '#000000';
+      if (c.roundRect) { c.beginPath(); c.roundRect(bx, by, boxW, boxH, rad); c.fill(); }
+      else c.fillRect(bx, by, boxW, boxH);
+      c.restore();
+    }
     for (const line of wrapped) {
       c.save();
       c.globalAlpha = alpha;
@@ -3011,6 +3060,10 @@ function restoreUI() {
   renderStickerToolList();
   $('lyrics-show').checked = state.lyrics.show;
   $('lyrics-color').value = state.lyrics.color || '#ffffff';
+  setVal('lyrics-font', state.lyrics.font || '');
+  setChk('lyrics-bg-on', !!state.lyrics.bgOn);
+  setVal('lyrics-bg', state.lyrics.bg || '#000000');
+  setVal('lyrics-bg-op', state.lyrics.bgOpacity ?? 55);
   $('lyrics-shadow').value = state.lyrics.shadow || 'medium';
   ['lyrics-text', 'lyrics-text-stage1', 'lyrics-text-ig'].forEach(id => {
     const el = document.getElementById(id);
@@ -4342,7 +4395,7 @@ async function init() {
   wireDrop('drop-bg', 'file-bg', files => handleBackgrounds(files));
   wireDrop('drop-logo', 'file-logo', handleLogo);
   wireDrop('drop-sticker', 'file-sticker', handleStickers);
-  $('btn-enter-studio').addEventListener('click', () => goToStep(2));
+  // (btn-enter-studio 는 data-goto="3" 일반 핸들러가 처리 — 중복 goToStep(2) 제거)
   // Activate bg tab from state
   if (state.bgMode && state.bgMode !== 'media') {
     qsa('.bg-tab').forEach(t => t.classList.toggle('active', t.dataset.bgTab === state.bgMode));

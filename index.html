@@ -859,6 +859,26 @@
                 <input type="color" value="#ffffff" id="lyrics-color" class="color-picker" />
               </label>
               <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>폰트</span>
+                <select class="text-input" id="lyrics-font">
+                  <option value="">기본 (제목 폰트)</option>
+                  <option value="'Noto Serif KR', serif">노토 명조</option>
+                  <option value="'Black Han Sans', sans-serif">검은고딕</option>
+                  <option value="'Gowun Batang', serif">고운바탕</option>
+                  <option value="'Nanum Pen Script', cursive">나눔손글씨</option>
+                  <option value="'Single Day', cursive">싱글데이</option>
+                  <option value="'Malgun Gothic','Apple SD Gothic Neo',sans-serif">맑은고딕</option>
+                </select>
+              </label>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                <span>배경</span>
+                <span style="display:flex; gap:6px; align-items:center;">
+                  <input type="checkbox" id="lyrics-bg-on" title="가사 배경 사용" />
+                  <input type="color" value="#000000" id="lyrics-bg" class="color-picker" />
+                  <input type="range" min="0" max="100" value="55" id="lyrics-bg-op" title="배경 투명도" style="flex:1;" />
+                </span>
+              </label>
+              <label class="slider-row" style="grid-template-columns: 60px 1fr;">
                 <span>그림자</span>
                 <select class="text-input" id="lyrics-shadow">
                   <option value="strong">진하게</option>
@@ -1069,6 +1089,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_0_char_consistency"></script>
+  <script type="module" src="app.js?v=v4_1_studio_trans_bgfx_lyricsfont"></script>
 </body>
 </html>
