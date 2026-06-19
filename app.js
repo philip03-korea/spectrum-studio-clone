@@ -1690,8 +1690,8 @@ function drawRising(c, data, W, H, sizePct, cy) {
   }
 }
 
-function drawTextWithShadow(c, text, x, y, fontPx, color, shadow) {
-  c.font = `bold ${fontPx}px ${getComputedStyle(document.body).fontFamily}`;
+function drawTextWithShadow(c, text, x, y, fontPx, color, shadow, font) {
+  c.font = `bold ${fontPx}px ${font || getComputedStyle(document.body).fontFamily}`;
   c.textAlign = 'center'; c.textBaseline = 'middle';
   if (shadow === 'box') {
     const metrics = c.measureText(text);
@@ -1988,7 +1988,7 @@ function drawLyrics(c, W, H, time) {
     for (const line of wrapped) {
       c.save();
       c.globalAlpha = alpha;
-      drawTextWithShadow(c, line, x, yy, size, col, shadow);
+      drawTextWithShadow(c, line, x, yy, size, col, shadow, fam);
       c.restore();
       yy += wlh;
     }
