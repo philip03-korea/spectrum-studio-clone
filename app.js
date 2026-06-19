@@ -3761,6 +3761,13 @@ async function hfFetch(url, opts) {
 function getHfProxyUrl() {
   return (localStorage.getItem('ssc-hf-proxy-url') || document.getElementById('lg-hf-proxy')?.value || '').trim();
 }
+// 선택된 Higgsfield 캐릭터(Element) ID — gpt_image_2 프롬프트에 <<<id>>>로 주입해 매 컷 같은 캐릭터
+function getSelectedElementId() {
+  const v = (document.getElementById('lg-element')?.value || '').trim();
+  // datalist는 "ID" 또는 "ID · 이름" 형태일 수 있으니 UUID만 추출
+  const m = v.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return m ? m[0] : '';
+}
 
 // GPT Image 2 (Higgsfield) — Cloudflare Worker 프록시 경유로 생성.
 //  • resolution=1k + quality=low = 약 0.5 크레딧/장 (유튜브 저용량용)
@@ -3953,7 +3960,7 @@ function bindLyricImageGen() {
       localStorage.setItem(LG_META_KEY, JSON.stringify({
         title: $L('lg-title')?.value || '', theme: $L('lg-theme')?.value || '',
         preset: $L('lg-preset')?.value || '', aspect: $L('lg-aspect')?.value || '',
-        model: $L('lg-model')?.value || '',
+        model: $L('lg-model')?.value || '', element: $L('lg-element')?.value || '',
       }));
     } catch {}
   };
@@ -3980,6 +3987,7 @@ function bindLyricImageGen() {
   $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; saveLGMeta(); });
   $L('lg-aspect')?.addEventListener('change', saveLGMeta);
   $L('lg-model')?.addEventListener('change', saveLGMeta);
+  $L('lg-element')?.addEventListener('input', saveLGMeta);
 
   // 저장된 메타 복원 (제목/테마/프리셋/비율/모델)
   try {
@@ -3990,6 +3998,7 @@ function bindLyricImageGen() {
       if (m.preset && $L('lg-preset')) $L('lg-preset').value = m.preset;
       if (m.aspect && $L('lg-aspect')) $L('lg-aspect').value = m.aspect;
       if (m.model && $L('lg-model')) $L('lg-model').value = m.model;
+      if (m.element && $L('lg-element')) $L('lg-element').value = m.element;
     }
   } catch {}
 
@@ -4259,20 +4268,30 @@ async function generateAllFrames() {
     }
   }
   const appliedHints = (isHF ? (_lg.styleHints || '') : (useStyleVision ? _lg.styleHints : '')) || '';
-  const fixedChar = isHF ? (_lg.character || '') : '';
-  // ★ 가사-이미지 매칭 + 캐릭터 일관성: 가사를 구체 영어 장면으로 변환 (업로드 캐릭터를 고정 주인공으로)
+  const elementId = isHF ? getSelectedElementId() : '';   // Higgsfield 캐릭터 Element (있으면 그걸로 고정)
+  // Element를 쓰면 텍스트 캐릭터 묘사 대신 <<<id>>> 주입(Higgsfield가 그 캐릭터를 넣음)
+  const fixedChar = (isHF && !elementId) ? (_lg.character || '') : '';
+  // ★ 가사-이미지 매칭 + 캐릭터 일관성
   if (oaKey && oaKey.startsWith('sk-') && !_lg.scenePlan._enriched) {
     try {
       document.getElementById('lg-progress').textContent = '🎬 주인공·장면 묘사 생성 중… (가사 매칭 + 캐릭터 일관성)';
       const res = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme, appliedHints, fixedChar);
-      _lg.scenePlan.character = res.character || fixedChar || '';
-      const charDesc = _lg.scenePlan.character;
-      const charPrefix = charDesc ? `Consistent recurring main character (keep appearance identical in every image): ${charDesc}. Scene: ` : '';
+      _lg.scenePlan.character = elementId ? '' : (res.character || fixedChar || '');
+      const charPrefix = elementId
+        ? `<<<${elementId}>>> `   // Higgsfield Element = 고정 캐릭터(매 컷 동일 얼굴)
+        : (_lg.scenePlan.character ? `Consistent recurring main character (keep appearance identical in every image): ${_lg.scenePlan.character}. Scene: ` : '');
       _lg.scenePlan.scenes.forEach((s, i) => {
         if (res.prompts[i]) s.visualPrompt = (charPrefix + String(res.prompts[i]).trim()).trim();
       });
       _lg.scenePlan._enriched = res.prompts.length > 0;
     } catch (e) { console.warn('장면 변환 건너뜀:', e.message); }
+  } else if (elementId && !_lg.scenePlan._enriched) {
+    // OpenAI 키가 없어도 Element는 적용 — 가사 원문 앞에 <<<id>>> 주입
+    _lg.scenePlan.scenes.forEach(s => {
+      const ly = (s.lyricFull || s.lyricSummary || '').trim();
+      s.visualPrompt = `<<<${elementId}>>> A music-video scene illustrating: "${ly}". ${theme ? 'Setting/era: ' + theme + '.' : ''}`.trim();
+    });
+    _lg.scenePlan._enriched = true;
   }
   _lg.prompts = _lg.scenePlan.scenes.map(s => ({
     idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints),

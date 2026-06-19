@@ -181,6 +181,21 @@
             </div>
             <div class="bg-thumbs hidden" id="lg-style-thumbs"></div>
 
+            <div class="sub-title">🧑 캐릭터 (Higgsfield Element) <span class="sub-tag">gpt_image_2 일관성</span></div>
+            <input class="text-input" id="lg-element" list="lg-element-list" placeholder="비워두면 사용 안 함 · 목록에서 고르거나 Element ID 붙여넣기" autocomplete="off" />
+            <datalist id="lg-element-list">
+              <option value="c3314a7f-097c-4336-add6-adfe06acd475">Lee Jiyul · 여아 8세</option>
+              <option value="f07f3163-57ba-47b7-8fb7-8dfe622b5ba5">Park Hyeonwoo · 아빠</option>
+              <option value="1fb4e4ac-7c0c-4dcf-8cdf-446e4821fc4a">Lee Junho · 아빠</option>
+              <option value="cbeac423-20a9-4fc9-b917-1a2804885d04">Park Doyun · 남아</option>
+              <option value="5bea8ba8-4691-4cda-b6ae-27e2ca8468ce">Lee Taehyun · 할아버지</option>
+              <option value="5e6604c6-da04-401e-aa24-6f7707301207">Lee Jeongsook · 할머니</option>
+              <option value="69b264df-c091-4d25-bcf4-027ced2678bb">Jung Taegang · 소방관</option>
+              <option value="566395e9-a6f6-49be-b05c-9df5745d62da">EIDO 마스코트 (기린)</option>
+              <option value="8520a5ce-dad1-46d6-a6e5-1dce4701fdc3">EIDO 마스코트 (그린)</option>
+            </datalist>
+            <div class="hint-text" style="margin-bottom:6px;">선택하면 <b>모든 컷을 같은 캐릭터</b>로 생성(gpt_image_2). 새 캐릭터는 깨끗한 단일 이미지로 Element 등록 권장. (등록은 채팅에서 도와드림)</div>
+
             <div class="sub-title">🖌️ 스타일 프리셋</div>
             <select class="text-input" id="lg-preset">
               <option value="">📤 업로드 이미지대로 (인물·얼굴·스타일 유지)</option>
@@ -1095,6 +1110,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_4_lyricfont_fix"></script>
+  <script type="module" src="app.js?v=v4_5_element_picker"></script>
 </body>
 </html>
