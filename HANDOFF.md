@@ -1,7 +1,36 @@
 # 🤝 HANDOFF — 벼량끝 On the Brink Studio PRO V2.1
 
 > 다른 컴퓨터에서 이어서 작업하기 위한 인수인계 문서.
-> 마지막 업데이트: 2026-06-01
+> 마지막 업데이트: 2026-06-19
+
+---
+
+## ⭐ 2026-06-19 현재 상태 (최신)
+
+**GPT Image 2 가사 이미지 생성 — 동작함.**
+- 경로: 앱 → **Cloudflare Worker**(`https://hf-gpt-image-proxy.philip03.workers.dev`) → **Contabo MCP 브리지 백엔드** → gpt_image_2 → cloudfront 이미지를 Worker가 바이트(CORS)로 반환.
+  - Worker 코드: `proxy/worker.js` (시크릿: `CONTABO_URL`, `CONTABO_KEY`). 터널 URL 바뀌면 `wrangler secret put CONTABO_URL`만 갱신.
+  - Contabo 백엔드 정보(엔드포인트·X-API-Key)는 `GPT_Image2_백엔드_핸드오프.md`(git 제외)에 있음.
+  - ⚠️ Contabo는 **Cloudflare Quick Tunnel**이라 서버 재시작 시 URL이 바뀜 → named tunnel 권장.
+- API 키(Key ID:Secret)로는 gpt_image_2 호출 불가(soul만). 상세: `docs/higgsfield_gpt_image2_api.md`.
+- **캐릭터 참조 이미지**는 Contabo 백엔드 미지원 → 현재 텍스트 기반(캐릭터 바이블)로 일관성 유지. 정확한 참조는 백엔드에 `--image` 추가 필요(SSH).
+
+**가사→이미지 파이프라인 (Stage 1)**
+- 가사 분석 시 문장단위 LRC는 줄별 분리(뮤직비디오용). 장면수=가사 줄 수로 제한.
+- OpenAI 키 있으면 생성 전 GPT-4o-mini가 **고정 주인공 + 컷별 영어 장면**으로 변환(가사 매칭 + 캐릭터 일관성).
+- 업로드 이미지 스타일은 비전으로 추출해 '그림체만' 프롬프트 반영.
+- 결과: 카드 그리드 + 클릭 라이트박스(←/→), 생성 중 표시, 생성 중단 버튼.
+- 새로고침 유지: API키·프록시·제목·테마·프리셋·비율·모델·가사·업로드이미지(IndexedDB). 초기화 버튼은 키·프록시만 남김.
+
+**Stage 2/3**
+- 슬라이드쇼 전환(fade/dissolve/slide/zoom/pan) + 배경효과(blur/zoom-light) 실제 적용.
+- 가사: 전용 폰트 + 배경색/투명도 + 글자색.
+- 스펙트럼 멀티색상: 단색 장르에서도 기본 다색 팔레트.
+
+**도구**
+- `tools/suno_download.py` — Suno 라이브러리 MP3+LRC+SRT 일괄 다운로드(토큰 직접 입력, git엔 placeholder).
+
+**내보내기 빠르게**: fps 30 + 해상도 FHD(4K 아님) + 성능 모드 '성능' + 이미지 배경(영상 X) + 재생 1회.
 
 ---
 
