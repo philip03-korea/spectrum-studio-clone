@@ -1328,9 +1328,10 @@ function getColorFor(i, total) {
     const hue = ((i / Math.max(1, total)) * 360) % 360;
     base = `hsl(${hue}, 90%, 62%)`;
   } else {
-    // multi
+    // multi — 장르 팔레트가 2색 이상일 때만 사용, 단색 장르(클래식/발라드 등)면 기본 다색 팔레트
     const p = PRESETS[state.genre];
-    const palette = (p?.colors?.length ? p.colors : [state.spectrum.color, '#4dd0ff', '#ffb547']);
+    const DEF_MULTI = ['#7c5cff', '#4dd0ff', '#ffb547', '#4ade80', '#ff5566'];
+    const palette = (p?.colors && p.colors.length >= 2) ? p.colors : DEF_MULTI;
     const idx = (i + (_vfx.cycleIdx || 0)) % palette.length;
     base = palette[idx];
   }
@@ -3441,31 +3442,29 @@ function buildScenePlan(lyrics, theme, N) {
 
 function buildPromptForScene(scene, theme, preset, styleHints) {
   const parts = [];
-  // ★ 가사 내용을 장면의 핵심 묘사로 사용 (이게 빠지면 가사와 무관한 이미지가 나옴)
+  const emotionMap = {
+    'hopeful': 'hopeful, warm light streaming down',
+    'somber': 'solemn, soft cool light',
+    'contemplative': 'quiet contemplation, soft natural light',
+    'reverent': 'reverent and sacred, golden divine light',
+    'neutral': 'gentle ambient light',
+  };
+  // ★ 가사 내용이 장면의 '주제'다 — 각 컷이 그 가사 한 줄을 그림으로 보여줘야 한다.
   const lyric = (scene.lyricFull || scene.lyricSummary || '').trim();
   if (lyric) {
-    parts.push(`Create an image that visually depicts the meaning of these song lyrics: "${lyric}".`);
-  }
-  // 성경 사건/테마는 보조 맥락
-  if (scene.biblicalEvent) {
-    parts.push(`Biblical context: ${scene.biblicalEvent}.`);
-  } else if (theme && !lyric) {
+    parts.push(`A cinematic music-video frame that literally illustrates the meaning of THIS specific lyric line: "${lyric}".`);
+    parts.push(`The main subject, action and setting MUST be derived from that lyric line (not a generic scene).`);
+  } else if (theme) {
     parts.push(`Scene from "${theme}".`);
   }
-  // 감정 톤
-  const emotionMap = {
-    'hopeful': 'hopeful, warm light streaming down, peaceful expression',
-    'somber': 'solemn mood, soft cool light, contemplative atmosphere',
-    'contemplative': 'quiet contemplation, soft natural light, thoughtful posture',
-    'reverent': 'reverent and sacred atmosphere, golden divine light, awe',
-    'neutral': 'balanced natural mood, gentle ambient light',
-  };
-  parts.push(emotionMap[scene.emotion] || emotionMap.neutral);
-  // 스타일 프리셋
-  if (preset && STYLE_PRESETS[preset]) parts.push(STYLE_PRESETS[preset]);
-  // 업로드 스타일 힌트
-  if (styleHints) parts.push(`Match this style: ${styleHints}.`);
-  // 항상 금지 조건
+  if (theme && lyric) parts.push(`Song theme for context: ${theme}.`);
+  // 성경 사건은 보조 맥락(괄호)으로만
+  if (scene.biblicalEvent) parts.push(`(subtle context: ${scene.biblicalEvent})`);
+  // 감정 톤 (분위기/조명만)
+  parts.push('Mood: ' + (emotionMap[scene.emotion] || emotionMap.neutral) + '.');
+  // 렌더링 스타일(주제가 아니라 '그림체'만)
+  if (preset && STYLE_PRESETS[preset]) parts.push('Rendering style: ' + STYLE_PRESETS[preset]);
+  if (styleHints) parts.push(`Rendering art style only (copy the look, NOT the subjects): ${styleHints}.`);
   parts.push(LG_NEG_PROMPT);
   return parts.join(' ');
 }
@@ -3821,7 +3820,14 @@ function bindLyricImageGen() {
   if ($L('lg-title') && !$L('lg-title').value) {
     $L('lg-title').value = state.title.text || '';
   }
-  $L('lg-title').addEventListener('input', e => { _lg.title = e.target.value; saveLGMeta(); });
+  $L('lg-title').addEventListener('input', e => {
+    _lg.title = e.target.value;
+    // 비주얼 편집의 '곡 제목 표시'와 동기화 (state.title.text + title-text 입력칸 + 미리보기)
+    state.title.text = e.target.value;
+    const tt = document.getElementById('title-text');
+    if (tt) tt.value = e.target.value;
+    saveLGMeta(); debouncedSave();
+  });
   $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; saveLGMeta(); });
   $L('lg-aspect')?.addEventListener('change', saveLGMeta);
   $L('lg-model')?.addEventListener('change', saveLGMeta);
