@@ -950,6 +950,37 @@ function parseAndCleanLrc(rawText) {
   const tsAnyRe = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
   const tsFirstRe = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/;
   const lines = text.split(/\r?\n/);
+
+  // --- 단어 단위 vs 문장 단위 판별 ---
+  // 각 타임스탬프 줄의 '단어 수'를 보고, 대부분 1단어면 word-level(병합), 아니면 sentence-level(줄 유지)
+  const restCounts = [];
+  for (const raw of lines) {
+    const l = raw.trim();
+    if (!tsFirstRe.test(l)) continue;
+    const r = l.replace(tsAnyRe, '').trim();
+    if (r && !/^\[[^\]]+\]$/.test(r)) restCounts.push(r.split(/\s+/).length);
+  }
+  const singleFrac = restCounts.length ? restCounts.filter(n => n === 1).length / restCounts.length : 0;
+  const isWordLevel = restCounts.length >= 8 && singleFrac > 0.6;
+
+  // 문장 단위: 타임스탬프 줄을 각각 한 줄로 유지 (합치지 않음)
+  if (!isWordLevel) {
+    const out = [];
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+      const m = line.match(tsFirstRe);
+      if (!m) continue;                                  // 타임스탬프 없는 줄(헤더/메타 등) 건너뜀
+      const [, mm, ss, frac] = m;
+      const tsStr = `${mm}:${ss}` + (frac != null ? `.${frac}` : '');
+      const rest = line.replace(tsAnyRe, '').trim();
+      if (!rest || /^\[[^\]]+\]$/.test(rest)) continue;  // ts-only / 섹션태그 줄 제외
+      out.push(`[${tsStr}]${rest}`);
+    }
+    return out.join('\n');
+  }
+
+  // 단어 단위: 빈 줄/섹션태그를 경계로 단어들을 문장으로 병합
   const out = [];
   let curStartFormatted = null;   // e.g. "00:13.23"
   let curWords = [];
