@@ -1,34 +1,50 @@
 /**
- * Higgsfield GPT Image 2 프록시 — Cloudflare Worker
+ * Higgsfield GPT Image 2 프록시 — Cloudflare Worker (v2 API 스펙)
  * ------------------------------------------------------------------
  * 브라우저(정적 앱)는 Higgsfield API를 직접 호출할 수 없습니다.
  *  1) 공식 SDK가 브라우저 환경을 차단(BrowserNotSupportedError)
  *  2) 비밀키를 공개 페이지에 노출하면 안 됨 (CORS·보안)
  * 이 Worker가 키를 안전하게 보관하고 브라우저↔Higgsfield를 중계합니다.
  *
+ * API 스펙 (Higgsfield v2 SDK 기반):
+ *   POST  /{endpoint}                          — body = input 그대로
+ *   GET   /requests/{request_id}/status       — 폴링
+ *   완료 상태: 'completed' | 'nsfw' | 'failed'
+ *   응답: { request_id, status, images: [{url}], ... }
+ *
  * 배포:
  *   wrangler secret put HF_KEY_ID       (Higgsfield Key ID)
  *   wrangler secret put HF_KEY_SECRET   (Higgsfield Key Secret)
  *   wrangler deploy
- * 자세한 내용은 같은 폴더의 README.md 참고.
  *
  * 엔드포인트:
  *   GET  /            → 헬스체크 { ok: true }
  *   POST /generate    → 이미지 생성
  *     body: {
  *       prompt: string,                 // 필수
- *       aspect_ratio?: "9:16"|"16:9"|"1:1"|...   (기본 "9:16")
- *       resolution?: "1k"|"2k"|"4k",    // 기본 "1k"
- *       quality?: "low"|"medium"|"high",// 기본 "low"  (1k+low = ~0.5 크레딧)
- *       references?: string[]           // data:URL 또는 https URL 배열 (캐릭터/스타일 참조, 최대 10)
+ *       aspect_ratio?: '9:16'|'16:9'|'1:1'|...   (기본 '9:16')
+ *       resolution?: '1k'|'2k'|'4k',    // 기본 '1k'
+ *       quality?: 'low'|'medium'|'high',// 기본 'low'  (1k+low ≈ 0.5~1 크레딧)
+ *       references?: string[]           // data:URL 또는 https URL (참조, 최대 10)
  *     }
  *     성공 → 이미지 바이너리(image/png 등)
- *     실패 → JSON { error }  (4xx/5xx)
+ *     실패 → JSON { error }
  */
 
 const HF_BASE = 'https://platform.higgsfield.ai';
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_MS = 180000; // 3분
+
+// GPT Image 2의 endpoint slug 후보 (첫 200/422 응답을 받는 것이 정답)
+// Higgsfield 공식 SDK 패턴: {provider}/{model}/{version?}/{action}
+// 422는 endpoint는 맞지만 입력 검증 실패 → 그것도 정답으로 간주(파라미터만 고치면 됨)
+const ENDPOINT_CANDIDATES = [
+  'openai/gpt-image-2/text-to-image',
+  'gpt-image-2/text-to-image',
+  'openai/gpt-image/v2/text-to-image',
+  'openai/gpt_image_2/text-to-image',
+  'gpt_image_2/text-to-image',
+];
 
 export default {
   async fetch(request, env) {
@@ -54,7 +70,6 @@ export default {
       return json({ error: 'Not found. POST /generate 를 사용하세요.' }, 404, cors);
     }
 
-    // 키 확인: Worker 시크릿 우선, 없으면 요청 본문의 키(덜 안전한 폴백) 사용
     let body;
     try {
       body = await request.json();
@@ -90,51 +105,89 @@ export default {
         if (uploaded) input_images.push({ type: 'image_url', image_url: uploaded });
       }
 
-      // 2) 생성 작업 제출 (gpt_image_2)
-      const params = { prompt, aspect_ratio, resolution, quality, batch_size: 1 };
-      if (input_images.length) params.input_images = input_images;
+      // 2) v2 SDK 형식: input 객체를 body로 그대로 전송
+      const input = { prompt, aspect_ratio, resolution, quality };
+      if (input_images.length) input.input_images = input_images;
 
-      const createRes = await fetch(`${HF_BASE}/agents/jobs`, {
-        method: 'POST',
-        headers: { ...auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ job_set_type: 'gpt_image_2', params }),
-      });
-      if (!createRes.ok) {
-        const t = await safeText(createRes);
-        return json({ error: `Higgsfield 작업 생성 실패 ${createRes.status}: ${t.slice(0, 300)}` }, 502, cors);
+      // 3) endpoint 후보 순차 시도 (200 또는 422 = 정답)
+      let createRes = null;
+      let usedEndpoint = null;
+      const attempts = [];
+      for (const ep of ENDPOINT_CANDIDATES) {
+        const r = await fetch(`${HF_BASE}/${ep}`, {
+          method: 'POST',
+          headers: { ...auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        });
+        attempts.push({ ep, status: r.status });
+        if (r.ok) {
+          createRes = r;
+          usedEndpoint = ep;
+          break;
+        }
+        if (r.status === 422 || r.status === 400) {
+          // endpoint는 맞지만 입력 검증 실패 — 그대로 사용자에게 전달
+          const t = await safeText(r);
+          return json({
+            error: `Higgsfield 입력 오류 (${ep}): ${t.slice(0, 400)}`,
+            endpoint_attempts: attempts,
+          }, r.status, cors);
+        }
+        // 401 → 인증 실패, 다른 endpoint도 다 실패할 거니 즉시 반환
+        if (r.status === 401) {
+          const t = await safeText(r);
+          return json({ error: `Higgsfield 인증 실패 (${ep}): ${t.slice(0, 200)}` }, 401, cors);
+        }
       }
+
+      if (!createRes) {
+        return json({
+          error: 'GPT Image 2 endpoint를 찾지 못했습니다. 후보 모두 실패.',
+          endpoint_attempts: attempts,
+        }, 502, cors);
+      }
+
       const created = await createRes.json();
-
-      // 즉시 이미지가 왔으면 바로 반환
       let imageUrl = pickImageUrl(created);
-      const jobId = created.id || created.request_id || created.job_set_id || created.jobs?.[0]?.id;
+      const requestId = created.request_id || created.id || created.job_set_id;
 
-      // 3) 폴링
+      // 4) 폴링 — GET /requests/{request_id}/status
       if (!imageUrl) {
-        if (!jobId) return json({ error: 'Higgsfield 응답에 작업 ID/이미지가 없습니다', raw: created }, 502, cors);
-        const pollUrl = created.status_url || `${HF_BASE}/agents/jobs/${jobId}`;
+        if (!requestId) return json({ error: 'request_id 없음', raw: created }, 502, cors);
         const start = Date.now();
         while (Date.now() - start < POLL_MAX_MS) {
           await sleep(POLL_INTERVAL_MS);
-          const pr = await fetch(pollUrl, { headers: auth });
+          const pr = await fetch(`${HF_BASE}/requests/${requestId}/status`, { headers: auth });
           if (!pr.ok) continue;
           const pj = await pr.json();
-          const status = String(pj.status || pj.state || pj.jobs?.[0]?.status || '').toLowerCase();
+          const status = String(pj.status || '').toLowerCase();
           imageUrl = pickImageUrl(pj);
           if (imageUrl) break;
-          if (['failed', 'error', 'nsfw', 'canceled', 'cancelled'].includes(status)) {
+          if (status === 'completed') {
+            // completed인데 URL 못 찾음 → 응답 구조 못 잡은 것
+            return json({ error: 'completed 상태인데 이미지 URL을 찾지 못함', raw: pj }, 502, cors);
+          }
+          if (status === 'failed' || status === 'nsfw') {
             return json({ error: `Higgsfield 생성 실패: ${status}`, raw: pj }, 502, cors);
           }
         }
         if (!imageUrl) return json({ error: 'Higgsfield 생성 시간 초과(3분)' }, 504, cors);
       }
 
-      // 4) 결과 이미지를 받아 브라우저로 그대로 전달 (CORS 우회)
+      // 5) 결과 이미지 받아서 브라우저로 전달
       const imgRes = await fetch(imageUrl);
       if (!imgRes.ok) return json({ error: `결과 이미지 다운로드 실패 ${imgRes.status}` }, 502, cors);
       const contentType = imgRes.headers.get('content-type') || 'image/png';
       const buf = await imgRes.arrayBuffer();
-      return new Response(buf, { status: 200, headers: { ...cors, 'Content-Type': contentType, 'Cache-Control': 'no-store' } });
+      return new Response(buf, {
+        status: 200,
+        headers: {
+          ...cors,
+          'Content-Type': contentType,
+          'Cache-Control': 'no-store',
+          'X-Used-Endpoint': usedEndpoint || 'unknown',
+        },
+      });
     } catch (e) {
       return json({ error: `프록시 오류: ${e.message}` }, 500, cors);
     }
@@ -151,12 +204,13 @@ function json(obj, status, cors) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function safeText(res) { try { return await res.text(); } catch { return ''; } }
 
-// 여러 응답 형태에서 이미지 URL 추출
+// 여러 응답 형태에서 이미지 URL 추출 (v2 + 구버전 모두 대응)
 function pickImageUrl(o) {
   if (!o) return null;
   return (
-    o.result_url ||
     o.images?.[0]?.url || o.images?.[0] ||
+    o.video?.url ||
+    o.result_url ||
     o.output?.[0]?.url || o.output?.[0] ||
     o.data?.[0]?.url ||
     o.jobs?.[0]?.results?.raw?.url ||

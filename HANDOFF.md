@@ -41,6 +41,46 @@ python -m http.server 8765
 
 ---
 
+## ⚡ 2026-06-18 세션 — GPT Image 2 프록시 진행 상황 (사무실에서 여기부터)
+
+**목표**: 이미지 생성을 **무조건 GPT Image 2(Higgsfield `gpt_image_2`)** 로만. OpenAI 폴백 금지(퀄리티 차이).
+
+**오늘 끝낸 것**:
+- ✅ OpenAI 자동 폴백 제거 (app.js) — GPT Image 2 외 자동 전환 안 함. 커밋 `fcd7cd2`
+- ✅ 프록시 미설정 alert에 배포 가이드 전부 내장 (Cloudflare/로컬 단계 + 링크)
+- ✅ `proxy.cjs` 추가 (로컬 Node CORS 프록시, 의존성 0)
+- ✅ **Cloudflare Worker 배포 완료**: `https://hf-gpt-image-proxy.philip03.workers.dev` (헬스체크 `{ok:true}` 정상)
+- ✅ Worker 시크릿 정상 등록 (`HF_KEY_ID`, `HF_KEY_SECRET`) — 인증 통과 확인(401 안 뜸)
+  - ⚠️ 처음에 `wrangler secret put HF_KEY_ID` 에 `HF_KEY_ID=값` 통째로 넣어 시크릿 "이름"에 키가 노출됨 → 잘못된 시크릿 2개 삭제 완료. **노출된 Higgsfield 키는 회전(폐기+재발급) 권장.**
+- ✅ `proxy/worker.js` 를 Higgsfield **v2 API 스펙**으로 재작성 (커밋 대기 중)
+  - `POST /{endpoint}` (body=input 그대로) → 폴링 `GET /requests/{request_id}/status` → `images[0].url`
+  - 완료 상태: `completed`/`nsfw`/`failed`
+
+**🚧 막힌 지점 — GPT Image 2 endpoint slug 미확정**:
+- 모델 ID는 `gpt_image_2` 로 확정 (CLI MODELS.md, MCP catalog 일치)
+- 하지만 `POST /{slug}` 의 정확한 slug를 못 찾음. 시도한 5개 전부 404:
+  - `openai/gpt-image-2/text-to-image`, `gpt-image-2/text-to-image`,
+    `openai/gpt-image/v2/text-to-image`, `openai/gpt_image_2/text-to-image`, `gpt_image_2/text-to-image`
+- 참고 패턴(다른 모델): `bytedance/seedream/v4/text-to-image`, `flux-pro/kontext/max/text-to-image`, `higgsfield-ai/soul/standard`, `reve/text-to-image`
+- worker.js 의 `ENDPOINT_CANDIDATES` 배열에 후보를 넣어두면 첫 200/422를 자동 채택하도록 만들어둠.
+
+**➡️ 사무실에서 할 일 (우선순위)**:
+1. **GPT Image 2 정확한 endpoint slug 확인** (가장 빠른 해결):
+   - https://cloud.higgsfield.ai 로그인 → GPT Image 2 → "Try API"/"Code"/"Docs" 의 curl 예시에서 `platform.higgsfield.ai/<path>` 확인
+   - 또는 Higgsfield CLI 설치돼 있으면: `higgsfield generate gpt_image_2 --prompt test --verbose`(또는 `--debug`) 로그에 호출 URL이 찍힐 수 있음
+   - 찾으면 `proxy/worker.js` 의 `ENDPOINT_CANDIDATES` 최상단에 추가 → `cd proxy && wrangler deploy`
+2. slug 확정 후 테스트:
+   ```powershell
+   $body = '{"prompt":"a sunrise","aspect_ratio":"16:9","resolution":"1k","quality":"low"}'
+   Invoke-WebRequest -Uri "https://hf-gpt-image-proxy.philip03.workers.dev/generate" -Method POST -ContentType "application/json" -Body $body -OutFile test.png -PassThru
+   ```
+   (응답 헤더 `X-Used-Endpoint` 에 채택된 slug가 찍힘)
+3. 작동 확인되면 클론 앱 Stage 1 "Higgsfield 프록시 URL" 칸에 Worker URL 입력 후 전체 흐름 테스트.
+
+**대안(slug 못 찾을 시)**: Claude Code MCP 브리지 경로(우리 세션 MCP는 `gpt_image_2` 생성 검증 완료 — 잔액 1983 크레딧, 1k/low ≈ 1크레딧).
+
+---
+
 ## 3. 현재 상태 (무엇이 끝났나)
 
 Stage 1~4 핵심 기능 + 원본 Spectrum Studio PRO 격차 보완까지 완료.
