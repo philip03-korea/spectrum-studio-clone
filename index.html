@@ -199,6 +199,16 @@
             </datalist>
             <div class="hint-text" style="margin-bottom:6px;">선택하면 <b>모든 컷을 같은 캐릭터</b>로 생성(gpt_image_2). 새 캐릭터는 깨끗한 단일 이미지로 Element 등록 권장. (등록은 채팅에서 도와드림)</div>
 
+            <!-- Soul 2 캐릭터 선택 — hf-soul-2 모델 선택 시에만 표시 -->
+            <div class="sub-title" id="lg-soul-section" style="display:none;">★ Soul 캐릭터 (Soul 2 전용) <span class="sub-tag">학습된 얼굴 · 매 컷 다른 장면</span></div>
+            <input class="text-input" id="lg-soul" list="lg-soul-list" placeholder="Soul ID 선택 또는 직접 입력" autocomplete="off" style="display:none;" />
+            <datalist id="lg-soul-list">
+              <option value="e77eaa54-a841-47fc-a518-37e1cd076bf2">★ You Are Enough · 여주인공</option>
+              <option value="ed8c7cb2-69e7-4b70-b619-dde39f8864c2">★ You Are Enough · 예수님</option>
+              <option value="c86400e4-799c-4907-b228-17df7dc276ca">★ You Are Enough · 아들</option>
+            </datalist>
+            <div class="hint-text" id="lg-soul-hint" style="display:none;margin-bottom:6px;"><b>학습된 Soul 캐릭터</b> — 매 컷 같은 얼굴 + 다른 장면 (뮤직비디오 최적). Soul 2는 Worker → platform.higgsfield.ai 직접 호출. 새 캐릭터는 채팅에서 학습 요청.</div>
+
             <div class="sub-title">🖌️ 스타일 프리셋</div>
             <select class="text-input" id="lg-preset">
               <option value="">📤 업로드 이미지대로 (인물·얼굴·스타일 유지)</option>
@@ -219,6 +229,7 @@
                 <option value="gpt-image-1" selected>gpt-image-1 (OpenAI)</option>
                 <option value="dall-e-3">DALL-E 3 (OpenAI)</option>
                 <option value="hf-gpt-image-2">GPT Image 2 (Higgsfield · 0.5크레딧 · 프록시)</option>
+                <option value="hf-soul-2">★ Soul 2 (Higgsfield · 캐릭터 학습 · 뮤직비디오용)</option>
               </select>
             </label>
             <label class="slider-row" style="grid-template-columns: 60px 1fr;">
@@ -1113,6 +1124,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_5_element_picker"></script>
+  <script type="module" src="app.js?v=v4_6_soul2"></script>
 </body>
 </html>

@@ -3764,7 +3764,12 @@ function getHfProxyUrl() {
 // 선택된 Higgsfield 캐릭터(Element) ID — gpt_image_2 프롬프트에 <<<id>>>로 주입해 매 컷 같은 캐릭터
 function getSelectedElementId() {
   const v = (document.getElementById('lg-element')?.value || '').trim();
-  // datalist는 "ID" 또는 "ID · 이름" 형태일 수 있으니 UUID만 추출
+  const m = v.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return m ? m[0] : '';
+}
+// 선택된 Soul ID — soul_2 모델 전용 (학습된 캐릭터 얼굴, API 페이로드에 주입)
+function getSelectedSoulId() {
+  const v = (document.getElementById('lg-soul')?.value || '').trim();
   const m = v.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   return m ? m[0] : '';
 }
@@ -3798,12 +3803,40 @@ async function generateImageViaHiggsfield(proxyUrl, prompt, aspect, refDataUrls)
   return await res.blob();
 }
 
+// Soul 2 (soul_2) — Worker 경유 → platform.higgsfield.ai 직접 호출 (API Key 인증)
+// soul_id = 학습된 캐릭터(매 컷 같은 얼굴 + 다른 장면). quality는 Worker에서 '1080p' 고정.
+async function generateImageViaSoul2(proxyUrl, soulId, prompt, aspect) {
+  const base = proxyUrl.replace(/\/+$/, '');
+  let res;
+  try {
+    res = await fetch(`${base}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ engine: 'soul_2', soul_id: soulId, prompt, aspect_ratio: aspect }),
+    });
+  } catch (e) {
+    throw new Error('Soul 2 프록시에 연결할 수 없습니다 — 프록시 URL과 배포 상태를 확인하세요');
+  }
+  if (!res.ok) {
+    let msg = `Soul 2 프록시 오류 ${res.status}`;
+    try { const j = await res.json(); if (j && j.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
+  return await res.blob();
+}
+
 // 모델에 따라 OpenAI / Higgsfield(프록시)로 라우팅
 async function generateImageDispatch(model, prompt, aspect, styleFiles) {
+  if (model === 'hf-soul-2') {
+    const proxyUrl = getHfProxyUrl();
+    if (!proxyUrl) throw new Error('Higgsfield 프록시 URL이 필요합니다 (Stage 1에서 입력)');
+    const soulId = getSelectedSoulId();
+    if (!soulId) throw new Error('Soul 2 — "★ Soul 캐릭터" 목록에서 학습된 캐릭터를 선택하세요');
+    return generateImageViaSoul2(proxyUrl, soulId, prompt, aspect);
+  }
   if (model === 'hf-gpt-image-2') {
     const proxyUrl = getHfProxyUrl();
     if (!proxyUrl) throw new Error('Higgsfield 프록시 URL이 필요합니다 (Stage 1에서 입력)');
-    // 업로드한 캐릭터/스타일 이미지를 참조로 전달 + 프롬프트에 스타일 유지 지시 추가
     let refs = [];
     let p = prompt;
     if (styleFiles && styleFiles.length) {
@@ -3961,8 +3994,16 @@ function bindLyricImageGen() {
         title: $L('lg-title')?.value || '', theme: $L('lg-theme')?.value || '',
         preset: $L('lg-preset')?.value || '', aspect: $L('lg-aspect')?.value || '',
         model: $L('lg-model')?.value || '', element: $L('lg-element')?.value || '',
+        soul: $L('lg-soul')?.value || '',
       }));
     } catch {}
+  };
+  // Soul 섹션 표시/숨김 (hf-soul-2 선택 시)
+  const updateSoulSection = () => {
+    const isSoul2 = $L('lg-model')?.value === 'hf-soul-2';
+    ['lg-soul-section', 'lg-soul', 'lg-soul-hint'].forEach(id => {
+      const el = $L(id); if (el) el.style.display = isSoul2 ? '' : 'none';
+    });
   };
   const saveStyleFiles = async () => {
     try {
@@ -3986,8 +4027,9 @@ function bindLyricImageGen() {
   });
   $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; saveLGMeta(); });
   $L('lg-aspect')?.addEventListener('change', saveLGMeta);
-  $L('lg-model')?.addEventListener('change', saveLGMeta);
+  $L('lg-model')?.addEventListener('change', () => { saveLGMeta(); updateSoulSection(); });
   $L('lg-element')?.addEventListener('input', saveLGMeta);
+  $L('lg-soul')?.addEventListener('input', saveLGMeta);
 
   // 저장된 메타 복원 (제목/테마/프리셋/비율/모델)
   try {
@@ -3999,8 +4041,10 @@ function bindLyricImageGen() {
       if (m.aspect && $L('lg-aspect')) $L('lg-aspect').value = m.aspect;
       if (m.model && $L('lg-model')) $L('lg-model').value = m.model;
       if (m.element && $L('lg-element')) $L('lg-element').value = m.element;
+      if (m.soul && $L('lg-soul')) $L('lg-soul').value = m.soul;
     }
   } catch {}
+  updateSoulSection(); // 복원 후 Soul 섹션 가시성 초기화
 
   // 스타일 이미지 다중 업로드 (최대 10)
   _lg.styleFiles = _lg.styleFiles || [];
@@ -4192,7 +4236,8 @@ function openFrameLightbox(startIdx) {
 
 async function generateAllFrames() {
   const model = document.getElementById('lg-model').value;
-  const isHF = model === 'hf-gpt-image-2';
+  const isSoul2 = model === 'hf-soul-2';
+  const isHF = model === 'hf-gpt-image-2' || isSoul2;
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
     if (!getHfProxyUrl()) {
@@ -4217,6 +4262,10 @@ async function generateAllFrames() {
         '2) 위 칸에 http://localhost:8766/hf 입력\n\n' +
         '자세히: proxy/README.md'
       );
+      return;
+    }
+    if (isSoul2 && !getSelectedSoulId()) {
+      alert('Soul 2 — "★ Soul 캐릭터" 목록에서 학습된 캐릭터를 선택하세요.\n(여주인공 / 예수님 / 아들 중 선택)');
       return;
     }
   } else {
@@ -4268,18 +4317,21 @@ async function generateAllFrames() {
     }
   }
   const appliedHints = (isHF ? (_lg.styleHints || '') : (useStyleVision ? _lg.styleHints : '')) || '';
-  const elementId = isHF ? getSelectedElementId() : '';   // Higgsfield 캐릭터 Element (있으면 그걸로 고정)
-  // Element를 쓰면 텍스트 캐릭터 묘사 대신 <<<id>>> 주입(Higgsfield가 그 캐릭터를 넣음)
-  const fixedChar = (isHF && !elementId) ? (_lg.character || '') : '';
+  const elementId = (model === 'hf-gpt-image-2') ? getSelectedElementId() : '';  // gpt_image_2 전용
+  const soulId = isSoul2 ? getSelectedSoulId() : '';                              // soul_2 전용
+  // Element/Soul 없을 때만 텍스트 캐릭터 묘사 사용
+  const fixedChar = (isHF && !elementId && !soulId) ? (_lg.character || '') : '';
   // ★ 가사-이미지 매칭 + 캐릭터 일관성
   if (oaKey && oaKey.startsWith('sk-') && !_lg.scenePlan._enriched) {
     try {
       document.getElementById('lg-progress').textContent = '🎬 주인공·장면 묘사 생성 중… (가사 매칭 + 캐릭터 일관성)';
       const res = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme, appliedHints, fixedChar);
-      _lg.scenePlan.character = elementId ? '' : (res.character || fixedChar || '');
+      _lg.scenePlan.character = (elementId || soulId) ? '' : (res.character || fixedChar || '');
       const charPrefix = elementId
-        ? `<<<${elementId}>>> `   // Higgsfield Element = 고정 캐릭터(매 컷 동일 얼굴)
-        : (_lg.scenePlan.character ? `Consistent recurring main character (keep appearance identical in every image): ${_lg.scenePlan.character}. Scene: ` : '');
+        ? `<<<${elementId}>>> `   // gpt_image_2 Element: 프롬프트에 <<<id>>> 주입
+        : (isSoul2
+          ? ''                    // soul_2: 캐릭터는 soul_id로 API에 전달 — 프롬프트엔 장면만
+          : (_lg.scenePlan.character ? `Consistent recurring main character (keep appearance identical in every image): ${_lg.scenePlan.character}. Scene: ` : ''));
       _lg.scenePlan.scenes.forEach((s, i) => {
         if (res.prompts[i]) s.visualPrompt = (charPrefix + String(res.prompts[i]).trim()).trim();
       });
@@ -4361,11 +4413,16 @@ async function generateAllFrames() {
 
 async function regenerateFrame(idx) {
   const model = document.getElementById('lg-model').value;
-  const isHF = model === 'hf-gpt-image-2';
+  const isSoul2 = model === 'hf-soul-2';
+  const isHF = model === 'hf-gpt-image-2' || isSoul2;
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
     if (!getHfProxyUrl()) {
-      alert('GPT Image 2 — Higgsfield 프록시 URL이 필요합니다 (Stage 1).\n배포 안내는 "전체 프레임 생성" 버튼을 한 번 누르면 자세히 나옵니다.\n또는 proxy/README.md');
+      alert('Higgsfield 프록시 URL이 필요합니다 (Stage 1).\n배포 안내는 "전체 프레임 생성" 버튼을 한 번 누르면 자세히 나옵니다.\n또는 proxy/README.md');
+      return;
+    }
+    if (isSoul2 && !getSelectedSoulId()) {
+      alert('Soul 2 — "★ Soul 캐릭터" 목록에서 학습된 캐릭터를 선택하세요.');
       return;
     }
   } else {
