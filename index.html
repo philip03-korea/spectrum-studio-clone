@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Black+Han+Sans&family=Gowun+Batang:wght@400;700&family=Nanum+Pen+Script&family=Single+Day&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=v1_2_titlepos_effects" />
+<link rel="stylesheet" href="styles.css?v=v1_3_lightbox" />
 </head>
 <body>
   <div class="app-shell">
@@ -227,6 +227,9 @@
 
             <button class="btn btn-primary" id="lg-gen-all" disabled style="width:100%; padding:12px; margin-top: 8px;">
               ② 전체 프레임 생성
+            </button>
+            <button class="btn btn-danger" id="lg-stop" style="width:100%; padding:10px; margin-top: 6px; display:none;">
+              ■ 생성 중단
             </button>
 
             <div class="hint-text" id="lg-progress" style="margin-top: 8px;">대기 중</div>
@@ -1066,6 +1069,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v3_3_gpt_image_2_only"></script>
+  <script type="module" src="app.js?v=v3_4_lightbox_stop_style"></script>
 </body>
 </html>

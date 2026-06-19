@@ -35,3 +35,8 @@ proxy/.dev.vars
 
 # Suno 다운로더 프로브 덤프 (개인 데이터)
 tools/probe_dump.json
+tools/__pycache__/
+
+# 시크릿 포함 핸드오프 문서 (Contabo X-API-Key·터널 URL 노출 — 커밋 금지)
+GPT_Image2_백엔드_핸드오프.md
+GPT_Image2_연동_작업지시서.md

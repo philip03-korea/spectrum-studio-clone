@@ -7,6 +7,7 @@ compatibility_date = "2024-11-01"
 [vars]
 ALLOW_ORIGIN = "*"
 
-# 비밀키(HF_KEY_ID / HF_KEY_SECRET)는 wrangler.toml 에 적지 말고 시크릿으로 등록:
-#   wrangler secret put HF_KEY_ID
-#   wrangler secret put HF_KEY_SECRET
+# Contabo gpt_image_2 백엔드 연결 정보는 wrangler.toml 에 적지 말고 시크릿으로 등록:
+#   wrangler secret put CONTABO_URL    (예: https://xxxx.trycloudflare.com)
+#   wrangler secret put CONTABO_KEY    (Contabo 백엔드 X-API-Key)
+# (이전 HF_KEY_ID/HF_KEY_SECRET 시크릿은 더 이상 안 씀 — 지우려면 wrangler secret delete HF_KEY_ID 등)

@@ -3820,6 +3820,12 @@ function bindLyricImageGen() {
 
   // ② 전체 생성
   $L('lg-gen-all').addEventListener('click', () => generateAllFrames());
+  // 생성 중단
+  $L('lg-stop')?.addEventListener('click', () => {
+    _lg.cancel = true;
+    const sb = $L('lg-stop');
+    if (sb) { sb.disabled = true; sb.textContent = '중단 중… (현재 장면 끝나면 멈춤)'; }
+  });
 
   $L('lg-to-bgs').addEventListener('click', () => addFramesToBackgrounds());
   $L('lg-download-zip').addEventListener('click', () => downloadFramesZip());
@@ -3841,7 +3847,7 @@ function renderScenePlan() {
       ${s.biblicalEvent ? `<div style="color: var(--warn); font-weight:600;">📖 ${s.biblicalEvent}</div>` : ''}
       <div style="color: var(--text-2); margin-top: 2px;">🎵 ${s.lyricSummary || '(가사 없음)'}</div>
       <div style="color: var(--text-2); font-size: 10px;">감정: ${s.emotion}</div>
-      ${frame ? `<img src="${frame.url}" style="margin-top:6px; width:100%; max-height:120px; object-fit:cover; border-radius:4px;" />` : ''}
+      ${frame ? `<img class="lg-frame-img" data-idx="${s.idx}" src="${frame.url}" title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;" />` : ''}
     `;
     wrap.appendChild(row);
   });
@@ -3849,6 +3855,53 @@ function renderScenePlan() {
   wrap.querySelectorAll('.lg-regen-btn').forEach(b => {
     b.addEventListener('click', () => regenerateFrame(Number(b.dataset.idx)));
   });
+  // 이미지 클릭 → 전체화면 라이트박스 (방향키/버튼으로 이동)
+  wrap.querySelectorAll('.lg-frame-img').forEach(img => {
+    img.addEventListener('click', () => openFrameLightbox(Number(img.dataset.idx)));
+  });
+}
+
+// 전체화면 라이트박스: 클릭한 이미지부터, ←/→ 또는 버튼으로 이동, Esc/배경클릭 닫기
+function openFrameLightbox(startIdx) {
+  const frames = [..._lg.frames].sort((a, b) => a.idx - b.idx);
+  if (!frames.length) return;
+  let ov = document.getElementById('lg-lightbox');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'lg-lightbox';
+    ov.innerHTML =
+      '<button class="lgbx-btn lgbx-close" title="닫기 (Esc)">✕</button>' +
+      '<button class="lgbx-btn lgbx-prev" title="이전 (←)">‹</button>' +
+      '<img class="lgbx-img" alt="생성 이미지" />' +
+      '<button class="lgbx-btn lgbx-next" title="다음 (→)">›</button>' +
+      '<div class="lgbx-cap"></div>';
+    document.body.appendChild(ov);
+    const render = () => {
+      const st = ov._state; if (!st) return;
+      const f = st.frames[st.pos];
+      ov.querySelector('.lgbx-img').src = f.url;
+      ov.querySelector('.lgbx-cap').textContent =
+        `#${String(f.idx).padStart(2, '0')} · ${st.pos + 1}/${st.frames.length}` +
+        (f.prompt ? ` — ${f.prompt.slice(0, 90)}` : '');
+    };
+    const move = d => { const st = ov._state; if (!st) return; st.pos = (st.pos + d + st.frames.length) % st.frames.length; render(); };
+    const close = () => ov.classList.remove('open');
+    ov._render = render; ov._move = move;
+    ov.querySelector('.lgbx-close').addEventListener('click', close);
+    ov.querySelector('.lgbx-prev').addEventListener('click', e => { e.stopPropagation(); move(-1); });
+    ov.querySelector('.lgbx-next').addEventListener('click', e => { e.stopPropagation(); move(1); });
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    document.addEventListener('keydown', e => {
+      if (!ov.classList.contains('open')) return;
+      if (e.key === 'Escape') close();
+      else if (e.key === 'ArrowLeft') move(-1);
+      else if (e.key === 'ArrowRight') move(1);
+    });
+  }
+  const pos = Math.max(0, frames.findIndex(f => f.idx === startIdx));
+  ov._state = { frames, pos };
+  ov.classList.add('open');
+  ov._render();
 }
 
 async function generateAllFrames() {
@@ -3900,9 +3953,16 @@ async function generateAllFrames() {
   const hasUpload = _lg.styleFiles && _lg.styleFiles.length > 0;
   const useUpload = !preset && hasUpload && !isHF;
   const useRefEdits   = useUpload && model === 'gpt-image-1';   // 얼굴·인물 복제 경로
-  const useStyleVision = useUpload && model === 'dall-e-3';      // 스타일만(폴백)
+  // 스타일 비전 추출(업로드 이미지 → 스타일 텍스트 → 프롬프트 주입):
+  //  • dall-e-3: 업로드+프리셋없음일 때
+  //  • GPT Image 2(HF): 업로드 이미지가 있으면 (OpenAI 키로 스타일 추출) — 캔버스/백엔드가 참조이미지 직접지원 안 하므로 스타일을 텍스트로 반영
+  const hfStyleVision = isHF && hasUpload && !!oaKey;
+  const useStyleVision = (useUpload && model === 'dall-e-3') || hfStyleVision;
+  if (isHF && hasUpload && !oaKey && !preset) {
+    document.getElementById('lg-progress').textContent = '⚠️ 업로드 이미지 스타일을 반영하려면 OpenAI 키(스타일 분석용)나 스타일 프리셋을 선택하세요.';
+  }
   if (useStyleVision && !_lg.styleHints) {
-    document.getElementById('lg-progress').textContent = '🎨 업로드 이미지에서 스타일 분석 중… (DALL·E 3은 얼굴 복제 미지원 — 스타일만)';
+    document.getElementById('lg-progress').textContent = '🎨 업로드 이미지에서 스타일 분석 중… (스타일을 프롬프트로 반영)';
     try {
       _lg.styleHints = await describeStyleFromImages(oaKey, _lg.styleFiles);
     } catch (e) {
@@ -3917,17 +3977,25 @@ async function generateAllFrames() {
   _lg.prompts = _lg.scenePlan.scenes.map(s => ({
     idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints),
   }));
-  // HF: 업로드 이미지가 있으면 참조로 전달 / gpt-image-1: edits 경로 / dall-e-3: 스타일 비전
-  const refFiles = isHF ? (hasUpload ? _lg.styleFiles : null) : (useRefEdits ? _lg.styleFiles : null);
+  // HF(gpt_image_2): 참조이미지는 백엔드 미지원 → 스타일은 위 비전 텍스트로 반영(refFiles 안 보냄)
+  // gpt-image-1: edits 경로 / dall-e-3: 스타일 비전
+  const refFiles = isHF ? null : (useRefEdits ? _lg.styleFiles : null);
   const modeTag = isHF
-    ? (hasUpload ? ' (업로드 이미지 참조)' : '')
+    ? (appliedHints ? ' (업로드 스타일 적용)' : (preset ? ' (선택 스타일)' : ''))
     : (useRefEdits ? ' (업로드 이미지로 인물 유지)' : (appliedHints ? ' (업로드 스타일 적용)' : ''));
   const fails = [];
   let lastErr = '';
+  _lg.cancel = false;
+  const stopBtn = document.getElementById('lg-stop');
+  if (stopBtn) { stopBtn.style.display = 'block'; stopBtn.disabled = false; stopBtn.textContent = '■ 생성 중단'; }
   for (let i = 0; i < total; i++) {
+    if (_lg.cancel) {
+      document.getElementById('lg-progress').textContent = `■ 중단됨 — ${_lg.frames.length}/${total} 생성 후 멈춤`;
+      break;
+    }
     const s = _lg.scenePlan.scenes[i];
     const prompt = _lg.prompts[i].prompt;
-    document.getElementById('lg-progress').textContent = `생성 중 ${i+1}/${total} — 장면 ${s.idx}${modeTag}`;
+    document.getElementById('lg-progress').textContent = `생성 중 ${i+1}/${total} — 장면 ${s.idx}${modeTag} (중단하려면 ■ 버튼)`;
     try {
       const blob = await generateImageDispatch(model, prompt, aspect, refFiles);
       const url = URL.createObjectURL(blob);
@@ -3941,15 +4009,21 @@ async function generateAllFrames() {
       if (/안전 시스템|API 401|API 키|프록시|키 미설정|크레딧/.test(e.message)) {
         document.getElementById('lg-progress').textContent = `❌ 중단: ${e.message}`;
         btn.disabled = false;
+        if (stopBtn) stopBtn.style.display = 'none';
         return;
       }
       // 그 외(일시적 오류 등)는 계속 진행
       document.getElementById('lg-progress').textContent = `⚠️ ${i+1}번 실패(계속): ${e.message}`;
     }
   }
+  if (stopBtn) stopBtn.style.display = 'none';
   const ok = _lg.frames.length;
+  if (_lg.cancel && ok) {
+    document.getElementById('lg-to-bgs').disabled = false;
+    document.getElementById('lg-download-zip').disabled = false;
+  }
   if (ok === 0) {
-    document.getElementById('lg-progress').textContent = `❌ 전부 실패: ${lastErr}`;
+    document.getElementById('lg-progress').textContent = _lg.cancel ? '■ 중단됨 (생성된 이미지 없음)' : `❌ 전부 실패: ${lastErr}`;
   } else if (fails.length) {
     document.getElementById('lg-progress').textContent = `✅ ${ok}개 완료 / ⚠️ ${fails.length}개 실패(#${fails.join(', #')}) — 실패분은 재생성 버튼으로 다시 시도`;
     document.getElementById('lg-to-bgs').disabled = false;
@@ -3992,8 +4066,8 @@ async function regenerateFrame(idx) {
       const scene = _lg.scenePlan?.scenes.find(s => s.idx === idx);
       if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints);
     }
-    // HF = 업로드 이미지 참조 / gpt-image-1 + 업로드 = edits(인물 유지) / 그 외 = 텍스트-투-이미지
-    const refFiles = isHF ? (hasUpload ? _lg.styleFiles : null) : (useRefEdits ? _lg.styleFiles : null);
+    // HF(gpt_image_2)는 참조이미지 미지원 → 스타일은 프롬프트(styleHints)로 반영 / gpt-image-1 + 업로드 = edits / 그 외 = t2i
+    const refFiles = isHF ? null : (useRefEdits ? _lg.styleFiles : null);
     const blob = await generateImageDispatch(model, promptObj.prompt, aspect, refFiles);
     const url = URL.createObjectURL(blob);
     const existing = _lg.frames.find(f => f.idx === idx);

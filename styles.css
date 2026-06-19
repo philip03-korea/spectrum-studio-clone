@@ -1216,3 +1216,64 @@ body {
   margin-bottom: 8px;
 }
 .btn-back { width: 100%; }
+
+/* ===== 생성 중단 버튼 ===== */
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { filter: brightness(1.1); }
+.btn-danger:disabled { opacity: 0.6; cursor: default; }
+
+/* ===== 가사 이미지 라이트박스 (전체화면 보기 + 방향 이동) ===== */
+#lg-lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.92);
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+#lg-lightbox.open { display: flex; }
+#lg-lightbox .lgbx-img {
+  max-width: 92vw;
+  max-height: 88vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+#lg-lightbox .lgbx-btn {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+#lg-lightbox .lgbx-btn:hover { background: rgba(255, 255, 255, 0.28); }
+#lg-lightbox .lgbx-close { top: 18px; right: 18px; width: 44px; height: 44px; font-size: 20px; }
+#lg-lightbox .lgbx-prev,
+#lg-lightbox .lgbx-next { top: 50%; transform: translateY(-50%); width: 56px; height: 56px; font-size: 34px; line-height: 1; }
+#lg-lightbox .lgbx-prev { left: 18px; }
+#lg-lightbox .lgbx-next { right: 18px; }
+#lg-lightbox .lgbx-cap {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 88vw;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 6px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
