@@ -2469,14 +2469,19 @@ function bindStage1Lyrics() {
     });
   }
 
-  // 초기 텍스트 반영
-  if (state.lyrics.rawText) setAllText(state.lyrics.rawText);
+  // 초기 텍스트 반영 + lines 재계산(새로고침 후 분석이 "가사 없음" 되던 버그 수정)
+  if (state.lyrics.rawText) {
+    setAllText(state.lyrics.rawText);
+    updateLyrics(state.lyrics.rawText, { skipPersist: true });
+  }
 }
 
 async function doReset() {
-  if (!confirm('⚠️ 모든 업로드 파일과 설정을 삭제할까요?\n(되돌릴 수 없습니다)')) return;
-  await dbClear();
-  localStorage.removeItem(SETTINGS_KEY);
+  if (!confirm('⚠️ 초기화할까요?\nAPI 키·프록시 URL은 유지되고, 나머지(가사·기본정보·업로드 이미지·생성결과·설정)는 모두 삭제됩니다.\n(되돌릴 수 없습니다)')) return;
+  await dbClear();                              // 업로드 미디어 + 스타일 이미지(IndexedDB)
+  localStorage.removeItem(SETTINGS_KEY);        // 상태(가사 포함)
+  localStorage.removeItem('ssc-lg-meta');       // 제목/테마/프리셋/비율/모델
+  // ※ ssc-openai-key, ssc-hf-proxy-url 는 일부러 남겨둠
   location.reload();
 }
 
@@ -3385,10 +3390,15 @@ function buildScenePlan(lyrics, theme, N) {
 
 function buildPromptForScene(scene, theme, preset, styleHints) {
   const parts = [];
-  // 성경 사건이 있으면 우선
+  // ★ 가사 내용을 장면의 핵심 묘사로 사용 (이게 빠지면 가사와 무관한 이미지가 나옴)
+  const lyric = (scene.lyricFull || scene.lyricSummary || '').trim();
+  if (lyric) {
+    parts.push(`Create an image that visually depicts the meaning of these song lyrics: "${lyric}".`);
+  }
+  // 성경 사건/테마는 보조 맥락
   if (scene.biblicalEvent) {
-    parts.push(`Biblical scene: ${scene.biblicalEvent}.`);
-  } else if (theme) {
+    parts.push(`Biblical context: ${scene.biblicalEvent}.`);
+  } else if (theme && !lyric) {
     parts.push(`Scene from "${theme}".`);
   }
   // 감정 톤
@@ -3737,12 +3747,45 @@ function bindLyricImageGen() {
     }
   });
 
+  // ----- Stage1 입력/이미지 영속화 (새로고침해도 유지) -----
+  const LG_META_KEY = 'ssc-lg-meta';
+  const saveLGMeta = () => {
+    try {
+      localStorage.setItem(LG_META_KEY, JSON.stringify({
+        title: $L('lg-title')?.value || '', theme: $L('lg-theme')?.value || '',
+        preset: $L('lg-preset')?.value || '', aspect: $L('lg-aspect')?.value || '',
+        model: $L('lg-model')?.value || '',
+      }));
+    } catch {}
+  };
+  const saveStyleFiles = async () => {
+    try {
+      const arr = await Promise.all((_lg.styleFiles || []).map(async f =>
+        ({ name: f.name, type: f.type, dataURL: await fileToDataURL(f) })));
+      await dbSet('lg-style-files', arr);
+    } catch {}
+  };
+
   // 곡 제목 자동 채움 (state.title.text)
   if ($L('lg-title') && !$L('lg-title').value) {
     $L('lg-title').value = state.title.text || '';
   }
-  $L('lg-title').addEventListener('input', e => { _lg.title = e.target.value; });
-  $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; });
+  $L('lg-title').addEventListener('input', e => { _lg.title = e.target.value; saveLGMeta(); });
+  $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; saveLGMeta(); });
+  $L('lg-aspect')?.addEventListener('change', saveLGMeta);
+  $L('lg-model')?.addEventListener('change', saveLGMeta);
+
+  // 저장된 메타 복원 (제목/테마/프리셋/비율/모델)
+  try {
+    const m = JSON.parse(localStorage.getItem(LG_META_KEY) || 'null');
+    if (m) {
+      if (m.title && $L('lg-title')) $L('lg-title').value = m.title;
+      if (m.theme && $L('lg-theme')) $L('lg-theme').value = m.theme;
+      if (m.preset && $L('lg-preset')) $L('lg-preset').value = m.preset;
+      if (m.aspect && $L('lg-aspect')) $L('lg-aspect').value = m.aspect;
+      if (m.model && $L('lg-model')) $L('lg-model').value = m.model;
+    }
+  } catch {}
 
   // 스타일 이미지 다중 업로드 (최대 10)
   _lg.styleFiles = _lg.styleFiles || [];
@@ -3765,6 +3808,7 @@ function bindLyricImageGen() {
         _lg.styleFiles.splice(i, 1);
         _lg.styleHints = '';   // 이미지 바뀌면 스타일 캐시 무효화 → 다시 분석
         renderStyleThumbs();
+        saveStyleFiles();
       });
       t.appendChild(x);
       wrap.appendChild(t);
@@ -3776,9 +3820,24 @@ function bindLyricImageGen() {
     _lg.styleFiles.push(...accepted.slice(0, Math.max(0, remaining)));
     _lg.styleHints = '';   // 새 이미지 추가 → 스타일 캐시 무효화
     renderStyleThumbs();
+    saveStyleFiles();
   });
-  // 프리셋을 바꾸면 업로드-스타일 캐시 무효화
-  if ($L('lg-preset')) $L('lg-preset').addEventListener('change', () => { _lg.styleHints = ''; });
+  // 프리셋을 바꾸면 업로드-스타일 캐시 무효화 + 저장
+  if ($L('lg-preset')) $L('lg-preset').addEventListener('change', () => { _lg.styleHints = ''; saveLGMeta(); });
+
+  // 저장된 스타일 이미지 복원 (IndexedDB)
+  (async () => {
+    try {
+      const arr = await dbGet('lg-style-files');
+      if (Array.isArray(arr) && arr.length && !(_lg.styleFiles && _lg.styleFiles.length)) {
+        _lg.styleFiles = await Promise.all(arr.map(async a => {
+          const blob = await (await fetch(a.dataURL)).blob();
+          return new File([blob], a.name || 'style.png', { type: a.type || blob.type || 'image/png' });
+        }));
+        renderStyleThumbs();
+      }
+    } catch {}
+  })();
 
   // 자동 카운트 토글
   const updateFramesUI = () => {
@@ -3793,6 +3852,13 @@ function bindLyricImageGen() {
 
   // ① 가사 분석
   $L('lg-analyze').addEventListener('click', () => {
+    // 분석 직전, 화면의 가사 텍스트로 한 번 더 동기화 (lines 비어있으면 textarea에서 복구)
+    if (!state.lyrics.lines.length) {
+      const ta = ['lyrics-text-ig', 'lyrics-text-stage1', 'lyrics-text']
+        .map(id => $L(id)?.value?.trim()).find(v => v);
+      const raw = ta || state.lyrics.rawText;
+      if (raw) updateLyrics(raw, { skipPersist: true });
+    }
     const lines = state.lyrics.lines;
     if (!lines.length) {
       $L('lg-analyze-status').textContent = '⚠️ 가사가 비어있습니다 (Stage 1에서 LRC 업로드 또는 텍스트 붙여넣기)';
@@ -3837,7 +3903,8 @@ function renderScenePlan() {
   wrap.innerHTML = '';
   _lg.scenePlan.scenes.forEach((s, i) => {
     const row = document.createElement('div');
-    row.style.cssText = 'border-bottom: 1px solid var(--border); padding: 8px 4px; font-size: 11px;';
+    row.className = 'lg-scene-card';
+    row.style.cssText = 'font-size: 11px;';
     const frame = _lg.frames.find(f => f.idx === s.idx);
     row.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
