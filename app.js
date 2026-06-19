@@ -3581,22 +3581,29 @@ async function describeStyleFromImages(apiKey, files) {
   return (j.choices?.[0]?.message?.content || '').trim();
 }
 
-// 가사 줄들을 "구체적 영어 이미지 프롬프트"로 일괄 변환 (GPT) — 가사-이미지 매칭 정확도 핵심
-// 추상적/한국어 가사를 이미지 모델이 잘 그리는 구체 장면 영어로 바꾼다. 한 번의 호출로 전체 처리.
-async function describeScenesFromLyrics(apiKey, scenes, theme) {
+// 가사 줄들을 "구체적 영어 이미지 프롬프트"로 일괄 변환 (GPT) — 가사 매칭 + 캐릭터 일관성 핵심.
+// ① 곡 전체에 걸친 '동일 주인공/세계관'을 먼저 정하고
+// ② 각 컷 프롬프트에 그 주인공 묘사를 똑같이 박아넣어, stateless 모델에서도 일관성이 유지되게 한다.
+// 반환: { character: "...", prompts: ["...", ...] }
+async function describeScenesFromLyrics(apiKey, scenes, theme, styleHint) {
   const list = scenes.map((s, i) =>
     `${i + 1}. ${((s.lyricFull || s.lyricSummary || '').trim()) || '(no lyric)'}`).join('\n');
   const instr =
-    'You are a music-video art director. For EACH numbered Korean lyric line below, write ONE vivid, concrete ENGLISH image-generation prompt that visually represents THAT line\'s meaning. ' +
-    'Rules: a single clear scene with concrete subject + setting + action + emotion + lighting; cinematic photographic language; each prompt distinct and faithful to its own line; do NOT render any text/letters in the image; one sentence each. ' +
-    (theme ? `Overall song theme/context: ${theme}. ` : '') +
-    'Return ONLY JSON: {"prompts":["...","..."]} with exactly the same number of items, in order.';
+    'You are a music-video director creating a coherent visual story from Korean lyrics.\n' +
+    'STEP 1 — Design ONE consistent main character (the protagonist that recurs in EVERY shot). ' +
+    'Write a fixed, detailed English appearance description: gender, age, hair (color/length/style), face, exact clothing/colors, body type. This MUST stay identical across all shots.\n' +
+    'STEP 2 — For EACH numbered lyric line, write ONE English SCENE prompt (the character is added separately, so do NOT repeat the character description here):\n' +
+    '  (a) a concrete, distinct scene — setting + action/pose + emotion + camera angle + lighting — that visually illustrates THAT specific lyric line,\n' +
+    '  (b) keep the same art style/world across all shots, no text or letters in the image.\n' +
+    (theme ? `Song theme/context: ${theme}.\n` : '') +
+    (styleHint ? `Art style to follow in every shot: ${styleHint}.\n` : '') +
+    'Return ONLY JSON: {"character":"<fixed description>","prompts":["...","..."]} — prompts length MUST equal the number of lyric lines, in order.';
   const body = {
     model: 'gpt-4o-mini',
     messages: [{ role: 'user', content: instr + '\n\nLyric lines:\n' + list }],
     response_format: { type: 'json_object' },
-    temperature: 0.7,
-    max_tokens: 1800,
+    temperature: 0.6,
+    max_tokens: 2600,
   };
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -3607,7 +3614,7 @@ async function describeScenesFromLyrics(apiKey, scenes, theme) {
   const j = await r.json();
   let obj = {};
   try { obj = JSON.parse(j.choices?.[0]?.message?.content || '{}'); } catch (_) {}
-  return Array.isArray(obj.prompts) ? obj.prompts : [];
+  return { character: (obj.character || '').trim(), prompts: Array.isArray(obj.prompts) ? obj.prompts : [] };
 }
 
 // ----- Higgsfield 이미지 생성 (GPT Image 2) -----
@@ -4138,10 +4145,14 @@ async function generateAllFrames() {
   // ★ 가사-이미지 매칭 핵심: OpenAI 키가 있으면 가사를 구체 영어 장면 묘사로 변환(컷마다 다른 장면)
   if (oaKey && oaKey.startsWith('sk-') && !_lg.scenePlan._enriched) {
     try {
-      document.getElementById('lg-progress').textContent = '🎬 가사를 장면 묘사로 변환 중… (매칭 정확도 향상)';
-      const vps = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme);
-      _lg.scenePlan.scenes.forEach((s, i) => { if (vps[i]) s.visualPrompt = String(vps[i]).trim(); });
-      _lg.scenePlan._enriched = vps.length > 0;
+      document.getElementById('lg-progress').textContent = '🎬 주인공·장면 묘사 생성 중… (가사 매칭 + 캐릭터 일관성)';
+      const res = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme, appliedHints);
+      _lg.scenePlan.character = res.character || '';
+      const charPrefix = res.character ? `Consistent recurring main character (keep appearance identical in every image): ${res.character}. Scene: ` : '';
+      _lg.scenePlan.scenes.forEach((s, i) => {
+        if (res.prompts[i]) s.visualPrompt = (charPrefix + String(res.prompts[i]).trim()).trim();
+      });
+      _lg.scenePlan._enriched = res.prompts.length > 0;
     } catch (e) { console.warn('장면 변환 건너뜀:', e.message); }
   }
   _lg.prompts = _lg.scenePlan.scenes.map(s => ({
