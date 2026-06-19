@@ -892,15 +892,35 @@ function distributeTextEvenly(text, duration) {
   if (!items.length) return [];
   return items.map((t, i) => ({ time: (i / items.length) * duration, text: t }));
 }
+// 한 줄에 가사가 다 뭉친 경우 문장/구 단위로 쪼갠다 (장면 분할이 1개로 망가지는 것 방지)
+function splitMergedLine(line, duration) {
+  const segs = String(line.text || '')
+    .split(/[.!?。…·]+|\s{2,}|\s*[\/|]\s*/)
+    .map(s => s.trim()).filter(s => s.length > 1);
+  if (segs.length <= 1) return [line];
+  const t0 = line.time || 0;
+  const span = Math.max(1, (duration || 180) - t0);
+  return segs.map((s, i) => ({ time: t0 + (i / segs.length) * span, text: s }));
+}
 function parseLyricsInput(text) {
   const t = text.trim();
   if (!t) return [];
-  if (/\[\d{1,2}:\d{1,2}/.test(t)) return parseLRC(t);
-  if (/-->/.test(t)) return parseSRT(t);
-  // 평문(타임스탬프 없음): 오디오가 있으면 길이에 맞춰 균등 분배,
-  // 아직 없으면 임시 길이(180초)로라도 줄을 생성한다.
-  // (가사 분석·이미지 생성·번역은 타이밍이 없어도 동작해야 하므로 빈 배열을 돌려주면 안 됨)
-  return distributeTextEvenly(t, state.audio?.duration || 180);
+  const dur = (typeof state !== 'undefined' && state.audio?.duration) || 180;
+  let lines;
+  if (/\[\d{1,2}:\d{1,2}/.test(t)) lines = parseLRC(t);
+  else if (/-->/.test(t)) lines = parseSRT(t);
+  else lines = null;
+  if (lines) {
+    // LRC/SRT인데 한 줄로 뭉쳐 있으면(경계 태그 없는 word-level 등) 문장 분할
+    if (lines.length === 1 && (lines[0].text || '').length > 40) {
+      lines = splitMergedLine(lines[0], dur);
+    }
+    return lines;
+  }
+  // 평문(타임스탬프 없음): 줄바꿈 우선, 한 덩어리면 문장 단위로 쪼갠 뒤 시간 균등 분배
+  let plain = distributeTextEvenly(t, dur);
+  if (plain.length === 1 && t.length > 40) plain = splitMergedLine(plain[0], dur);
+  return plain;
 }
 
 // ----- parseAndCleanLrc: 섹션 태그 제거 + 단어→문장 병합 (사용자 스펙) -----
@@ -3866,11 +3886,13 @@ function bindLyricImageGen() {
     }
     let N = Number($L('lg-frames').value);
     if ($L('lg-auto-count').checked) {
-      // 자동: 가사 줄 수 / 2 + 2 (8~20 클램프)
+      // 자동: 가사 줄 수 / 2.5 (8~20 클램프)
       N = Math.max(8, Math.min(20, Math.round(lines.length / 2.5)));
-      $L('lg-frames').value = N;
-      $L('lg-frames-v').textContent = N;
     }
+    // 가사 줄 수보다 장면이 많으면 "(가사 없음)" 빈 장면이 생기므로 줄 수로 제한
+    N = Math.max(1, Math.min(N, lines.length));
+    $L('lg-frames').value = N;
+    $L('lg-frames-v').textContent = N;
     const theme = $L('lg-theme').value.trim();
     const plan = buildScenePlan(lines, theme, N);
     _lg.scenePlan = plan;
@@ -3903,7 +3925,7 @@ function renderScenePlan() {
   wrap.innerHTML = '';
   _lg.scenePlan.scenes.forEach((s, i) => {
     const row = document.createElement('div');
-    row.className = 'lg-scene-card';
+    row.className = 'lg-scene-card' + (_lg.generatingIdx === s.idx ? ' generating' : '');
     row.style.cssText = 'font-size: 11px;';
     const frame = _lg.frames.find(f => f.idx === s.idx);
     row.innerHTML = `
@@ -3914,7 +3936,9 @@ function renderScenePlan() {
       ${s.biblicalEvent ? `<div style="color: var(--warn); font-weight:600;">📖 ${s.biblicalEvent}</div>` : ''}
       <div style="color: var(--text-2); margin-top: 2px;">🎵 ${s.lyricSummary || '(가사 없음)'}</div>
       <div style="color: var(--text-2); font-size: 10px;">감정: ${s.emotion}</div>
-      ${frame ? `<img class="lg-frame-img" data-idx="${s.idx}" src="${frame.url}" title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;" />` : ''}
+      ${frame
+        ? `<img class="lg-frame-img" data-idx="${s.idx}" src="${frame.url}" title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;" />`
+        : (_lg.generatingIdx === s.idx ? `<div class="lg-gen-spin">⏳ 생성 중…</div>` : '')}
     `;
     wrap.appendChild(row);
   });
@@ -4063,6 +4087,8 @@ async function generateAllFrames() {
     const s = _lg.scenePlan.scenes[i];
     const prompt = _lg.prompts[i].prompt;
     document.getElementById('lg-progress').textContent = `생성 중 ${i+1}/${total} — 장면 ${s.idx}${modeTag} (중단하려면 ■ 버튼)`;
+    _lg.generatingIdx = s.idx;
+    renderScenePlan();   // 현재 장면에 "⏳ 생성 중…" 표시
     try {
       const blob = await generateImageDispatch(model, prompt, aspect, refFiles);
       const url = URL.createObjectURL(blob);
@@ -4077,6 +4103,7 @@ async function generateAllFrames() {
         document.getElementById('lg-progress').textContent = `❌ 중단: ${e.message}`;
         btn.disabled = false;
         if (stopBtn) stopBtn.style.display = 'none';
+        _lg.generatingIdx = null; renderScenePlan();
         return;
       }
       // 그 외(일시적 오류 등)는 계속 진행
@@ -4084,6 +4111,7 @@ async function generateAllFrames() {
     }
   }
   if (stopBtn) stopBtn.style.display = 'none';
+  _lg.generatingIdx = null; renderScenePlan();
   const ok = _lg.frames.length;
   if (_lg.cancel && ok) {
     document.getElementById('lg-to-bgs').disabled = false;
