@@ -3451,13 +3451,17 @@ function buildPromptForScene(scene, theme, preset, styleHints) {
   };
   // ★ 가사 내용이 장면의 '주제'다 — 각 컷이 그 가사 한 줄을 그림으로 보여줘야 한다.
   const lyric = (scene.lyricFull || scene.lyricSummary || '').trim();
-  if (lyric) {
+  if (scene.visualPrompt) {
+    // GPT로 변환된 구체 영어 장면 묘사가 있으면 그걸 주제로 사용(매칭 정확도 최상)
+    parts.push(scene.visualPrompt);
+    if (theme) parts.push(`Theme: ${theme}.`);
+  } else if (lyric) {
     parts.push(`A cinematic music-video frame that literally illustrates the meaning of THIS specific lyric line: "${lyric}".`);
     parts.push(`The main subject, action and setting MUST be derived from that lyric line (not a generic scene).`);
+    if (theme) parts.push(`Song theme for context: ${theme}.`);
   } else if (theme) {
     parts.push(`Scene from "${theme}".`);
   }
-  if (theme && lyric) parts.push(`Song theme for context: ${theme}.`);
   // 성경 사건은 보조 맥락(괄호)으로만
   if (scene.biblicalEvent) parts.push(`(subtle context: ${scene.biblicalEvent})`);
   // 감정 톤 (분위기/조명만)
@@ -3575,6 +3579,35 @@ async function describeStyleFromImages(apiKey, files) {
   }
   const j = await r.json();
   return (j.choices?.[0]?.message?.content || '').trim();
+}
+
+// 가사 줄들을 "구체적 영어 이미지 프롬프트"로 일괄 변환 (GPT) — 가사-이미지 매칭 정확도 핵심
+// 추상적/한국어 가사를 이미지 모델이 잘 그리는 구체 장면 영어로 바꾼다. 한 번의 호출로 전체 처리.
+async function describeScenesFromLyrics(apiKey, scenes, theme) {
+  const list = scenes.map((s, i) =>
+    `${i + 1}. ${((s.lyricFull || s.lyricSummary || '').trim()) || '(no lyric)'}`).join('\n');
+  const instr =
+    'You are a music-video art director. For EACH numbered Korean lyric line below, write ONE vivid, concrete ENGLISH image-generation prompt that visually represents THAT line\'s meaning. ' +
+    'Rules: a single clear scene with concrete subject + setting + action + emotion + lighting; cinematic photographic language; each prompt distinct and faithful to its own line; do NOT render any text/letters in the image; one sentence each. ' +
+    (theme ? `Overall song theme/context: ${theme}. ` : '') +
+    'Return ONLY JSON: {"prompts":["...","..."]} with exactly the same number of items, in order.';
+  const body = {
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: instr + '\n\nLyric lines:\n' + list }],
+    response_format: { type: 'json_object' },
+    temperature: 0.7,
+    max_tokens: 1800,
+  };
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`장면 변환 실패 ${r.status}`);
+  const j = await r.json();
+  let obj = {};
+  try { obj = JSON.parse(j.choices?.[0]?.message?.content || '{}'); } catch (_) {}
+  return Array.isArray(obj.prompts) ? obj.prompts : [];
 }
 
 // ----- Higgsfield 이미지 생성 (GPT Image 2) -----
@@ -4102,6 +4135,15 @@ async function generateAllFrames() {
   // 프롬프트 재구성 (분석 시점엔 styleHints가 비어 있었으므로)
   const theme = document.getElementById('lg-theme').value.trim();
   const appliedHints = useStyleVision ? _lg.styleHints : '';
+  // ★ 가사-이미지 매칭 핵심: OpenAI 키가 있으면 가사를 구체 영어 장면 묘사로 변환(컷마다 다른 장면)
+  if (oaKey && oaKey.startsWith('sk-') && !_lg.scenePlan._enriched) {
+    try {
+      document.getElementById('lg-progress').textContent = '🎬 가사를 장면 묘사로 변환 중… (매칭 정확도 향상)';
+      const vps = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme);
+      _lg.scenePlan.scenes.forEach((s, i) => { if (vps[i]) s.visualPrompt = String(vps[i]).trim(); });
+      _lg.scenePlan._enriched = vps.length > 0;
+    } catch (e) { console.warn('장면 변환 건너뜀:', e.message); }
+  }
   _lg.prompts = _lg.scenePlan.scenes.map(s => ({
     idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints),
   }));
