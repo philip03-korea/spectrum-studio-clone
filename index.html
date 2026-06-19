@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Black+Han+Sans&family=Gowun+Batang:wght@400;700&family=Nanum+Pen+Script&family=Single+Day&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=v1_5_genspin" />
+<link rel="stylesheet" href="styles.css?v=v1_6_bgsync" />
 </head>
 <body>
   <div class="app-shell">
@@ -706,6 +706,9 @@
               <label class="check-row">
                 <input type="checkbox" id="slideshow-enabled" checked /> 배경 자동 전환
               </label>
+              <label class="check-row">
+                <input type="checkbox" id="slideshow-sync" /> 🎵 가사 타이밍에 맞춰 전환 (생성 이미지 권장)
+              </label>
               <label class="slider-row">
                 <span>간격</span>
                 <input type="range" min="2" max="20" value="5" id="slideshow-interval" />
@@ -714,6 +717,9 @@
               <label class="check-row">
                 <input type="checkbox" id="slideshow-crossfade" checked /> 크로스페이드
               </label>
+              <div class="adjust-divider">가사 ↔ 이미지 싱크</div>
+              <div class="hint-text" style="margin-bottom:6px;">각 배경이 나타날 <b>시작 시간(mm:ss)</b>. 위 "가사 타이밍" ON일 때 적용. 가사와 안 맞으면 여기서 직접 조정하세요.</div>
+              <div id="bg-sync-list" class="bg-sync-list"></div>
               <div class="adjust-divider">프레임</div>
               <label class="slider-row" style="grid-template-columns: 60px 1fr;">
                 <span>스타일</span>
@@ -1089,6 +1095,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_1_studio_trans_bgfx_lyricsfont"></script>
+  <script type="module" src="app.js?v=v4_2_lyric_bg_sync"></script>
 </body>
 </html>

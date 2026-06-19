@@ -1244,6 +1244,14 @@ body {
 .btn-danger:hover { filter: brightness(1.1); }
 .btn-danger:disabled { opacity: 0.6; cursor: default; }
 
+/* ===== 가사↔이미지 싱크 정렬 에디터 ===== */
+.bg-sync-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.bg-sync-row { display: flex; align-items: center; gap: 8px; }
+.bg-sync-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 5px; flex-shrink: 0; background:#000; }
+.bg-sync-info { flex: 1; min-width: 0; }
+.bg-sync-lyric { font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+.bg-sync-time { width: 80px; font-size: 12px; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--border); background: var(--panel-2, rgba(255,255,255,0.05)); color: var(--text); }
+
 /* ===== 가사 이미지 라이트박스 (전체화면 보기 + 방향 이동) ===== */
 #lg-lightbox {
   display: none;

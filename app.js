@@ -30,7 +30,7 @@ const DEFAULT_STATE = () => ({
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
   lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'dual' },
-  slideshow: { enabled: true, interval: 5, crossfade: true },
+  slideshow: { enabled: true, interval: 5, crossfade: true, syncLyrics: false },
   frame: { style: 'none', intensity: 50 },
   filter: { preset: 'none' },
   audioEl: null, audioCtx: null, analyser: null, source: null, freqData: null,
@@ -586,6 +586,7 @@ function renderBgThumbs() {
     });
     wrap.appendChild(t);
   });
+  renderBgSyncList();   // 가사↔이미지 싱크 목록도 동기화
 }
 async function reorderBackgrounds(from, to) {
   if (from < 0 || to < 0 || from >= state.backgrounds.length || to >= state.backgrounds.length) return;
@@ -650,7 +651,23 @@ function getActiveBg() {
 }
 /** Returns {bg, nextBg?, fadeAlpha?} for given time. Handles slideshow. */
 function getBgForTime(time) {
-  if (!state.slideshow.enabled || state.backgrounds.length <= 1) {
+  const bgs = state.backgrounds;
+  // 가사 타이밍 동기화: 시간(time) 정보를 가진 배경을 시간순으로 배치해 현재 구간을 선택
+  if (state.slideshow.syncLyrics && bgs.length && bgs.some(b => typeof b.time === 'number')) {
+    const timed = bgs.map(b => ({ b, t: typeof b.time === 'number' ? b.time : 0 })).sort((a, b) => a.t - b.t);
+    let idx = 0;
+    for (let i = 0; i < timed.length; i++) { if (time >= timed[i].t - 0.01) idx = i; else break; }
+    const cur = timed[idx].b;
+    const next = timed[idx + 1];
+    let fadeAlpha = 0, nextBg = null;
+    if (next && state.slideshow.crossfade) {
+      const seg = next.t - timed[idx].t;
+      const fade = Math.min(1.2, Math.max(0.3, seg * 0.2));
+      if (time > next.t - fade) { fadeAlpha = (time - (next.t - fade)) / fade; nextBg = next.b; }
+    }
+    return { bg: cur, nextBg: fadeAlpha > 0 ? nextBg : null, fadeAlpha };
+  }
+  if (!state.slideshow.enabled || bgs.length <= 1) {
     return { bg: getActiveBg() };
   }
   const interval = Math.max(1, state.slideshow.interval);
@@ -840,6 +857,7 @@ function bindAllSliders() {
   onE('lyrics-display','change',e => { state.lyrics.display = e.target.value; debouncedSave(); });
   onE('lyrics-translate','click', translateAllLyrics);
   onE('slideshow-enabled', 'change', e => { state.slideshow.enabled = e.target.checked; debouncedSave(); });
+  onE('slideshow-sync', 'change', e => { state.slideshow.syncLyrics = e.target.checked; debouncedSave(); });
   onE('slideshow-crossfade','change', e => { state.slideshow.crossfade = e.target.checked; debouncedSave(); });
   onE('frame-style', 'change', e => { state.frame.style = e.target.value; debouncedSave(); });
 
@@ -3071,7 +3089,9 @@ function restoreUI() {
   });
   if (state.lyrics.rawText) updateLyrics(state.lyrics.rawText, { skipPersist: true });
   $('slideshow-enabled').checked = state.slideshow.enabled;
+  setChk('slideshow-sync', !!state.slideshow.syncLyrics);
   $('slideshow-crossfade').checked = state.slideshow.crossfade;
+  renderBgSyncList();
   $('frame-style').value = state.frame.style;
   renderPalette(PRESETS[state.genre]?.colors);
 }
@@ -4324,12 +4344,61 @@ async function regenerateFrame(idx) {
 
 async function addFramesToBackgrounds() {
   if (!_lg.frames.length) return;
-  // 프레임 순서대로 배경에 추가
+  // 프레임 순서대로 배경에 추가 + 각 배경에 해당 가사 장면의 시작 시간을 태그
   for (const f of _lg.frames.sort((a,b)=>a.idx-b.idx)) {
     const file = new File([f.blob], `frame-${String(f.idx).padStart(2,'0')}.png`, { type: 'image/png' });
     await handleBackgrounds([file]);
+    const bg = state.backgrounds[state.backgrounds.length - 1];
+    const scene = _lg.scenePlan?.scenes.find(s => s.idx === f.idx);
+    if (bg && scene) {
+      bg.time = scene.timeStart || 0;          // 가사 타임스탬프(초)
+      bg.lyric = scene.lyricSummary || '';
+      bg.sceneIdx = f.idx;
+    }
   }
-  alert(`${_lg.frames.length}개 프레임이 배경에 추가됐습니다. 슬라이드쇼가 자동 ON이라 영상에 그대로 들어갑니다.`);
+  // 생성 이미지는 가사 타이밍 동기화를 기본 ON
+  state.slideshow.syncLyrics = true;
+  const sc = document.getElementById('slideshow-sync'); if (sc) sc.checked = true;
+  renderBgSyncList();
+  debouncedSave();
+  alert(`${_lg.frames.length}개 프레임이 배경에 추가됐습니다.\n"가사 타이밍 동기화"가 켜져서 각 이미지가 가사 시간에 맞춰 전환됩니다.\n(비주얼 편집 → 배경 탭 아래 "가사↔이미지 싱크"에서 시간 직접 조정 가능)`);
+}
+
+// 가사↔이미지 싱크 정렬 에디터 — 각 배경의 시작 시간을 mm:ss로 편집
+function renderBgSyncList() {
+  const wrap = document.getElementById('bg-sync-list');
+  if (!wrap) return;
+  const bgs = state.backgrounds || [];
+  if (!bgs.length) { wrap.innerHTML = '<div class="hint-text">배경이 없습니다.</div>'; return; }
+  wrap.innerHTML = '';
+  bgs.forEach((bg, i) => {
+    const row = document.createElement('div');
+    row.className = 'bg-sync-row';
+    const mmss = fmtTime(bg.time || 0);
+    row.innerHTML =
+      `<img class="bg-sync-thumb" src="${bg.url}" />` +
+      `<div class="bg-sync-info"><div class="bg-sync-lyric">${(bg.lyric || bg.name || ('#' + (i+1))).slice(0,30)}</div>` +
+      `<input class="bg-sync-time" data-bgidx="${i}" value="${mmss}" placeholder="mm:ss" /></div>`;
+    wrap.appendChild(row);
+  });
+  wrap.querySelectorAll('.bg-sync-time').forEach(inp => {
+    inp.addEventListener('change', e => {
+      const i = +e.target.dataset.bgidx;
+      const sec = parseMmss(e.target.value);
+      if (sec != null && state.backgrounds[i]) {
+        state.backgrounds[i].time = sec;
+        debouncedSave();
+        renderBgSyncList();
+      }
+    });
+  });
+}
+function parseMmss(s) {
+  s = String(s || '').trim();
+  const m = s.match(/^(\d+):(\d{1,2})(?:\.(\d+))?$/);
+  if (m) return (+m[1]) * 60 + (+m[2]) + (m[3] ? +('0.' + m[3]) : 0);
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
 }
 
 async function downloadFramesZip() {
