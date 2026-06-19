@@ -3654,23 +3654,59 @@ async function describeStyleFromImages(apiKey, files) {
   return (j.choices?.[0]?.message?.content || '').trim();
 }
 
+// 업로드 이미지에서 '주인공(성별·외모)'과 '아트 스타일'을 함께 추출 — 업로드 캐릭터를 생성에 반영하기 위함.
+// 반환: { character: "...", style: "..." }
+async function analyzeReferenceImages(apiKey, files) {
+  const imgs = [];
+  for (const f of files.slice(0, 4)) {
+    imgs.push({ type: 'image_url', image_url: { url: await fileToDataURL(f), detail: 'low' } });
+  }
+  const body = {
+    model: 'gpt-4o',
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text:
+          'These are reference images for an ILLUSTRATED music video. Return ONLY JSON {"character":"...","style":"..."}.\n' +
+          '"character": ONE concise English description of the MAIN character to reuse in every shot — gender, approximate age, hair (color/length/style), clothing & colors, body type, overall vibe. Treat as a fictional illustrated character; describe appearance only (no real-person identification, no names). If multiple people, describe the most prominent one.\n' +
+          '"style": the shared ART STYLE only — medium/technique, color palette, lighting, mood, texture.' },
+        ...imgs,
+      ],
+    }],
+    response_format: { type: 'json_object' },
+    max_tokens: 350,
+  };
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`이미지 분석 실패 ${r.status}`);
+  const j = await r.json();
+  let obj = {};
+  try { obj = JSON.parse(j.choices?.[0]?.message?.content || '{}'); } catch (_) {}
+  return { character: (obj.character || '').trim(), style: (obj.style || '').trim() };
+}
+
 // 가사 줄들을 "구체적 영어 이미지 프롬프트"로 일괄 변환 (GPT) — 가사 매칭 + 캐릭터 일관성 핵심.
 // ① 곡 전체에 걸친 '동일 주인공/세계관'을 먼저 정하고
 // ② 각 컷 프롬프트에 그 주인공 묘사를 똑같이 박아넣어, stateless 모델에서도 일관성이 유지되게 한다.
 // 반환: { character: "...", prompts: ["...", ...] }
-async function describeScenesFromLyrics(apiKey, scenes, theme, styleHint) {
+async function describeScenesFromLyrics(apiKey, scenes, theme, styleHint, fixedCharacter) {
   const list = scenes.map((s, i) =>
     `${i + 1}. ${((s.lyricFull || s.lyricSummary || '').trim()) || '(no lyric)'}`).join('\n');
+  const step1 = fixedCharacter
+    ? `STEP 1 — The main character is FIXED (from the user's uploaded reference). Use EXACTLY this character in EVERY shot — do NOT change gender, age, hair, or clothing: ${fixedCharacter}\n`
+    : 'STEP 1 — Design ONE consistent main character (the protagonist that recurs in EVERY shot). Write a fixed, detailed English appearance description: gender, age, hair, face, exact clothing/colors, body type. This MUST stay identical across all shots.\n';
   const instr =
     'You are a music-video director creating a coherent visual story from Korean lyrics.\n' +
-    'STEP 1 — Design ONE consistent main character (the protagonist that recurs in EVERY shot). ' +
-    'Write a fixed, detailed English appearance description: gender, age, hair (color/length/style), face, exact clothing/colors, body type. This MUST stay identical across all shots.\n' +
+    step1 +
     'STEP 2 — For EACH numbered lyric line, write ONE English SCENE prompt (the character is added separately, so do NOT repeat the character description here):\n' +
     '  (a) a concrete, distinct scene — setting + action/pose + emotion + camera angle + lighting — that visually illustrates THAT specific lyric line,\n' +
     '  (b) keep the same art style/world across all shots, no text or letters in the image.\n' +
-    (theme ? `Song theme/context: ${theme}.\n` : '') +
+    (theme ? `IMPORTANT — Use this as the WORLD / ERA / SETTING for every shot (period-accurate clothing, props, architecture, mood): ${theme}.\n` : '') +
     (styleHint ? `Art style to follow in every shot: ${styleHint}.\n` : '') +
-    'Return ONLY JSON: {"character":"<fixed description>","prompts":["...","..."]} — prompts length MUST equal the number of lyric lines, in order.';
+    'Return ONLY JSON: {"character":"<fixed description>","prompts":["...","..."]} — character = the fixed character used; prompts length MUST equal the number of lyric lines, in order.';
   const body = {
     model: 'gpt-4o-mini',
     messages: [{ role: 'user', content: instr + '\n\nLyric lines:\n' + list }],
@@ -3976,7 +4012,7 @@ function bindLyricImageGen() {
       x.addEventListener('click', e => {
         e.stopPropagation();
         _lg.styleFiles.splice(i, 1);
-        _lg.styleHints = '';   // 이미지 바뀌면 스타일 캐시 무효화 → 다시 분석
+        _lg.styleHints = ''; _lg.character = '';   // 이미지 바뀌면 스타일·캐릭터 캐시 무효화 → 다시 분석
         renderStyleThumbs();
         saveStyleFiles();
       });
@@ -3988,7 +4024,7 @@ function bindLyricImageGen() {
     const accepted = files.filter(f => f.type.startsWith('image/'));
     const remaining = 10 - _lg.styleFiles.length;
     _lg.styleFiles.push(...accepted.slice(0, Math.max(0, remaining)));
-    _lg.styleHints = '';   // 새 이미지 추가 → 스타일 캐시 무효화
+    _lg.styleHints = ''; _lg.character = '';   // 새 이미지 추가 → 스타일·캐릭터 캐시 무효화
     renderStyleThumbs();
     saveStyleFiles();
   });
@@ -4197,31 +4233,41 @@ async function generateAllFrames() {
   // 스타일 비전 추출(업로드 이미지 → 스타일 텍스트 → 프롬프트 주입):
   //  • dall-e-3: 업로드+프리셋없음일 때
   //  • GPT Image 2(HF): 업로드 이미지가 있으면 (OpenAI 키로 스타일 추출) — 캔버스/백엔드가 참조이미지 직접지원 안 하므로 스타일을 텍스트로 반영
-  const hfStyleVision = isHF && hasUpload && !!oaKey;
-  const useStyleVision = (useUpload && model === 'dall-e-3') || hfStyleVision;
-  if (isHF && hasUpload && !oaKey && !preset) {
-    document.getElementById('lg-progress').textContent = '⚠️ 업로드 이미지 스타일을 반영하려면 OpenAI 키(스타일 분석용)나 스타일 프리셋을 선택하세요.';
+  const theme = document.getElementById('lg-theme').value.trim();
+  if (isHF && hasUpload && !oaKey) {
+    document.getElementById('lg-progress').textContent = '⚠️ 업로드 이미지(캐릭터·스타일)를 반영하려면 OpenAI 키가 필요합니다 (분석용).';
   }
+  // HF + 업로드 이미지: 업로드에서 '주인공(성별·외모)'과 '스타일'을 추출 → 그 캐릭터를 고정 주인공으로 사용
+  if (isHF && hasUpload && oaKey && oaKey.startsWith('sk-') && (!_lg.styleHints || !_lg.character)) {
+    document.getElementById('lg-progress').textContent = '🖼️ 업로드 이미지 분석 중… (캐릭터·스타일 추출)';
+    try {
+      const a = await analyzeReferenceImages(oaKey, _lg.styleFiles);
+      _lg.styleHints = a.style || _lg.styleHints || '';
+      _lg.character = a.character || '';
+    } catch (e) { console.warn('이미지 분석 실패:', e.message); }
+  }
+  // dall-e-3: 스타일만 비전 추출 (기존)
+  const useStyleVision = useUpload && model === 'dall-e-3';
   if (useStyleVision && !_lg.styleHints) {
-    document.getElementById('lg-progress').textContent = '🎨 업로드 이미지에서 스타일 분석 중… (스타일을 프롬프트로 반영)';
+    document.getElementById('lg-progress').textContent = '🎨 업로드 이미지에서 스타일 분석 중…';
     try {
       _lg.styleHints = await describeStyleFromImages(oaKey, _lg.styleFiles);
     } catch (e) {
       document.getElementById('lg-progress').textContent = `❌ 스타일 분석 실패: ${e.message}`;
-      btn.disabled = false;
+      btn.disabled = false; if (stopBtn) stopBtn.style.display = 'none';
       return;
     }
   }
-  // 프롬프트 재구성 (분석 시점엔 styleHints가 비어 있었으므로)
-  const theme = document.getElementById('lg-theme').value.trim();
-  const appliedHints = useStyleVision ? _lg.styleHints : '';
-  // ★ 가사-이미지 매칭 핵심: OpenAI 키가 있으면 가사를 구체 영어 장면 묘사로 변환(컷마다 다른 장면)
+  const appliedHints = (isHF ? (_lg.styleHints || '') : (useStyleVision ? _lg.styleHints : '')) || '';
+  const fixedChar = isHF ? (_lg.character || '') : '';
+  // ★ 가사-이미지 매칭 + 캐릭터 일관성: 가사를 구체 영어 장면으로 변환 (업로드 캐릭터를 고정 주인공으로)
   if (oaKey && oaKey.startsWith('sk-') && !_lg.scenePlan._enriched) {
     try {
       document.getElementById('lg-progress').textContent = '🎬 주인공·장면 묘사 생성 중… (가사 매칭 + 캐릭터 일관성)';
-      const res = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme, appliedHints);
-      _lg.scenePlan.character = res.character || '';
-      const charPrefix = res.character ? `Consistent recurring main character (keep appearance identical in every image): ${res.character}. Scene: ` : '';
+      const res = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme, appliedHints, fixedChar);
+      _lg.scenePlan.character = res.character || fixedChar || '';
+      const charDesc = _lg.scenePlan.character;
+      const charPrefix = charDesc ? `Consistent recurring main character (keep appearance identical in every image): ${charDesc}. Scene: ` : '';
       _lg.scenePlan.scenes.forEach((s, i) => {
         if (res.prompts[i]) s.visualPrompt = (charPrefix + String(res.prompts[i]).trim()).trim();
       });
