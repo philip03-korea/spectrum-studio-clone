@@ -43,8 +43,58 @@ export default {
       } catch (e) { backend = { error: e.message }; }
       return json({ ok: true, service: 'gpt-image2-proxy', backend }, 200, cors);
     }
+    // ============ Higgsfield 영상 생성 경로 (Seedance 2.0 / Grok Imagine 1.5) ============
+    if (request.method === 'POST' && url.pathname === '/generate-video') {
+      if (!base || !key) {
+        return json({ error: 'Worker 미설정 — CONTABO_URL / CONTABO_KEY 를 설정하세요.' }, 500, cors);
+      }
+      let vbody;
+      try { vbody = await request.json(); } catch { return json({ error: '잘못된 JSON 본문' }, 400, cors); }
+      const vprompt = (vbody.prompt || '').trim();
+      if (!vprompt) return json({ error: 'prompt 가 비어 있습니다' }, 400, cors);
+
+      const vpayload = {
+        model:        vbody.model        || 'seedance_2_0',
+        prompt:       vprompt,
+        duration:     vbody.duration     || 8,
+        aspect_ratio: vbody.aspect_ratio || '9:16',
+        resolution:   vbody.resolution   || '720p',
+        mode:         vbody.mode         || null,   // 'std' | 'fast' | null
+      };
+      if (vbody.start_image) vpayload.start_image = vbody.start_image;
+      if (vbody.end_image)   vpayload.end_image   = vbody.end_image;
+
+      try {
+        const vRes = await fetch(`${base}/generate-video`, {
+          method: 'POST',
+          headers: { 'X-API-Key': key, 'Content-Type': 'application/json' },
+          body: JSON.stringify(vpayload),
+        });
+        const vText = await vRes.text();
+        let vData; try { vData = JSON.parse(vText); } catch { vData = null; }
+        if (!vRes.ok || !vData) {
+          return json({ error: `영상 백엔드 오류 ${vRes.status}: ${vText.slice(0, 300)}` }, 502, cors);
+        }
+        // Contabo 가 video_url 또는 url 을 반환
+        const videoUrl = vData.video_url || vData.url || null;
+        if (!videoUrl) {
+          return json({ error: `영상 URL 없음: ${(vData.error || vText).toString().slice(0, 300)}` }, 502, cors);
+        }
+        // 영상 바이너리 → CORS 헤더 붙여 전달
+        const vidRes = await fetch(videoUrl);
+        if (!vidRes.ok) return json({ error: `영상 다운로드 실패 ${vidRes.status}` }, 502, cors);
+        const ct = vidRes.headers.get('content-type') || 'video/mp4';
+        return new Response(await vidRes.arrayBuffer(), {
+          status: 200,
+          headers: { ...cors, 'Content-Type': ct, 'Cache-Control': 'no-store' },
+        });
+      } catch (e) {
+        return json({ error: `영상 프록시 오류: ${e.message}` }, 500, cors);
+      }
+    }
+
     if (request.method !== 'POST' || url.pathname !== '/generate') {
-      return json({ error: 'Not found. POST /generate 만 지원.' }, 404, cors);
+      return json({ error: 'Not found. POST /generate 또는 POST /generate-video 만 지원.' }, 404, cors);
     }
 
     let body;

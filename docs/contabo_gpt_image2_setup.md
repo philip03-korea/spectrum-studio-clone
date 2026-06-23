@@ -244,3 +244,147 @@ file test.png    # PNG image data 면 성공
 ## 주의
 - 토큰/시크릿을 깃이나 프론트에 노출 금지. systemd 환경변수/서버 내부에만.
 - `higgsfield auth login` 토큰은 CLI가 자동 갱신하므로, 서버는 토큰 만료 신경 쓸 필요 없음(단 그 사용자 홈 토큰 파일 유지).
+
+---
+
+## 8. 영상 생성 추가 엔드포인트 — POST /generate-video
+
+> **v50 추가.** Seedance 2.0 / Grok Imagine 1.5 영상 생성.
+> 이 엔드포인트를 기존 `server.py`에 추가하면 된다.
+
+### 요청 형식 (Cloudflare Worker → Contabo)
+```
+POST /generate-video
+X-API-Key: <CONTABO_KEY>
+Content-Type: application/json
+{
+  "model":        "seedance_2_0",     // 또는 "grok_video_v15"
+  "prompt":       "...",
+  "duration":     8,                  // 8 | 10 | 15
+  "aspect_ratio": "9:16",
+  "resolution":   "720p",             // "480p" | "720p" | "1080p"
+  "mode":         "std",              // "std" | "fast" | null (Grok은 null)
+  "start_image":  "data:image/...;base64,..." // (선택) 첫 프레임, Grok은 필수
+}
+```
+응답: **영상 바이너리** (Content-Type: video/mp4). 실패 시 JSON `{ "error": "..." }`.
+
+### Contabo server.py 추가 코드
+
+`/opt/hf-proxy/server.py` 에 아래 함수+라우트를 추가:
+
+```python
+import tempfile, subprocess, json, os, re, base64, urllib.request
+from flask import request, Response, jsonify
+from pathlib import Path
+
+VIDEO_MODELS = {"seedance_2_0", "grok_video_v15"}
+
+def find_video_url(obj):
+    """CLI JSON 응답에서 영상 URL 탐색."""
+    if isinstance(obj, str):
+        if obj.startswith("http") and re.search(r"\.(mp4|webm|mov)(\?|$)", obj, re.I):
+            return obj
+        return None
+    if isinstance(obj, dict):
+        for k in ("result_url","url","video_url","raw","min"):
+            if k in obj:
+                u = find_video_url(obj[k])
+                if u: return u
+        for v in obj.values():
+            u = find_video_url(v)
+            if u: return u
+    if isinstance(obj, list):
+        for v in obj:
+            u = find_video_url(v)
+            if u: return u
+    return None
+
+@app.post("/generate-video")
+def generate_video():
+    if APP_SECRET and request.headers.get("X-API-Key") != APP_SECRET:
+        return jsonify(error="인증 실패 (X-API-Key)"), 403
+    b = request.get_json(force=True, silent=True) or {}
+    prompt = (b.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify(error="prompt 비어있음"), 400
+
+    model  = b.get("model") if b.get("model") in VIDEO_MODELS else "seedance_2_0"
+    dur    = int(b.get("duration") or 8)
+    if dur not in (8, 10, 15): dur = 8
+    ar     = b.get("aspect_ratio") or "9:16"
+    res    = b.get("resolution")   or "720p"
+    mode   = b.get("mode")         or None   # "std" | "fast" | None
+
+    tmp_img = None
+    try:
+        # start_image data:URL → 임시파일
+        si = b.get("start_image") or ""
+        m = re.match(r"^data:([^;]+);base64,(.+)$", si, re.S)
+        if m:
+            ext = (m.group(1).split("/")[-1] or "png").replace("jpeg","jpg")
+            fd, tmp_img = tempfile.mkstemp(suffix="."+ext)
+            with os.fdopen(fd, "wb") as f:
+                f.write(base64.b64decode(m.group(2)))
+
+        cmd = ["higgsfield","generate","create", model,
+               "--prompt", prompt,
+               "--aspect_ratio", ar,
+               "--resolution", res,
+               "--duration", str(dur),
+               "--wait", "--json"]
+        if mode:
+            cmd += ["--mode", mode]
+        if tmp_img:
+            cmd += ["--image", tmp_img]
+
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if out.returncode != 0:
+            return jsonify(error=f"CLI 실패: {out.stderr[-400:] or out.stdout[-400:]}"), 502
+
+        try:
+            data = json.loads(out.stdout)
+        except Exception:
+            mm = re.search(r"\{.*\}\s*$", out.stdout, re.S)
+            data = json.loads(mm.group(0)) if mm else {}
+
+        video_url = find_video_url(data)
+        if not video_url:
+            return jsonify(error="결과 영상 URL 못 찾음", raw=out.stdout[-600:]), 502
+
+        with urllib.request.urlopen(video_url, timeout=300) as r:
+            blob = r.read()
+            ct = r.headers.get("Content-Type", "video/mp4")
+        return Response(blob, mimetype=ct, headers={"Cache-Control":"no-store"})
+
+    except subprocess.TimeoutExpired:
+        return jsonify(error="영상 생성 시간 초과(10분)"), 504
+    except Exception as e:
+        return jsonify(error=f"서버 오류: {e}"), 500
+    finally:
+        if tmp_img and os.path.exists(tmp_img):
+            os.remove(tmp_img)
+```
+
+### CLI 검증 (Contabo 에서 직접 실행)
+```bash
+# Seedance 2.0 Fast 8초 테스트
+higgsfield generate create seedance_2_0 \
+  --prompt "a firefighter demonstrating a fire mask in smoke" \
+  --aspect_ratio 9:16 --resolution 720p --duration 8 --mode fast \
+  --wait --json
+
+# Grok Imagine 1.5 (이미지→영상)
+higgsfield generate create grok_video_v15 \
+  --prompt "camera slowly zooms in, dramatic lighting" \
+  --image /tmp/start.jpg \
+  --aspect_ratio 9:16 --duration 8 \
+  --wait --json
+```
+
+### 크레딧 소모량 (확정값)
+| 모델 | 8초 | 10초 | 15초 |
+|---|---|---|---|
+| Seedance 2.0 Std (`std`) | 36cr | 45cr | 68cr |
+| Seedance 2.0 Fast (`fast`) | 28cr | 35cr | 53cr |
+| Grok Imagine 1.5 | ~20cr | ~25cr | ~37cr (추정) |
