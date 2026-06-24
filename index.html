@@ -181,33 +181,33 @@
             </div>
             <div class="bg-thumbs hidden" id="lg-style-thumbs"></div>
 
-            <div class="sub-title">🧑 캐릭터 (Higgsfield Element) <span class="sub-tag">gpt_image_2 일관성</span></div>
-            <input class="text-input" id="lg-element" list="lg-element-list" placeholder="비워두면 사용 안 함 · 목록에서 고르거나 Element ID 붙여넣기" autocomplete="off" />
-            <datalist id="lg-element-list">
-              <option value="5b8a7006-aeca-42f9-96ca-9f6cfa608f4b">★ You Are Enough · 여주인공</option>
-              <option value="8e29ef74-0c3b-46a5-b648-0b8f4e035781">★ You Are Enough · 예수님</option>
-              <option value="7248d960-ffa2-422e-b649-57b66d24a201">★ You Are Enough · 아들</option>
-              <option value="c3314a7f-097c-4336-add6-adfe06acd475">Lee Jiyul · 여아 8세</option>
-              <option value="f07f3163-57ba-47b7-8fb7-8dfe622b5ba5">Park Hyeonwoo · 아빠</option>
-              <option value="1fb4e4ac-7c0c-4dcf-8cdf-446e4821fc4a">Lee Junho · 아빠</option>
-              <option value="cbeac423-20a9-4fc9-b917-1a2804885d04">Park Doyun · 남아</option>
-              <option value="5bea8ba8-4691-4cda-b6ae-27e2ca8468ce">Lee Taehyun · 할아버지</option>
-              <option value="5e6604c6-da04-401e-aa24-6f7707301207">Lee Jeongsook · 할머니</option>
-              <option value="69b264df-c091-4d25-bcf4-027ced2678bb">Jung Taegang · 소방관</option>
-              <option value="566395e9-a6f6-49be-b05c-9df5745d62da">EIDO 마스코트 (기린)</option>
-              <option value="8520a5ce-dad1-46d6-a6e5-1dce4701fdc3">EIDO 마스코트 (그린)</option>
-            </datalist>
-            <div class="hint-text" style="margin-bottom:6px;">선택하면 <b>모든 컷을 같은 캐릭터</b>로 생성(gpt_image_2). 새 캐릭터는 깨끗한 단일 이미지로 Element 등록 권장. (등록은 채팅에서 도와드림)</div>
+            <div class="sub-title">🧑 캐릭터 (Higgsfield Element) <span class="sub-tag">gpt_image_2 일관성 · 복수 선택 가능</span></div>
+            <div class="char-check-group" id="lg-element-group">
+              <label class="char-check"><input type="checkbox" name="lg-el" value="5b8a7006-aeca-42f9-96ca-9f6cfa608f4b" /><span>★ 여주인공</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="8e29ef74-0c3b-46a5-b648-0b8f4e035781" /><span>★ 예수님</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="7248d960-ffa2-422e-b649-57b66d24a201" /><span>★ 아들</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="c3314a7f-097c-4336-add6-adfe06acd475" /><span>여아 8세 (Jiyul)</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="f07f3163-57ba-47b7-8fb7-8dfe622b5ba5" /><span>아빠 (Hyeonwoo)</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="1fb4e4ac-7c0c-4dcf-8cdf-446e4821fc4a" /><span>아빠 (Junho)</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="cbeac423-20a9-4fc9-b917-1a2804885d04" /><span>남아 (Doyun)</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="5bea8ba8-4691-4cda-b6ae-27e2ca8468ce" /><span>할아버지</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="5e6604c6-da04-401e-aa24-6f7707301207" /><span>할머니</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="69b264df-c091-4d25-bcf4-027ced2678bb" /><span>소방관</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="566395e9-a6f6-49be-b05c-9df5745d62da" /><span>EIDO 기린</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-el" value="8520a5ce-dad1-46d6-a6e5-1dce4701fdc3" /><span>EIDO 그린</span></label>
+            </div>
+            <input class="text-input" id="lg-element-custom" placeholder="직접 입력: Element ID (쉼표로 구분해 여러 개 가능)" autocomplete="off" style="margin-top:4px;" />
+            <div class="hint-text" style="margin-bottom:6px;">여러 명 체크하면 <b>같은 장면에 함께 등장</b>(gpt_image_2 <<<id>>> 다중 주입). 새 캐릭터는 깨끗한 단일 이미지로 Element 등록 권장.</div>
 
             <!-- Soul 2 캐릭터 선택 — hf-soul-2 모델 선택 시에만 표시 -->
-            <div class="sub-title" id="lg-soul-section" style="display:none;">★ Soul 캐릭터 (Soul 2 전용) <span class="sub-tag">학습된 얼굴 · 매 컷 다른 장면</span></div>
-            <input class="text-input" id="lg-soul" list="lg-soul-list" placeholder="Soul ID 선택 또는 직접 입력" autocomplete="off" style="display:none;" />
-            <datalist id="lg-soul-list">
-              <option value="e77eaa54-a841-47fc-a518-37e1cd076bf2">★ You Are Enough · 여주인공</option>
-              <option value="ed8c7cb2-69e7-4b70-b619-dde39f8864c2">★ You Are Enough · 예수님</option>
-              <option value="c86400e4-799c-4907-b228-17df7dc276ca">★ You Are Enough · 아들</option>
-            </datalist>
-            <div class="hint-text" id="lg-soul-hint" style="display:none;margin-bottom:6px;"><b>학습된 Soul 캐릭터</b> — 매 컷 같은 얼굴 + 다른 장면 (뮤직비디오 최적). Soul 2는 Worker → platform.higgsfield.ai 직접 호출. 새 캐릭터는 채팅에서 학습 요청.</div>
+            <div class="sub-title" id="lg-soul-section" style="display:none;">★ Soul 캐릭터 (Soul 2 전용) <span class="sub-tag">학습된 얼굴 · 복수 선택 시 교대 배정</span></div>
+            <div class="char-check-group" id="lg-soul-group" style="display:none;">
+              <label class="char-check"><input type="checkbox" name="lg-so" value="e77eaa54-a841-47fc-a518-37e1cd076bf2" /><span>★ 여주인공</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-so" value="ed8c7cb2-69e7-4b70-b619-dde39f8864c2" /><span>★ 예수님</span></label>
+              <label class="char-check"><input type="checkbox" name="lg-so" value="c86400e4-799c-4907-b228-17df7dc276ca" /><span>★ 아들</span></label>
+            </div>
+            <input class="text-input" id="lg-soul-custom" placeholder="직접 입력: Soul ID" autocomplete="off" style="display:none;margin-top:4px;" />
+            <div class="hint-text" id="lg-soul-hint" style="display:none;margin-bottom:6px;">여러 명 체크하면 <b>프레임마다 교대 배정</b> (Soul API는 1컷 1캐릭터). 새 캐릭터는 채팅에서 학습 요청.</div>
 
             <div class="sub-title">🖌️ 스타일 프리셋</div>
             <select class="text-input" id="lg-preset">
@@ -1124,6 +1124,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_6_soul2"></script>
+  <script type="module" src="app.js?v=v4_7_multichar"></script>
 </body>
 </html>

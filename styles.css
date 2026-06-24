@@ -979,6 +979,21 @@ body {
   margin: 14px 0 6px;
   text-transform: uppercase;
 }
+/* 캐릭터 체크박스 그룹 */
+.char-check-group {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0;
+}
+.char-check {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 8px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  font-size: 11px; cursor: pointer; user-select: none;
+  transition: background .15s, border-color .15s;
+}
+.char-check:hover { border-color: var(--accent); }
+.char-check input:checked + span { font-weight: 700; color: var(--accent); }
+.char-check:has(input:checked) { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: var(--accent); }
+
 .sub-tag {
   display: inline-block;
   margin-left: 4px;

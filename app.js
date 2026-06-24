@@ -3424,7 +3424,7 @@ async function renderToMp4() {
 // 🎨 가사 맞춤 이미지 생성 (OpenAI gpt-image-1 / DALL-E 3)
 // ====================================================================
 
-const LG_NEG_PROMPT = 'no text, no subtitles, no lyrics, no timestamp, no numbers, no logo, no watermark, no UI, no speech bubble, no comic panel border, no split screen, no collage, single full-frame image only.';
+const LG_NEG_PROMPT = 'CRITICAL: Do NOT render ANY text, letters, words, numbers, titles, subtitles, captions, lyrics, timestamps, watermarks, logos, or typography anywhere in the image. Do NOT split the image into panels, grids, collages, comic strips, or multiple frames. Output exactly ONE single full-frame illustration with ZERO text overlays.';
 
 // 성경 인물 정규 스토리 아크 (테마 매칭 시 우선 사용)
 const BIBLE_ARCS = {
@@ -3515,6 +3515,8 @@ function buildScenePlan(lyrics, theme, N) {
 
 function buildPromptForScene(scene, theme, preset, styleHints) {
   const parts = [];
+  // ★ 프롬프트 맨 앞에 핵심 금지사항 — 모델이 가장 먼저 읽게
+  parts.push('[Single full-frame image, absolutely NO text/letters/numbers/watermarks, NO split panels/grids/collage.]');
   const emotionMap = {
     'hopeful': 'hopeful, warm light streaming down',
     'somber': 'solemn, soft cool light',
@@ -3522,10 +3524,8 @@ function buildPromptForScene(scene, theme, preset, styleHints) {
     'reverent': 'reverent and sacred, golden divine light',
     'neutral': 'gentle ambient light',
   };
-  // ★ 가사 내용이 장면의 '주제'다 — 각 컷이 그 가사 한 줄을 그림으로 보여줘야 한다.
   const lyric = (scene.lyricFull || scene.lyricSummary || '').trim();
   if (scene.visualPrompt) {
-    // GPT로 변환된 구체 영어 장면 묘사가 있으면 그걸 주제로 사용(매칭 정확도 최상)
     parts.push(scene.visualPrompt);
     if (theme) parts.push(`Theme: ${theme}.`);
   } else if (lyric) {
@@ -3535,13 +3535,11 @@ function buildPromptForScene(scene, theme, preset, styleHints) {
   } else if (theme) {
     parts.push(`Scene from "${theme}".`);
   }
-  // 성경 사건은 보조 맥락(괄호)으로만
   if (scene.biblicalEvent) parts.push(`(subtle context: ${scene.biblicalEvent})`);
-  // 감정 톤 (분위기/조명만)
   parts.push('Mood: ' + (emotionMap[scene.emotion] || emotionMap.neutral) + '.');
-  // 렌더링 스타일(주제가 아니라 '그림체'만)
   if (preset && STYLE_PRESETS[preset]) parts.push('Rendering style: ' + STYLE_PRESETS[preset]);
   if (styleHints) parts.push(`Rendering art style only (copy the look, NOT the subjects): ${styleHints}.`);
+  // ★ 프롬프트 끝에도 상세 금지사항 반복
   parts.push(LG_NEG_PROMPT);
   return parts.join(' ');
 }
@@ -3761,18 +3759,23 @@ async function hfFetch(url, opts) {
 function getHfProxyUrl() {
   return (localStorage.getItem('ssc-hf-proxy-url') || document.getElementById('lg-hf-proxy')?.value || '').trim();
 }
-// 선택된 Higgsfield 캐릭터(Element) ID — gpt_image_2 프롬프트에 <<<id>>>로 주입해 매 컷 같은 캐릭터
-function getSelectedElementId() {
-  const v = (document.getElementById('lg-element')?.value || '').trim();
-  const m = v.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-  return m ? m[0] : '';
+// 선택된 Higgsfield 캐릭터(Element) ID 배열 — 체크박스 + 직접입력
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+function getSelectedElementIds() {
+  const ids = [...document.querySelectorAll('input[name="lg-el"]:checked')].map(c => c.value);
+  const custom = (document.getElementById('lg-element-custom')?.value || '').match(UUID_RE);
+  if (custom) custom.forEach(id => { if (!ids.includes(id)) ids.push(id); });
+  return ids;
 }
-// 선택된 Soul ID — soul_2 모델 전용 (학습된 캐릭터 얼굴, API 페이로드에 주입)
-function getSelectedSoulId() {
-  const v = (document.getElementById('lg-soul')?.value || '').trim();
-  const m = v.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-  return m ? m[0] : '';
+function getSelectedElementId() { return getSelectedElementIds()[0] || ''; }
+// 선택된 Soul ID 배열 — 체크박스 + 직접입력. Soul API는 1컷 1캐릭터이므로 프레임별 교대 배정.
+function getSelectedSoulIds() {
+  const ids = [...document.querySelectorAll('input[name="lg-so"]:checked')].map(c => c.value);
+  const custom = (document.getElementById('lg-soul-custom')?.value || '').match(UUID_RE);
+  if (custom) custom.forEach(id => { if (!ids.includes(id)) ids.push(id); });
+  return ids;
 }
+function getSelectedSoulId() { return getSelectedSoulIds()[0] || ''; }
 
 // GPT Image 2 (Higgsfield) — Cloudflare Worker 프록시 경유로 생성.
 //  • resolution=1k + quality=low = 약 0.5 크레딧/장 (유튜브 저용량용)
@@ -3825,13 +3828,14 @@ async function generateImageViaSoul2(proxyUrl, soulId, prompt, aspect) {
   return await res.blob();
 }
 
-// 모델에 따라 OpenAI / Higgsfield(프록시)로 라우팅
-async function generateImageDispatch(model, prompt, aspect, styleFiles) {
+// 모델에 따라 OpenAI / Higgsfield(프록시)로 라우팅. frameIdx: Soul 다중 캐릭터 교대용.
+async function generateImageDispatch(model, prompt, aspect, styleFiles, frameIdx) {
   if (model === 'hf-soul-2') {
     const proxyUrl = getHfProxyUrl();
     if (!proxyUrl) throw new Error('Higgsfield 프록시 URL이 필요합니다 (Stage 1에서 입력)');
-    const soulId = getSelectedSoulId();
-    if (!soulId) throw new Error('Soul 2 — "★ Soul 캐릭터" 목록에서 학습된 캐릭터를 선택하세요');
+    const soulIds = _lg._soulIds || getSelectedSoulIds();
+    if (!soulIds.length) throw new Error('Soul 2 — "★ Soul 캐릭터" 목록에서 학습된 캐릭터를 선택하세요');
+    const soulId = soulIds[typeof frameIdx === 'number' ? (frameIdx % soulIds.length) : 0];
     return generateImageViaSoul2(proxyUrl, soulId, prompt, aspect);
   }
   if (model === 'hf-gpt-image-2') {
@@ -3993,15 +3997,18 @@ function bindLyricImageGen() {
       localStorage.setItem(LG_META_KEY, JSON.stringify({
         title: $L('lg-title')?.value || '', theme: $L('lg-theme')?.value || '',
         preset: $L('lg-preset')?.value || '', aspect: $L('lg-aspect')?.value || '',
-        model: $L('lg-model')?.value || '', element: $L('lg-element')?.value || '',
-        soul: $L('lg-soul')?.value || '',
+        model: $L('lg-model')?.value || '',
+        elementIds: [...document.querySelectorAll('input[name="lg-el"]:checked')].map(c => c.value),
+        elementCustom: $L('lg-element-custom')?.value || '',
+        soulIds: [...document.querySelectorAll('input[name="lg-so"]:checked')].map(c => c.value),
+        soulCustom: $L('lg-soul-custom')?.value || '',
       }));
     } catch {}
   };
   // Soul 섹션 표시/숨김 (hf-soul-2 선택 시)
   const updateSoulSection = () => {
     const isSoul2 = $L('lg-model')?.value === 'hf-soul-2';
-    ['lg-soul-section', 'lg-soul', 'lg-soul-hint'].forEach(id => {
+    ['lg-soul-section', 'lg-soul-group', 'lg-soul-custom', 'lg-soul-hint'].forEach(id => {
       const el = $L(id); if (el) el.style.display = isSoul2 ? '' : 'none';
     });
   };
@@ -4028,8 +4035,10 @@ function bindLyricImageGen() {
   $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; saveLGMeta(); });
   $L('lg-aspect')?.addEventListener('change', saveLGMeta);
   $L('lg-model')?.addEventListener('change', () => { saveLGMeta(); updateSoulSection(); });
-  $L('lg-element')?.addEventListener('input', saveLGMeta);
-  $L('lg-soul')?.addEventListener('input', saveLGMeta);
+  document.querySelectorAll('input[name="lg-el"]').forEach(cb => cb.addEventListener('change', saveLGMeta));
+  $L('lg-element-custom')?.addEventListener('input', saveLGMeta);
+  document.querySelectorAll('input[name="lg-so"]').forEach(cb => cb.addEventListener('change', saveLGMeta));
+  $L('lg-soul-custom')?.addEventListener('input', saveLGMeta);
 
   // 저장된 메타 복원 (제목/테마/프리셋/비율/모델)
   try {
@@ -4040,8 +4049,16 @@ function bindLyricImageGen() {
       if (m.preset && $L('lg-preset')) $L('lg-preset').value = m.preset;
       if (m.aspect && $L('lg-aspect')) $L('lg-aspect').value = m.aspect;
       if (m.model && $L('lg-model')) $L('lg-model').value = m.model;
-      if (m.element && $L('lg-element')) $L('lg-element').value = m.element;
-      if (m.soul && $L('lg-soul')) $L('lg-soul').value = m.soul;
+      if (Array.isArray(m.elementIds)) m.elementIds.forEach(id => {
+        const cb = document.querySelector(`input[name="lg-el"][value="${id}"]`);
+        if (cb) cb.checked = true;
+      });
+      if (m.elementCustom && $L('lg-element-custom')) $L('lg-element-custom').value = m.elementCustom;
+      if (Array.isArray(m.soulIds)) m.soulIds.forEach(id => {
+        const cb = document.querySelector(`input[name="lg-so"][value="${id}"]`);
+        if (cb) cb.checked = true;
+      });
+      if (m.soulCustom && $L('lg-soul-custom')) $L('lg-soul-custom').value = m.soulCustom;
     }
   } catch {}
   updateSoulSection(); // 복원 후 Soul 섹션 가시성 초기화
@@ -4317,31 +4334,35 @@ async function generateAllFrames() {
     }
   }
   const appliedHints = (isHF ? (_lg.styleHints || '') : (useStyleVision ? _lg.styleHints : '')) || '';
-  const elementId = (model === 'hf-gpt-image-2') ? getSelectedElementId() : '';  // gpt_image_2 전용
-  const soulId = isSoul2 ? getSelectedSoulId() : '';                              // soul_2 전용
-  // Element/Soul 없을 때만 텍스트 캐릭터 묘사 사용
-  const fixedChar = (isHF && !elementId && !soulId) ? (_lg.character || '') : '';
+  const elementIds = (model === 'hf-gpt-image-2') ? getSelectedElementIds() : [];
+  const elementId = elementIds[0] || '';
+  const soulIds = isSoul2 ? getSelectedSoulIds() : [];
+  const soulId = soulIds[0] || '';
+  _lg._soulIds = soulIds; // 프레임 루프에서 교대 배정용
+  const fixedChar = (isHF && !elementIds.length && !soulIds.length) ? (_lg.character || '') : '';
   // ★ 가사-이미지 매칭 + 캐릭터 일관성
   if (oaKey && oaKey.startsWith('sk-') && !_lg.scenePlan._enriched) {
     try {
       document.getElementById('lg-progress').textContent = '🎬 주인공·장면 묘사 생성 중… (가사 매칭 + 캐릭터 일관성)';
       const res = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme, appliedHints, fixedChar);
-      _lg.scenePlan.character = (elementId || soulId) ? '' : (res.character || fixedChar || '');
-      const charPrefix = elementId
-        ? `<<<${elementId}>>> `   // gpt_image_2 Element: 프롬프트에 <<<id>>> 주입
-        : (isSoul2
-          ? ''                    // soul_2: 캐릭터는 soul_id로 API에 전달 — 프롬프트엔 장면만
+      _lg.scenePlan.character = (elementIds.length || soulIds.length) ? '' : (res.character || fixedChar || '');
+      const elPrefix = elementIds.length
+        ? elementIds.map(id => `<<<${id}>>>`).join(' ') + ' '
+        : '';
+      const charPrefix = elPrefix
+        || (isSoul2
+          ? ''
           : (_lg.scenePlan.character ? `Consistent recurring main character (keep appearance identical in every image): ${_lg.scenePlan.character}. Scene: ` : ''));
       _lg.scenePlan.scenes.forEach((s, i) => {
         if (res.prompts[i]) s.visualPrompt = (charPrefix + String(res.prompts[i]).trim()).trim();
       });
       _lg.scenePlan._enriched = res.prompts.length > 0;
     } catch (e) { console.warn('장면 변환 건너뜀:', e.message); }
-  } else if (elementId && !_lg.scenePlan._enriched) {
-    // OpenAI 키가 없어도 Element는 적용 — 가사 원문 앞에 <<<id>>> 주입
+  } else if (elementIds.length && !_lg.scenePlan._enriched) {
+    const elPrefix = elementIds.map(id => `<<<${id}>>>`).join(' ');
     _lg.scenePlan.scenes.forEach(s => {
       const ly = (s.lyricFull || s.lyricSummary || '').trim();
-      s.visualPrompt = `<<<${elementId}>>> A music-video scene illustrating: "${ly}". ${theme ? 'Setting/era: ' + theme + '.' : ''}`.trim();
+      s.visualPrompt = `${elPrefix} A music-video scene illustrating: "${ly}". ${theme ? 'Setting/era: ' + theme + '.' : ''}`.trim();
     });
     _lg.scenePlan._enriched = true;
   }
@@ -4370,7 +4391,7 @@ async function generateAllFrames() {
     _lg.generatingIdx = s.idx;
     renderScenePlan();   // 현재 장면에 "⏳ 생성 중…" 표시
     try {
-      const blob = await generateImageDispatch(model, prompt, aspect, refFiles);
+      const blob = await generateImageDispatch(model, prompt, aspect, refFiles, i);
       const url = URL.createObjectURL(blob);
       _lg.frames.push({ idx: s.idx, blob, url, prompt });
       renderScenePlan();
@@ -4421,7 +4442,7 @@ async function regenerateFrame(idx) {
       alert('Higgsfield 프록시 URL이 필요합니다 (Stage 1).\n배포 안내는 "전체 프레임 생성" 버튼을 한 번 누르면 자세히 나옵니다.\n또는 proxy/README.md');
       return;
     }
-    if (isSoul2 && !getSelectedSoulId()) {
+    if (isSoul2 && !getSelectedSoulIds().length) {
       alert('Soul 2 — "★ Soul 캐릭터" 목록에서 학습된 캐릭터를 선택하세요.');
       return;
     }
