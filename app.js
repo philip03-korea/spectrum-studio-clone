@@ -2507,6 +2507,7 @@ function bindSidebarBottomButtons() {
 // 가사 통합 매니저 — 3개 단계(가사 이미지 / 미디어 준비 / 비주얼 편집)의
 // 가사 textarea·파일·비우기·번역상태를 양방향 동기화한다.
 // 어느 단계에서 LRC를 업로드하든 나머지 단계에 자동 등록된다.
+let applyLyricsTextGlobal = null; // Whisper 자동 생성 가사도 같은 파이프라인을 타도록 노출
 function bindStage1Lyrics() {
   const widgets = [
     { ta: $('lyrics-text-ig'),     file: $('file-lrc-ig'),     clr: $('lyrics-clear-ig'),     trans: $('trans-status-ig') },
@@ -2523,15 +2524,8 @@ function bindStage1Lyrics() {
     widgets.forEach(w => { if (w.trans) w.trans.textContent = text; });
   };
 
-  // LRC/TXT/SRT 파일을 읽어 정리 → 전 단계 동기화 → 자동 한/영 번역
-  const loadLyricsFromFile = async (file) => {
-    if (!file) return;
-    const name = (file.name || '').toLowerCase();
-    if (!/\.(lrc|txt|srt)$/.test(name) && !/^text\//.test(file.type || '')) {
-      setAllTrans('⚠️ LRC / TXT / SRT 파일만 지원합니다');
-      return;
-    }
-    const raw = await file.text();
+  // LRC/TXT/SRT 텍스트를 정리 → 전 단계 동기화 → 자동 한/영 번역
+  const loadLyricsFromText = async (raw) => {
     const cleaned = parseAndCleanLrc(raw);
     setAllText(cleaned);
     updateLyrics(cleaned);
@@ -2548,6 +2542,18 @@ function bindStage1Lyrics() {
       setAllTrans('⚠️ 번역 일부 실패 — 비주얼 편집에서 다시 시도 가능');
     }
     debouncedSave();
+  };
+  applyLyricsTextGlobal = loadLyricsFromText;
+
+  // LRC/TXT/SRT 파일을 읽어 위 파이프라인으로 전달
+  const loadLyricsFromFile = async (file) => {
+    if (!file) return;
+    const name = (file.name || '').toLowerCase();
+    if (!/\.(lrc|txt|srt)$/.test(name) && !/^text\//.test(file.type || '')) {
+      setAllTrans('⚠️ LRC / TXT / SRT 파일만 지원합니다');
+      return;
+    }
+    await loadLyricsFromText(await file.text());
   };
 
   // 어느 textarea를 편집하든 나머지에 즉시 반영
@@ -2593,6 +2599,142 @@ function bindStage1Lyrics() {
     setAllText(state.lyrics.rawText);
     updateLyrics(state.lyrics.rawText, { skipPersist: true });
   }
+}
+
+// ====================================================================
+// Stage 1 음원 업로드 → Whisper 가사(LRC/SRT) 자동 생성
+// 흐름: MP3 업로드 → 미디어 준비에 자동 등록 → Whisper 전사 →
+//       LRC를 가사 파이프라인에 자동 등록 + LRC/SRT 다운로드 버튼 활성화.
+// 자동 생성이 실패하면 [가사 자동 생성] 버튼으로 언제든 재시도.
+// ====================================================================
+let _lgAudioFile = null;      // Stage 1에서 업로드한 음원 (재생성용)
+let _lgTranscript = null;     // { lrc, srt, base } — 다운로드용
+
+function lrcTimestamp(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec - m * 60;
+  return `[${String(m).padStart(2, '0')}:${s.toFixed(2).padStart(5, '0')}]`;
+}
+function srtTimestamp(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60), ms = Math.round((sec - Math.floor(sec)) * 1000);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+}
+function segmentsToLrc(segs) {
+  return segs.map(s => `${lrcTimestamp(s.start)}${s.text}`).join('\n');
+}
+function segmentsToSrt(segs) {
+  return segs.map((s, i) => `${i + 1}\n${srtTimestamp(s.start)} --> ${srtTimestamp(s.end)}\n${s.text}\n`).join('\n');
+}
+function downloadTextFile(text, filename) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+async function transcribeCurrentAudio(opts = {}) {
+  const btn = $('lg-transcribe-btn');
+  const setStatus = t => { const el = $('lg-transcribe-status'); if (el) el.textContent = t; };
+
+  // 음원: Stage 1 업로드분 → 없으면 미디어 준비에 등록된 오디오(IndexedDB)
+  let file = _lgAudioFile;
+  if (!file) { try { file = await dbGet('audio'); } catch { /* ignore */ } }
+  if (!file) { setStatus('⚠️ 먼저 위에 음원(MP3)을 업로드하세요'); return; }
+
+  const key = ($('lg-apikey')?.value || localStorage.getItem('ssc-openai-key') || '').trim();
+  if (!key) {
+    setStatus(opts.auto
+      ? '🔑 OpenAI API 키를 저장하면 가사가 자동 생성됩니다 — 키 입력 후 [가사 자동 생성] 클릭'
+      : '⚠️ 가사 자동 생성에는 OpenAI API 키가 필요합니다 (위 🔑 칸에 입력·저장)');
+    return;
+  }
+  if (file.size > 25 * 1024 * 1024) {
+    setStatus('⚠️ 파일이 25MB를 초과합니다 (Whisper 한도) — 더 낮은 비트레이트 MP3로 시도하세요');
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = '🎙️ 인식 중...'; }
+  setStatus('🎙️ Whisper로 가사 인식 중... (곡 길이에 따라 수십 초 걸립니다)');
+  try {
+    const fd = new FormData();
+    fd.append('file', file, file.name || 'audio.mp3');
+    fd.append('model', 'whisper-1');
+    fd.append('response_format', 'verbose_json');
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}` },
+      body: fd,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`API ${res.status} — ${errText.slice(0, 180)}`);
+    }
+    const json = await res.json();
+    const segs = (json.segments || [])
+      .map(s => ({ start: Math.max(0, s.start || 0), end: Math.max(0, s.end || 0), text: (s.text || '').trim() }))
+      .filter(s => s.text);
+    if (!segs.length) throw new Error('인식된 가사가 없습니다 (반주만 있는 구간일 수 있음)');
+
+    const base = (file.name || 'lyrics').replace(/\.[^.]+$/, '');
+    _lgTranscript = { lrc: segmentsToLrc(segs), srt: segmentsToSrt(segs), base };
+
+    // 가사 통합 파이프라인 등록 (전 단계 동기화 + 자동 한/영 번역)
+    if (applyLyricsTextGlobal) await applyLyricsTextGlobal(_lgTranscript.lrc);
+    else updateLyrics(parseAndCleanLrc(_lgTranscript.lrc));
+
+    $('lg-dl-lrc')?.classList.remove('hidden');
+    $('lg-dl-srt')?.classList.remove('hidden');
+    setStatus(`✅ 가사 ${segs.length}줄 자동 생성 완료 — 전 단계 등록됨 · 아래 버튼으로 LRC/SRT 저장 가능`);
+  } catch (err) {
+    console.error('[transcribe]', err);
+    setStatus(`❌ 자동 생성 실패: ${err.message} → [가사 자동 생성] 버튼으로 다시 시도하세요`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🎙️ 가사 자동 생성'; }
+  }
+}
+
+function bindStage1AudioTranscribe() {
+  const drop = $('audio-drop-ig'), input = $('file-audio-ig');
+  const btn = $('lg-transcribe-btn');
+  const setStatus = t => { const el = $('lg-transcribe-status'); if (el) el.textContent = t; };
+  if (!drop || !input) return;
+
+  const onAudio = async (file) => {
+    if (!file) return;
+    if (!/^audio\//.test(file.type || '') && !/\.(mp3|wav|m4a|ogg|oga|flac|aac|webm)$/i.test(file.name || '')) {
+      setStatus('⚠️ 오디오 파일만 지원합니다 (MP3 / WAV / M4A ...)');
+      return;
+    }
+    _lgAudioFile = file;
+    _lgTranscript = null;
+    $('lg-dl-lrc')?.classList.add('hidden');
+    $('lg-dl-srt')?.classList.add('hidden');
+    setStatus(`🎵 "${file.name}" 등록됨 (미디어 준비에도 자동 등록) — 가사 자동 생성 시작...`);
+    try { await handleAudioFile(file); } catch (err) { console.error(err); }
+    await transcribeCurrentAudio({ auto: true });
+  };
+
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('dragover');
+    if (e.dataTransfer?.files?.length) onAudio(e.dataTransfer.files[0]);
+  });
+  input.addEventListener('change', e => {
+    if (e.target.files?.length) onAudio(e.target.files[0]);
+    e.target.value = '';   // 같은 파일 재선택 허용
+  });
+
+  if (btn) btn.addEventListener('click', () => transcribeCurrentAudio({ auto: false }));
+  $('lg-dl-lrc')?.addEventListener('click', () => {
+    if (_lgTranscript) downloadTextFile(_lgTranscript.lrc, `${_lgTranscript.base}.lrc`);
+  });
+  $('lg-dl-srt')?.addEventListener('click', () => {
+    if (_lgTranscript) downloadTextFile(_lgTranscript.srt, `${_lgTranscript.base}.srt`);
+  });
 }
 
 async function doReset() {
@@ -4600,6 +4742,7 @@ async function init() {
   bindSidebarBottomButtons();
   bindSpectrumControls();
   bindStage1Lyrics();
+  bindStage1AudioTranscribe();
   bindLyricImageGen();
   renderTitleFontGrid();
   bindRainbowToggle();

@@ -153,6 +153,22 @@
             <input type="text" class="text-input" id="lg-title" placeholder="곡 제목" style="margin-bottom: 6px;" />
             <input type="text" class="text-input" id="lg-theme" placeholder="성경 인물/주제 (예: 아브라함의 연대기)" />
 
+            <div class="sub-title">🎵 음원 업로드 (Suno MP3)</div>
+            <div class="drop-area drop-mini" id="audio-drop-ig">
+              <input type="file" id="file-audio-ig" accept="audio/*" hidden />
+              <label for="file-audio-ig" class="drop-label">
+                <div class="drop-icon">🎵</div>
+                <div class="drop-text">MP3 / 오디오 드롭 · 클릭</div>
+                <div class="drop-hint">음원을 먼저 올리면 가사(LRC/SRT)가 자동 생성됩니다 · 미디어 준비에도 자동 등록</div>
+              </label>
+            </div>
+            <div class="lyrics-mode" style="margin-top:6px; flex-wrap:wrap; gap:6px;">
+              <button class="btn-key-save" id="lg-transcribe-btn">🎙️ 가사 자동 생성</button>
+              <button class="btn-mini hidden" id="lg-dl-lrc">⬇ LRC 저장</button>
+              <button class="btn-mini hidden" id="lg-dl-srt">⬇ SRT 저장</button>
+            </div>
+            <div class="hint-text" id="lg-transcribe-status" style="margin-top:4px;">음원 업로드 시 Whisper(OpenAI)로 LRC/SRT 자동 생성 · 실패하면 위 버튼으로 다시 생성</div>
+
             <div class="sub-title">🎤 LRC 가사 업로드</div>
             <div class="drop-area drop-mini" id="lyrics-drop-ig">
               <input type="file" id="file-lrc-ig" accept=".lrc,.txt,.srt" hidden />
@@ -1124,6 +1140,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_7_multichar"></script>
+  <script type="module" src="app.js?v=v4_8_audio_whisper"></script>
 </body>
 </html>
