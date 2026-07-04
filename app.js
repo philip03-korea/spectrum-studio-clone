@@ -3919,6 +3919,18 @@ function getSelectedSoulIds() {
 }
 function getSelectedSoulId() { return getSelectedSoulIds()[0] || ''; }
 
+// 백엔드 오류를 사람이 읽을 안내로 변환.
+// Cloudflare 530 + error 1016 = Origin DNS 오류 — Contabo Quick Tunnel이 재시작되어
+// 예전 trycloudflare.com URL이 죽은 상태. Worker 시크릿 CONTABO_URL 갱신이 필요하다.
+function explainProxyError(msg) {
+  if (/530/.test(msg) && /1016/.test(msg)) {
+    return `${msg}\n→ Contabo 터널이 끊겼습니다 (Quick Tunnel은 서버 재시작 시 URL이 바뀜).\n` +
+      `① Contabo에서 cloudflared 터널 재시작 → 새 https://xxxx.trycloudflare.com URL 확인\n` +
+      `② PC에서: cd proxy && wrangler secret put CONTABO_URL (새 URL 입력, 재배포 불필요)`;
+  }
+  return msg;
+}
+
 // GPT Image 2 (Higgsfield) — Cloudflare Worker 프록시 경유로 생성.
 //  • resolution=1k + quality=low = 약 0.5 크레딧/장 (유튜브 저용량용)
 //  • refDataUrls: 업로드한 캐릭터/스타일 이미지(data:URL) → 참조로 전달
@@ -3943,7 +3955,7 @@ async function generateImageViaHiggsfield(proxyUrl, prompt, aspect, refDataUrls)
   if (!res.ok) {
     let msg = `프록시 오류 ${res.status}`;
     try { const j = await res.json(); if (j && j.error) msg = j.error; } catch {}
-    throw new Error(msg);
+    throw new Error(explainProxyError(msg));
   }
   return await res.blob();
 }
@@ -3965,7 +3977,7 @@ async function generateImageViaSoul2(proxyUrl, soulId, prompt, aspect) {
   if (!res.ok) {
     let msg = `Soul 2 프록시 오류 ${res.status}`;
     try { const j = await res.json(); if (j && j.error) msg = j.error; } catch {}
-    throw new Error(msg);
+    throw new Error(explainProxyError(msg));
   }
   return await res.blob();
 }
