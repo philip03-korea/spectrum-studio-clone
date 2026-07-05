@@ -1,7 +1,82 @@
 # 🤝 HANDOFF — 벼량끝 On the Brink Studio PRO V2.1
 
 > 다른 컴퓨터에서 이어서 작업하기 위한 인수인계 문서.
-> 마지막 업데이트: 2026-06-19
+> 마지막 업데이트: 2026-07-05
+
+---
+
+## ⭐ 2026-07-05 — 이미지 백엔드 완전 복구 (도메인 영구화 + Higgsfield 토큰 재인증 + 자동갱신)
+
+> GPT Image 2(Higgsfield) 이미지 생성이 `백엔드 오류 530/1016` → `502` → `Invalid or expired token` 으로
+> 죽어 있던 것을 **완전 복구**했다. 핵심은 hermes OAuth가 아니라 **Higgsfield 자체 CLI로 토큰을 발급**한 것.
+
+### 1) 영구 도메인 (완료)
+- 임시 Quick Tunnel(자꾸 죽던 것) → 고정 도메인 **`https://suno.theziller.com`** 로 전환.
+  - Cafe24 A레코드 `suno.theziller.com` → `84.247.144.131`
+  - nginx: `/etc/nginx/sites-enabled/suno` → `127.0.0.1:8799`
+  - HTTPS: certbot (만료 2026-10-03 자동갱신)
+  - Cloudflare Worker `hf-gpt-image-proxy` 시크릿 `CONTABO_URL=https://suno.theziller.com`
+- 서버 재시작에도 URL 안 깨짐.
+
+### 2) 토큰 문제의 근본 원인 (hermes OAuth = 막다른 길)
+- 백엔드는 `mcp.higgsfield.ai` OAuth 액세스 토큰으로 이미지를 생성함. 그 토큰이 만료 + refresh_token 폐기.
+- 재로그인(`hermes -p ha4 mcp login higgsfield`)은 **Clerk의 DCR redirect_uri 버그**로 영구 실패:
+  hermes가 매번 랜덤 콜백 포트를 쓰는데 Clerk이 "pre-registered redirect uris와 불일치"로 거부.
+  로컬 `higgsfield.client.json`의 등록값이 요청값과 같아도 거부됨 → **클라이언트 측에서 못 고침**.
+- Claude Code MCP 토큰 이식(option 5)도 불가: `.credentials.json`의 accessToken이 **빈 값**(claude.ai 브로커).
+
+### 3) ✅ 해결 — Higgsfield 자체 CLI 우회
+Higgsfield 자체 CLI는 **first-party 고정 redirect(`http://localhost:8765/callback`, client_id `RGGJvwJkPrrtRj`)** 를
+써서 Clerk을 통과한다.
+
+```bash
+# 서버에 CLI 설치 (node/npm 필요 — 이미 v22/10 있음)
+npm install -g @higgsfield/cli
+export PATH="$(npm prefix -g)/bin:$PATH"     # 전역 bin이 PATH에 없어서 필요
+
+# 헤드리스 로그인: 데스크톱에서 포트포워딩 후 브라우저 승인
+#  (데스크톱 새 터미널)  ssh -N -L 8765:localhost:8765 admin@84.247.144.131
+#  (서버)                higgsfield auth login   → 출력된 URL을 데스크톱 브라우저에서 승인
+#  → "Successfully authenticated!" / 브라우저 "Device authorized"
+```
+- CLI 토큰 저장 위치: **`/home/admin/.config/higgsfield/credentials.json`**
+  (필드: `access_token`, `refresh_token`, `expires_at`(unix초), `token_type`, `scope`)
+- 이 토큰을 백엔드 파일 형식으로 이식:
+  **`/home/admin/.hermes/profiles/ha4/mcp-tokens/higgsfield.json`** = `{"access_token","refresh_token","expires_at"}`
+- 백엔드 재시작 후 `curl .../generate` → `status:"completed"` + cloudfront 이미지 URL 확인 = 정상.
+
+### 4) ✅ 자동 갱신 (cron — 매 6시간)
+토큰은 ~24h 만료. 직접 OAuth refresh는 **Cloudflare 1010 / `invalid_client`** 로 막힘 → CLI를 갱신 엔진으로 사용.
+- `/home/admin/hf_token_cron.sh`: 크리덴셜을 강제 만료표시 → `higgsfield auth token`(CLI가 자동 refresh) →
+  `hf_sync_token.py`로 백엔드 파일 동기화.
+- crontab: `0 */6 * * * /home/admin/hf_token_cron.sh`
+- 보조 스크립트: `/home/admin/hf_sync_token.py` (credentials.json → higgsfield.json 동기화)
+
+### 5) 백엔드 재시작 (토큰은 메모리 로드라 파일 갱신 후 필요)
+```bash
+K=$(cat /proc/$(pgrep -f gpt_backend.py)/environ | tr '\0' '\n' | grep -oP 'BACKEND_API_KEY=\K.*')
+pkill -f gpt_backend.py; sleep 2
+cd /home/admin && BACKEND_API_KEY="$K" nohup /home/admin/hermes-venv/bin/python /home/admin/gpt_backend.py \
+  > /home/admin/gpt_backend.log 2>&1 &
+curl -s http://127.0.0.1:8799/health   # token_expires_in 양수면 정상
+```
+
+### 핵심 경로 모음
+| 항목 | 값 |
+|---|---|
+| 서버 | `ssh admin@84.247.144.131` (hermes) |
+| 이미지 백엔드 | `/home/admin/gpt_backend.py` (`127.0.0.1:8799`) |
+| 백엔드 토큰(정본) | `/home/admin/.hermes/profiles/ha4/mcp-tokens/higgsfield.json` |
+| CLI 토큰(원본) | `/home/admin/.config/higgsfield/credentials.json` |
+| 자동갱신 | `/home/admin/hf_token_cron.sh` + `hf_sync_token.py` (crontab 6h) |
+| 도메인 | `https://suno.theziller.com` → nginx → 8799 |
+| Worker | `hf-gpt-image-proxy.philip03.workers.dev` (CONTABO_URL/CONTABO_KEY) |
+
+### TODO (남은 개선)
+- [ ] 백엔드 `gpt_backend.py`: 만료 임박 시 깨진 `_refresh()` 대신 CLI 기반 갱신(`hf_token_cron.sh`) 호출하도록 패치.
+      (`_token()`은 이미 매 호출 파일을 재로드하므로 cron 갱신은 재시작 없이 반영됨)
+- [ ] 안정화됐으니 `BACKEND_API_KEY` / Worker `CONTABO_KEY` 회전(보안).
+- [ ] 만료 시 재로그인은 `higgsfield auth login`(포트포워딩) 반복이면 됨 — hermes 경로는 버림.
 
 ---
 
