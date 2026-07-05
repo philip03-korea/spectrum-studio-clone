@@ -700,12 +700,20 @@ body {
   border-radius: 3px;
   position: relative;
   cursor: pointer;
+  touch-action: none;
+}
+/* 클릭/드래그하기 쉽게 세로 히트 영역 확장(시각은 그대로 6px) */
+.track::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: -8px; bottom: -8px;
 }
 .track-fill {
   position: absolute; left: 0; top: 0; bottom: 0;
   background: linear-gradient(90deg, var(--accent), var(--cyan));
   border-radius: 3px;
   width: 0%;
+  pointer-events: none;
 }
 .track-handle {
   position: absolute;
@@ -717,7 +725,10 @@ body {
   box-shadow: 0 1px 4px rgba(0,0,0,0.5);
   left: 0%;
   pointer-events: none;
+  transition: width .1s, height .1s;
 }
+.track:hover .track-handle, .track:active .track-handle { width: 16px; height: 16px; }
+.play-btn-sm { width: 28px; height: 28px; font-size: 12px; background: var(--bg-3); color: var(--text-1); }
 .track-name { color: var(--text-2); font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .adjust-section { display: flex; flex-direction: column; gap: 10px; }

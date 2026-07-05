@@ -1130,11 +1130,37 @@ function togglePlay() {
 function bindPlayback() {
   $('play-overlay').addEventListener('click', togglePlay);
   $('play-btn').addEventListener('click', togglePlay);
+  // 처음으로 버튼
+  const startBtn = $('to-start-btn');
+  if (startBtn) startBtn.addEventListener('click', () => {
+    if (!state.audioEl) return;
+    state.audioEl.currentTime = 0;
+    updateTimeline();
+  });
+  // 진행바: 클릭 + 드래그 스크럽으로 재생 위치 이동
   const track = $('track');
-  track.addEventListener('click', e => {
-    if (!state.audioEl || !state.audio) return;
+  const dur = () => (state.audio?.duration) || (state.audioEl?.duration) || 0;
+  const seekToClientX = (clientX) => {
+    if (!state.audioEl || !dur()) return;
     const rect = track.getBoundingClientRect();
-    state.audioEl.currentTime = ((e.clientX - rect.left) / rect.width) * state.audio.duration;
+    let ratio = (clientX - rect.left) / rect.width;
+    ratio = Math.max(0, Math.min(1, ratio));
+    state.audioEl.currentTime = ratio * dur();
+    updateTimeline();
+  };
+  let dragging = false;
+  const onMove = e => { if (dragging) { seekToClientX(e.clientX); e.preventDefault(); } };
+  const onUp = () => {
+    dragging = false;
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+  };
+  track.addEventListener('pointerdown', e => {
+    dragging = true;
+    seekToClientX(e.clientX);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    e.preventDefault();
   });
 }
 function updateTimeline() {
