@@ -3592,7 +3592,9 @@ async function renderToMp4() {
 // 🎨 가사 맞춤 이미지 생성 (OpenAI gpt-image-1 / DALL-E 3)
 // ====================================================================
 
-const LG_NEG_PROMPT = 'CRITICAL: Do NOT render ANY text, letters, words, numbers, titles, subtitles, captions, lyrics, timestamps, watermarks, logos, or typography anywhere in the image. Do NOT split the image into panels, grids, collages, comic strips, or multiple frames. Output exactly ONE single full-frame illustration with ZERO text overlays.';
+const LG_NEG_PROMPT = 'CRITICAL: Do NOT render ANY text, letters, words, numbers, titles, subtitles, captions, lyrics, timestamps, watermarks, logos, or typography anywhere in the image. Do NOT split the image into panels, grids, collages, comic strips, or multiple frames. Do NOT create a character sheet, character turnaround, reference sheet, model sheet, expression sheet, contact sheet, lookbook, or any layout showing the same character in multiple poses/views/angles/expressions. Show the character EXACTLY ONCE, in a single candid moment inside ONE continuous cinematic scene. Output exactly ONE single full-frame illustration with ZERO text overlays.';
+// Soul/캐릭터 모델 전용 강한 네거티브 (분할·텍스트·시트 방지)
+const SOUL_NEG_PROMPT = 'split screen, split image, composite, multiple panels, grid layout, collage, triptych, diptych, comic panels, divided image, border frame, panel border, side-by-side, before and after, text, letters, words, numbers, caption, subtitle, label, watermark, logo, typography, character sheet, character turnaround, reference sheet, model sheet, expression sheet, contact sheet, lookbook, multiple views, multiple poses, multiple angles, multiple expressions, montage';
 
 // 성경 인물 정규 스토리 아크 (테마 매칭 시 우선 사용)
 const BIBLE_ARCS = {
@@ -3684,7 +3686,7 @@ function buildScenePlan(lyrics, theme, N) {
 function buildPromptForScene(scene, theme, preset, styleHints) {
   const parts = [];
   // ★ 프롬프트 맨 앞에 핵심 금지사항 — 모델이 가장 먼저 읽게
-  parts.push('[Single full-frame image, absolutely NO text/letters/numbers/watermarks, NO split panels/grids/collage.]');
+  parts.push('[ONE single full-frame image of ONE character in ONE scene. Absolutely NO text/letters/numbers/watermarks, NO split panels/grids/collage, NO character sheet / turnaround / multiple poses or views.]');
   const emotionMap = {
     'hopeful': 'hopeful, warm light streaming down',
     'somber': 'solemn, soft cool light',
@@ -3995,7 +3997,7 @@ async function generateImageViaSoul2(proxyUrl, soulId, prompt, aspect) {
     res = await fetch(`${base}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ engine: 'soul_2', soul_id: soulId, prompt, aspect_ratio: aspect }),
+      body: JSON.stringify({ engine: 'soul_2', soul_id: soulId, prompt, aspect_ratio: aspect, negative_prompt: SOUL_NEG_PROMPT, enhance_prompt: false }),
     });
   } catch (e) {
     throw new Error('Soul 2 프록시에 연결할 수 없습니다 — 프록시 URL과 배포 상태를 확인하세요');

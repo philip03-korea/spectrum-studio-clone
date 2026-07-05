@@ -168,6 +168,9 @@ function json(obj, status, cors) {
   return new Response(JSON.stringify(obj), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 }
 
+// Soul/캐릭터 모델 전용 네거티브 — 분할패널·텍스트·캐릭터시트/턴어라운드 방지
+const SOUL_NEG = 'split screen, split image, composite, multiple panels, grid layout, collage, triptych, diptych, comic panels, divided image, border frame, panel border, side-by-side, before and after, text, letters, words, numbers, caption, subtitle, label, watermark, logo, typography, character sheet, character turnaround, reference sheet, model sheet, expression sheet, contact sheet, lookbook, multiple views, multiple poses, multiple angles, multiple expressions, montage';
+
 // ============ Soul 2 경로 A: Contabo 백엔드 경유 (Bearer 토큰 보유 → fnf.higgsfield.ai) ============
 async function handleSoul2ViaContabo(body, base, key, cors) {
   const soulId = (body.soul_id || '').trim();
@@ -177,6 +180,8 @@ async function handleSoul2ViaContabo(body, base, key, cors) {
     soul_id: soulId,
     prompt: body.prompt,
     aspect_ratio: body.aspect_ratio || '9:16',
+    negative_prompt: body.negative_prompt || SOUL_NEG,
+    enhance_prompt: body.enhance_prompt === true,
   };
   const genRes = await fetch(`${base}/generate-soul`, {
     method: 'POST',
@@ -222,8 +227,9 @@ async function handleSoul2Direct(body, env, cors) {
   const auth = { 'Authorization': `Key ${keyId}:${keySecret}` };
   const params = {
     prompt: body.prompt, width_and_height, quality, batch_size: 1,
-    enhance_prompt: true, custom_reference_id: soulId,
+    enhance_prompt: body.enhance_prompt === true, custom_reference_id: soulId,
     custom_reference_strength: typeof body.strength === 'number' ? body.strength : 1.0,
+    negative_prompt: body.negative_prompt || SOUL_NEG,
   };
   try {
     const create = await fetch('https://platform.higgsfield.ai/v1/text2image/soul', {
