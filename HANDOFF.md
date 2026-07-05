@@ -1,7 +1,28 @@
 # 🤝 HANDOFF — 벼량끝 On the Brink Studio PRO V2.1
 
 > 다른 컴퓨터에서 이어서 작업하기 위한 인수인계 문서.
-> 마지막 업데이트: 2026-07-05
+> 마지막 업데이트: 2026-07-06
+
+---
+
+## ⭐ 2026-07-06 — Soul 분할/시트 방지 + GPT Image 2 참조 이미지 실반영
+
+### Soul 2 — 분할패널/텍스트/캐릭터시트 방지 (해결)
+- **원인**: `soul_2` 모델은 `negative_prompt` 파라미터를 지원 안 함(무시). 게다가 확산 모델이라
+  프롬프트 속 "no sheet / no panels / NOT a turnaround" 같은 **부정어를 오히려 그려버림**.
+- **해결(백엔드 `gpt_backend.py` `_generate_soul`)**: 프롬프트에서 대괄호 지시문·`CRITICAL:` 꼬리·
+  시트 유발 단어가 든 문장을 **전부 제거**하고, **순수 긍정 단일장면 프롬프트만** 전송.
+  (negative_prompt 제거)
+
+### GPT Image 2 — 업로드 참조 이미지 실제 반영 (신규)
+- **이전 문제**: 앱이 `references`를 보내도 백엔드가 무시 → 텍스트만으로 생성 → 참조와 무관한 왜곡 실사.
+- **해결**:
+  - Worker `/generate` 가 `references`(data URL)를 백엔드로 전달 (배포 완료).
+  - 백엔드 `_generate` 가 `_upload_refs()` 로 참조 이미지를 Higgsfield에 업로드
+    (`media_upload`→PUT→`media_confirm`) → `gpt_image_2` params에 `medias:[{value:media_id,role:"image"}]` 전달.
+  - 버그 수정: `_find_url` 이 입력 `media_input` URL이 아니라 **생성 결과 `results.rawUrl`** 을 반환하도록.
+  - 현재 참조 **첫 1장**만 사용(용량/안정성). 실증: 해안도시 참조 → 그 배경 반영한 단일 인물 장면 생성 확인.
+- 백엔드 파일: `/home/admin/gpt_backend.py` (SSH 패치, `.bak_*` 백업 있음). Worker: `proxy/worker.js`.
 
 ---
 
