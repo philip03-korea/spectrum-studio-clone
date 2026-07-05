@@ -131,6 +131,7 @@ export default {
       quality: body.quality || 'low',
       resolution: body.resolution || '1k',
       count: 1,
+      references: Array.isArray(body.references) ? body.references : [],
     };
 
     try {
