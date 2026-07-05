@@ -73,8 +73,10 @@ curl -s http://127.0.0.1:8799/health   # token_expires_in 양수면 정상
 | Worker | `hf-gpt-image-proxy.philip03.workers.dev` (CONTABO_URL/CONTABO_KEY) |
 
 ### TODO (남은 개선)
-- [ ] 백엔드 `gpt_backend.py`: 만료 임박 시 깨진 `_refresh()` 대신 CLI 기반 갱신(`hf_token_cron.sh`) 호출하도록 패치.
-      (`_token()`은 이미 매 호출 파일을 재로드하므로 cron 갱신은 재시작 없이 반영됨)
+- [x] **백엔드 `gpt_backend.py` `_refresh()` 패치 완료 (2026-07-05)**: 깨진 직접 OAuth refresh 대신
+      `subprocess.run(["/bin/bash","/home/admin/hf_token_cron.sh"], env=HOME=/home/admin)` 로 교체.
+      만료(-10s) 토큰에서 generate 시 자가치유되어 `expires_in`이 ~86400으로 점프 확인.
+      (`_get_token()`은 매 호출 파일 재로드 → cron 갱신은 재시작 없이 반영)
 - [ ] 안정화됐으니 `BACKEND_API_KEY` / Worker `CONTABO_KEY` 회전(보안).
 - [ ] 만료 시 재로그인은 `higgsfield auth login`(포트포워딩) 반복이면 됨 — hermes 경로는 버림.
 
