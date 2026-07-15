@@ -4366,17 +4366,22 @@ function renderScenePlan() {
     row.className = 'lg-scene-card' + (_lg.generatingIdx === s.idx ? ' generating' : '');
     row.style.cssText = 'font-size: 11px;';
     const frame = _lg.frames.find(f => f.idx === s.idx);
+    const isGen = _lg.generatingIdx === s.idx;
     row.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
         <b style="color: var(--accent-hover);">#${String(s.idx).padStart(2,'0')}</b>
-        <button class="btn-mini lg-regen-btn" data-idx="${s.idx}">🔄 재생성</button>
+        ${isGen
+          ? `<button class="btn-mini lg-regen-btn" data-idx="${s.idx}" disabled style="opacity:.6; cursor:default;">⏳ 재생성 중…</button>`
+          : `<button class="btn-mini lg-regen-btn" data-idx="${s.idx}">🔄 재생성</button>`}
       </div>
       ${s.biblicalEvent ? `<div style="color: var(--warn); font-weight:600;">📖 ${s.biblicalEvent}</div>` : ''}
       <div style="color: var(--text-2); margin-top: 2px;">🎵 ${s.lyricSummary || '(가사 없음)'}</div>
       <div style="color: var(--text-2); font-size: 10px;">감정: ${s.emotion}</div>
-      ${frame
-        ? `<img class="lg-frame-img" data-idx="${s.idx}" src="${frame.url}" title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;" />`
-        : (_lg.generatingIdx === s.idx ? `<div class="lg-gen-spin">⏳ 생성 중…</div>` : '')}
+      ${isGen
+        ? `<div class="lg-gen-spin" style="position:relative; margin-top:6px;">${frame ? `<img src="${frame.url}" style="width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; display:block; opacity:.3;" />` : ''}<div style="${frame ? 'position:absolute; inset:0; ' : ''}display:flex; align-items:center; justify-content:center; gap:6px; color:var(--accent-hover); font-weight:700;"><span class="lg-spin-emoji">🔄</span> ${frame ? '재생성 중…' : '생성 중…'}</div></div>`
+        : (frame
+          ? `<img class="lg-frame-img" data-idx="${s.idx}" src="${frame.url}" title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;" />`
+          : '')}
     `;
     wrap.appendChild(row);
   });
@@ -4642,6 +4647,8 @@ async function regenerateFrame(idx) {
   const useRefEdits = useUpload && model === 'gpt-image-1';
   const useStyleVision = useUpload && model === 'dall-e-3';
   document.getElementById('lg-progress').textContent = `재생성 중 #${idx}…`;
+  _lg.generatingIdx = idx;
+  renderScenePlan();   // 클릭한 카드에 "🔄 재생성 중…" 즉시 표시
   try {
     // DALL·E 3 스타일 모드인데 아직 스타일 미분석이면 먼저 분석
     if (useStyleVision && !_lg.styleHints) {
@@ -4664,10 +4671,12 @@ async function regenerateFrame(idx) {
     } else {
       _lg.frames.push({ idx, blob, url, prompt: promptObj.prompt });
     }
-    renderScenePlan();
     document.getElementById('lg-progress').textContent = `✅ #${idx} 재생성 완료`;
   } catch (e) {
     document.getElementById('lg-progress').textContent = `❌ #${idx} 실패: ${e.message}`;
+  } finally {
+    _lg.generatingIdx = null;
+    renderScenePlan();   // 새 이미지 반영 + "재생성 중" 표시 해제
   }
 }
 
