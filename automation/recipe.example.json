@@ -1,0 +1,14 @@
+{
+  "siteUrl": "https://philip03-korea.github.io/spectrum-studio-clone/",
+  "audioPath": "./drops/part15-여호와이레/song.mp3",
+  "backgroundPaths": [
+    "./drops/part15-여호와이레/bg1.jpg",
+    "./drops/part15-여호와이레/bg2.jpg"
+  ],
+  "logoPath": "./drops/logo.png",
+  "lyricsText": "여기에 LRC 또는 일반 가사 텍스트 붙여넣기",
+  "genre": "ballad",
+  "outputDir": "./output",
+  "outputName": "part15-여호와이레.mp4",
+  "headless": true
+}
