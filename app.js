@@ -4649,9 +4649,11 @@ async function generateAllFrames() {
   _lg.prompts = _lg.scenePlan.scenes.map(s => ({
     idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints),
   }));
-  // HF(gpt_image_2): 참조이미지는 백엔드 미지원 → 스타일은 위 비전 텍스트로 반영(refFiles 안 보냄)
+  // gpt_image_2: 업로드 이미지를 실제 참조로 직접 전송 (백엔드가 medias로 반영)
   // gpt-image-1: edits 경로 / dall-e-3: 스타일 비전
-  const refFiles = isHF ? null : (useRefEdits ? _lg.styleFiles : null);
+  const refFiles = (model === 'hf-gpt-image-2' && hasUpload) ? _lg.styleFiles
+    : isHF ? null
+    : (useRefEdits ? _lg.styleFiles : null);
   const modeTag = isHF
     ? (appliedHints ? ' (업로드 스타일 적용)' : (preset ? ' (선택 스타일)' : ''))
     : (useRefEdits ? ' (업로드 이미지로 인물 유지)' : (appliedHints ? ' (업로드 스타일 적용)' : ''));
