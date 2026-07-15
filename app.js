@@ -4324,8 +4324,8 @@ function bindLyricImageGen() {
     }
     let N = Number($L('lg-frames').value);
     if ($L('lg-auto-count').checked) {
-      // 자동: 가사 줄 수 / 2.5 (8~20 클램프)
-      N = Math.max(8, Math.min(20, Math.round(lines.length / 2.5)));
+      // 자동: 가사 줄 수 / 2.5 (8~40 클램프)
+      N = Math.max(8, Math.min(40, Math.round(lines.length / 2.5)));
     }
     // 가사 줄 수보다 장면이 많으면 "(가사 없음)" 빈 장면이 생기므로 줄 수로 제한
     N = Math.max(1, Math.min(N, lines.length));
