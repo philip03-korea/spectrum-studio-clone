@@ -5,6 +5,14 @@
 
 import { Muxer, ArrayBufferTarget } from 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.5/+esm';
 
+// 로드된 코드 버전을 화면에 표시 (캐시 확인용) — import.meta.url 의 ?v= 값
+try {
+  const _cv = (new URL(import.meta.url).searchParams.get('v')) || '?';
+  const _el = document.getElementById('brand-code-ver');
+  if (_el) _el.textContent = _cv;
+  console.log('[벼량끝] code version:', _cv);
+} catch (_) {}
+
 // ====================================================================
 // State
 // ====================================================================

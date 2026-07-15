@@ -78,6 +78,7 @@ body {
 }
 .brand-pro { color: var(--warn); font-weight: 700; font-size: 10px; letter-spacing: 0.5px; }
 .brand-ver { background: var(--warn-bg); color: #fff; padding: 1px 6px; border-radius: 3px; font-weight: 800; font-size: 10px; }
+.brand-code-ver { color: var(--text-2); font-size: 9px; opacity: 0.7; font-variant-numeric: tabular-nums; }
 /* legacy classes kept for back-compat (no longer used) */
 .brand-row { display: flex; align-items: center; gap: 10px; }
 .brand-mark { color: var(--cyan); }
