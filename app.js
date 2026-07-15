@@ -2669,6 +2669,50 @@ function downloadTextFile(text, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+// 성경(창세기 아브라함 이야기) 테마 감지 + 등장인물 성별/관계 용어집.
+// Whisper 프롬프트 힌트(고유명사 인식률 개선)와 장면 프롬프트(캐릭터 성별/관계 정확화)에 공용으로 사용.
+const BIBLE_THEME_RE = /아브라함|성경|창세기|출애굽|시편|다윗|모세|여호와|예수/;
+const BIBLE_CHARACTER_GLOSSARY = {
+  '아브라함': 'male, elderly biblical patriarch',
+  '사라': 'female, Abraham\'s wife',
+  '롯': 'male, Abraham\'s nephew',
+  '이삭': 'male, Abraham and Sarah\'s son',
+  '하갈': 'female, Sarah\'s servant, Ishmael\'s mother',
+  '이스마엘': 'male, Abraham and Hagar\'s son',
+  '리브가': 'female, Isaac\'s wife',
+};
+
+// Whisper STT 결과의 오인식(특히 고유명사)을 문맥으로 교정. 실패 시 원본 그대로 반환(안전).
+async function correctLyricsWithContext(apiKey, segs, theme) {
+  const idxs = segs.map((_, i) => i).filter(i => segs[i].text !== '(간주중)');
+  if (!idxs.length) return segs;
+  const lines = idxs.map(i => `${i}: ${segs[i].text}`).join('\n');
+  const isBiblical = BIBLE_THEME_RE.test(theme || '');
+  const glossary = isBiblical
+    ? ('성경(창세기) 이야기다. 등장인물: ' + Object.entries(BIBLE_CHARACTER_GLOSSARY).map(([k, v]) => `${k}(${v})`).join(', ') + '.')
+    : '';
+  const instr =
+    '다음은 노래 가사를 음성인식(Whisper)한 결과다. 발음이 비슷해 잘못 인식된 단어(특히 고유명사·인명)만 문맥에 맞게 교정하라. ' +
+    '의미를 임의로 바꾸지 말고, 줄 수와 순서를 그대로 유지하라. 이미 올바른 줄은 그대로 둔다. ' +
+    (theme ? `테마: ${theme}. ` : '') + glossary +
+    '\n각 줄은 "번호: 텍스트" 형식이다. 교정 결과만 같은 "번호: 텍스트" 형식으로, 같은 줄 수만큼 반환하라(설명 금지).\n\n' + lines;
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: instr }], temperature: 0.2, max_tokens: 2000 }),
+    });
+    if (!r.ok) return segs;
+    const j = await r.json();
+    const out = (j.choices?.[0]?.message?.content || '').split('\n').map(l => l.trim()).filter(Boolean);
+    const map = {};
+    out.forEach(l => { const m = l.match(/^(\d+):\s*(.*)$/); if (m) map[Number(m[1])] = m[2]; });
+    const result = segs.slice();
+    idxs.forEach(i => { if (map[i]) result[i] = { ...result[i], text: map[i] }; });
+    return result;
+  } catch (_) { return segs; }
+}
+
 async function transcribeCurrentAudio(opts = {}) {
   const btn = $('lg-transcribe-btn');
   const setStatus = t => { const el = $('lg-transcribe-status'); if (el) el.textContent = t; };
@@ -2693,10 +2737,20 @@ async function transcribeCurrentAudio(opts = {}) {
   if (btn) { btn.disabled = true; btn.textContent = '🎙️ 인식 중...'; }
   setStatus('🎙️ Whisper로 가사 인식 중... (곡 길이에 따라 수십 초 걸립니다)');
   try {
+    const themeVal = ($('lg-theme')?.value || '').trim();
+    const isBiblicalTheme = BIBLE_THEME_RE.test(themeVal);
+    // Whisper 고유명사 인식 정확도 개선: 테마 + (성경 테마면) 등장인물 이름을 프롬프트 힌트로 제공
+    const promptBias = [
+      themeVal,
+      isBiblicalTheme ? ('등장인물: ' + Object.keys(BIBLE_CHARACTER_GLOSSARY).join(', ') + ', 하나님, 여호와.') : '',
+    ].filter(Boolean).join(' ').slice(0, 800);
+
     const fd = new FormData();
     fd.append('file', file, file.name || 'audio.mp3');
     fd.append('model', 'whisper-1');
     fd.append('response_format', 'verbose_json');
+    fd.append('language', 'ko');
+    if (promptBias) fd.append('prompt', promptBias);
     const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}` },
@@ -2707,10 +2761,28 @@ async function transcribeCurrentAudio(opts = {}) {
       throw new Error(`API ${res.status} — ${errText.slice(0, 180)}`);
     }
     const json = await res.json();
-    const segs = (json.segments || [])
-      .map(s => ({ start: Math.max(0, s.start || 0), end: Math.max(0, s.end || 0), text: (s.text || '').trim() }))
-      .filter(s => s.text);
+    // no_speech_prob/avg_logprob 낮은(=반주/무음일 확률 높은) 구간은 Whisper가 흔히 텍스트를 "환각"으로
+    // 지어내므로, 그 가짜 텍스트 대신 "(간주중)"으로 표시한다.
+    let segs = (json.segments || [])
+      .map(s => ({
+        start: Math.max(0, s.start || 0), end: Math.max(0, s.end || 0),
+        text: (s.text || '').trim(),
+        noSpeech: typeof s.no_speech_prob === 'number' ? s.no_speech_prob : 0,
+        logprob: typeof s.avg_logprob === 'number' ? s.avg_logprob : 0,
+      }))
+      .filter(s => s.text)
+      .map(s => ((s.noSpeech > 0.6 || s.logprob < -1.0) ? { start: s.start, end: s.end, text: '(간주중)' } : { start: s.start, end: s.end, text: s.text }));
     if (!segs.length) throw new Error('인식된 가사가 없습니다 (반주만 있는 구간일 수 있음)');
+    // 연속된 "(간주중)" 구간은 하나로 합쳐 표시를 깔끔하게 정리
+    segs = segs.reduce((acc, s) => {
+      const prev = acc[acc.length - 1];
+      if (prev && prev.text === '(간주중)' && s.text === '(간주중)') { prev.end = s.end; return acc; }
+      acc.push({ ...s }); return acc;
+    }, []);
+
+    // 문맥 기반 교정: 발음이 비슷해 잘못 인식된 고유명사 등을 GPT로 보정 (실패해도 원본 텍스트 유지)
+    setStatus('🧠 가사 문맥 교정 중… (오인식 고유명사 등)');
+    segs = await correctLyricsWithContext(key, segs, themeVal).catch(() => segs);
 
     const base = (file.name || 'lyrics').replace(/\.[^.]+$/, '');
     _lgTranscript = { lrc: segmentsToLrc(segs), srt: segmentsToSrt(segs), base };
@@ -3875,9 +3947,16 @@ async function describeScenesFromLyrics(apiKey, scenes, theme, styleHint, fixedC
   const step1 = fixedCharacter
     ? `STEP 1 — The main character is FIXED (from the user's uploaded reference). Use EXACTLY this character in EVERY shot — do NOT change gender, age, hair, or clothing: ${fixedCharacter}\n`
     : 'STEP 1 — Design ONE consistent main character (the protagonist that recurs in EVERY shot). Write a fixed, detailed English appearance description: gender, age, hair, face, exact clothing/colors, body type. This MUST stay identical across all shots.\n';
+  const isBiblical = BIBLE_THEME_RE.test(theme || '');
+  const bibleGuidance = isBiblical
+    ? 'STEP 2 CHARACTER OVERRIDE — This is a Bible (Genesis) story. Use accurate biblical knowledge for each named figure\'s gender/role — never guess or invent an inconsistent gender. Known figures: ' +
+      Object.entries(BIBLE_CHARACTER_GLOSSARY).map(([k, v]) => `${k}=${v}`).join(', ') + '. ' +
+      'If a lyric line explicitly names a DIFFERENT figure than the fixed protagonist (e.g. mentions "롯"/Lot while the fixed character is Abraham), describe THAT specific named figure with the CORRECT gender/role from the list above for that shot, instead of the fixed protagonist. Use the fixed protagonist only for lines that are about them (or unclear/no explicit other figure).\n'
+    : '';
   const instr =
     'You are a music-video director creating a coherent visual story from Korean lyrics.\n' +
     step1 +
+    bibleGuidance +
     'STEP 2 — For EACH numbered lyric line, write ONE English SCENE prompt (the character is added separately, so do NOT repeat the character description here):\n' +
     '  (a) a concrete, distinct scene — setting + action/pose + emotion + camera angle + lighting — that visually illustrates THAT specific lyric line,\n' +
     '  (b) keep the same art style/world across all shots, no text or letters in the image.\n' +
