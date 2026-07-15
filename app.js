@@ -4491,8 +4491,10 @@ async function generateAllFrames() {
   //  • dall-e-3: 업로드+프리셋없음일 때
   //  • GPT Image 2(HF): 업로드 이미지가 있으면 (OpenAI 키로 스타일 추출) — 캔버스/백엔드가 참조이미지 직접지원 안 하므로 스타일을 텍스트로 반영
   const theme = document.getElementById('lg-theme').value.trim();
-  if (isHF && hasUpload && !oaKey) {
-    document.getElementById('lg-progress').textContent = '⚠️ 업로드 이미지(캐릭터·스타일)를 반영하려면 OpenAI 키가 필요합니다 (분석용).';
+  if (model === 'hf-gpt-image-2' && hasUpload) {
+    document.getElementById('lg-progress').textContent = '🖼️ 업로드 이미지를 참조로 직접 사용합니다 (OpenAI 키 불필요).';
+  } else if (isHF && hasUpload && !oaKey) {
+    document.getElementById('lg-progress').textContent = '⚠️ 업로드 이미지(스타일)를 반영하려면 OpenAI 키가 필요합니다 (분석용).';
   }
   // HF + 업로드 이미지: 업로드에서 '주인공(성별·외모)'과 '스타일'을 추출 → 그 캐릭터를 고정 주인공으로 사용
   if (isHF && hasUpload && oaKey && oaKey.startsWith('sk-') && (!_lg.styleHints || !_lg.character)) {
@@ -4650,7 +4652,9 @@ async function regenerateFrame(idx) {
       if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints);
     }
     // HF(gpt_image_2)는 참조이미지 미지원 → 스타일은 프롬프트(styleHints)로 반영 / gpt-image-1 + 업로드 = edits / 그 외 = t2i
-    const refFiles = isHF ? null : (useRefEdits ? _lg.styleFiles : null);
+    const refFiles = (model === 'hf-gpt-image-2' && hasUpload) ? _lg.styleFiles
+      : isHF ? null
+      : (useRefEdits ? _lg.styleFiles : null);
     const blob = await generateImageDispatch(model, promptObj.prompt, aspect, refFiles);
     const url = URL.createObjectURL(blob);
     const existing = _lg.frames.find(f => f.idx === idx);
