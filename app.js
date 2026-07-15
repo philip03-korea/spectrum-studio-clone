@@ -882,6 +882,16 @@ function bindAllSliders() {
 // ====================================================================
 // Lyrics
 // ====================================================================
+// LRC/SRT/TXT 안에 섞인 "비가사" 텍스트 판별 — 곡 구조 태그([Intro], [Verse 1]…)나
+// 연출/악기 지시문(장엄한 팀파니와…) 처럼 줄 전체가 대괄호/괄호 하나로만 이루어진 줄.
+// 실제로 부르는 가사만 남기기 위해 이런 줄은 시간+가사 목록에서 제외한다.
+function isNonLyricLine(s) {
+  const t = String(s || '').trim();
+  if (!t) return true;
+  if (/^\[[^\]]+\]$/.test(t)) return true;   // [Intro], [Verse 1], [Chorus] …
+  if (/^\([^)]*\)$/.test(t)) return true;    // (장엄한 팀파니와…), (연출: …) …
+  return false;
+}
 function parseLRC(text) {
   const lines = [];
   const re = /\[(\d{1,2}):(\d{1,2})(?:[\.:](\d{1,3}))?\]/g;
@@ -889,7 +899,7 @@ function parseLRC(text) {
     const matches = [...line.matchAll(re)];
     if (!matches.length) continue;
     const lyric = line.replace(re, '').trim();
-    if (!lyric) continue;
+    if (!lyric || isNonLyricLine(lyric)) continue;
     for (const m of matches) {
       const min = +m[1], sec = +m[2];
       let frac = 0;
@@ -913,7 +923,7 @@ function parseSRT(text) {
     const time = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000;
     const idx = block.indexOf('\n', block.indexOf('-->'));
     const txt = block.slice(idx + 1).trim();
-    if (txt) lines.push({ time, text: txt });
+    if (txt && !isNonLyricLine(txt)) lines.push({ time, text: txt });
   }
   return lines.sort((a, b) => a.time - b.time);
 }
@@ -974,7 +984,7 @@ function parseAndCleanLrc(rawText) {
     // TXT path
     return text.split(/\r?\n/)
       .map(l => l.trim())
-      .filter(l => l && !/^\[[^\]]+\]$/.test(l))
+      .filter(l => l && !isNonLyricLine(l))
       .join('\n');
   }
   const tsAnyRe = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
@@ -988,7 +998,7 @@ function parseAndCleanLrc(rawText) {
     const l = raw.trim();
     if (!tsFirstRe.test(l)) continue;
     const r = l.replace(tsAnyRe, '').trim();
-    if (r && !/^\[[^\]]+\]$/.test(r)) restCounts.push(r.split(/\s+/).length);
+    if (r && !isNonLyricLine(r)) restCounts.push(r.split(/\s+/).length);
   }
   const singleFrac = restCounts.length ? restCounts.filter(n => n === 1).length / restCounts.length : 0;
   const isWordLevel = restCounts.length >= 8 && singleFrac > 0.6;
@@ -1004,7 +1014,7 @@ function parseAndCleanLrc(rawText) {
       const [, mm, ss, frac] = m;
       const tsStr = `${mm}:${ss}` + (frac != null ? `.${frac}` : '');
       const rest = line.replace(tsAnyRe, '').trim();
-      if (!rest || /^\[[^\]]+\]$/.test(rest)) continue;  // ts-only / 섹션태그 줄 제외
+      if (!rest || isNonLyricLine(rest)) continue;  // ts-only / 섹션태그·연출지시문 줄 제외
       out.push(`[${tsStr}]${rest}`);
     }
     return out.join('\n');
@@ -1029,7 +1039,7 @@ function parseAndCleanLrc(rawText) {
     if (!tsMatch) {
       // No timestamp on this line. Could be a stray continuation; append as a word.
       // (Spec doesn't address this explicitly; safest is to attach to current group.)
-      if (line && !/^\[[^\]]+\]$/.test(line)) curWords.push(line);
+      if (line && !isNonLyricLine(line)) curWords.push(line);
       else flush();
       continue;
     }
@@ -1039,7 +1049,7 @@ function parseAndCleanLrc(rawText) {
     // Strip all timestamps to get the textual remainder.
     const rest = line.replace(tsAnyRe, '').trim();
     if (!rest) continue;                                         // Rule 4: ts-only
-    if (/^\[[^\]]+\]$/.test(rest)) { flush(); continue; }        // Rule 1+2: section tag = boundary
+    if (isNonLyricLine(rest)) { flush(); continue; }        // Rule 1+2: section tag·연출지시문 = boundary
     if (!curStartFormatted) curStartFormatted = tsStr;
     curWords.push(rest);
   }
@@ -2713,6 +2723,19 @@ async function correctLyricsWithContext(apiKey, segs, theme) {
   } catch (_) { return segs; }
 }
 
+// 파일의 오디오 재생 길이(초)를 빠르게 구함 — 마지막 세그먼트 뒤 여백(아웃트로 간주) 계산용
+function getAudioDuration(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const a = new Audio();
+    a.preload = 'metadata';
+    const done = d => { URL.revokeObjectURL(url); resolve(d); };
+    a.onloadedmetadata = () => done(isFinite(a.duration) ? a.duration : 0);
+    a.onerror = () => done(0);
+    a.src = url;
+  });
+}
+
 async function transcribeCurrentAudio(opts = {}) {
   const btn = $('lg-transcribe-btn');
   const setStatus = t => { const el = $('lg-transcribe-status'); if (el) el.textContent = t; };
@@ -2761,18 +2784,31 @@ async function transcribeCurrentAudio(opts = {}) {
       throw new Error(`API ${res.status} — ${errText.slice(0, 180)}`);
     }
     const json = await res.json();
-    // no_speech_prob/avg_logprob 낮은(=반주/무음일 확률 높은) 구간은 Whisper가 흔히 텍스트를 "환각"으로
-    // 지어내므로, 그 가짜 텍스트 대신 "(간주중)"으로 표시한다.
+    // no_speech_prob/avg_logprob/compression_ratio 로 보아 반주·무음일 확률이 높은 구간은 Whisper가
+    // 흔히 텍스트를 "환각"으로 지어내므로, 그 가짜 텍스트 대신 "(간주중)"으로 표시한다.
     let segs = (json.segments || [])
       .map(s => ({
         start: Math.max(0, s.start || 0), end: Math.max(0, s.end || 0),
         text: (s.text || '').trim(),
         noSpeech: typeof s.no_speech_prob === 'number' ? s.no_speech_prob : 0,
         logprob: typeof s.avg_logprob === 'number' ? s.avg_logprob : 0,
+        compRatio: typeof s.compression_ratio === 'number' ? s.compression_ratio : 0,
       }))
       .filter(s => s.text)
-      .map(s => ((s.noSpeech > 0.6 || s.logprob < -1.0) ? { start: s.start, end: s.end, text: '(간주중)' } : { start: s.start, end: s.end, text: s.text }));
+      .map(s => ((s.noSpeech > 0.6 || s.logprob < -1.0 || s.compRatio > 2.4) ? { start: s.start, end: s.end, text: '(간주중)' } : { start: s.start, end: s.end, text: s.text }));
     if (!segs.length) throw new Error('인식된 가사가 없습니다 (반주만 있는 구간일 수 있음)');
+
+    // 앞/뒤 여백 보정: Whisper가 곡 맨 앞(보컬 시작 전)·맨 뒤(아웃트로) 구간을
+    // 세그먼트로 아예 안 주는 경우가 많아, 그 구간이 "간주중" 없이 비거나 다음 가사에 붙어버린다.
+    // 첫 세그먼트 시작 전 / 마지막 세그먼트 끝 이후 여백을 명시적으로 "(간주중)"으로 채운다.
+    const LEAD_TAIL_GAP = 2.0;
+    if (segs[0].start > LEAD_TAIL_GAP) segs.unshift({ start: 0, end: segs[0].start, text: '(간주중)' });
+    try {
+      const dur = await getAudioDuration(file);
+      const last = segs[segs.length - 1];
+      if (dur && dur - last.end > LEAD_TAIL_GAP) segs.push({ start: last.end, end: dur, text: '(간주중)' });
+    } catch (_) { /* duration 못 구해도 무시 */ }
+
     // 연속된 "(간주중)" 구간은 하나로 합쳐 표시를 깔끔하게 정리
     segs = segs.reduce((acc, s) => {
       const prev = acc[acc.length - 1];
