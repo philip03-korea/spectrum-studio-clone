@@ -5,10 +5,12 @@ Suno 라이브러리 일괄 다운로더 — 곡마다 MP3 + LRC + SRT 를 제�
 사용법
 ------
 1) pip install requests
-2) 아래 BEARER_TOKEN 에 토큰을 넣는다 (suno.com 로그인 후):
+2) 토큰을 이 파일이 아니라 tools/.suno_token 에 한 줄로 저장한다 (suno.com 로그인 후):
      - 크롬 F12 → Application → Cookies → https://suno.com → __session 값
        또는 Console 에서:  await window.Clerk.session.getToken()
-   토큰은 수십 분~몇 시간 후 만료됨 → 401 나면 새로 복사해 다시 넣을 것.
+   토큰은 수십 분~몇 시간 후 만료됨 → 401 나면 tools/.suno_token 을 새 값으로 덮어쓸 것.
+   (tools/.suno_token 은 .gitignore 처리되어 있어 절대 커밋되지 않음 — 이 스크립트 파일 안에는
+    토큰을 절대 직접 붙여넣지 말 것. SUNO_TOKEN 환경변수로 대신 넘겨도 됨.)
 
 3) 구조부터 확인 (1곡의 실제 JSON 덤프):
      python suno_download.py --probe
@@ -35,7 +37,19 @@ except ImportError:
     sys.exit(1)
 
 # ============================ 설정 ============================
-BEARER_TOKEN = "여기에_토큰_붙여넣기"   # ← suno.com 토큰
+def _load_token():
+    """우선순위: SUNO_TOKEN 환경변수 → tools/.suno_token 파일 (둘 다 git에 커밋되지 않음)."""
+    env_tok = os.environ.get("SUNO_TOKEN")
+    if env_tok:
+        return env_tok.strip()
+    token_file = os.path.join(os.path.dirname(__file__), ".suno_token")
+    if os.path.exists(token_file):
+        with open(token_file, encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
+
+BEARER_TOKEN = _load_token()
 
 OUT_DIR = r"C:\Users\admin\Downloads\노래제목별_정리"
 API_BASE = "https://studio-api-prod.suno.com/api"   # 401/404 시 studio-api.prod.suno.com 로도 시도해볼 것
@@ -352,8 +366,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="N곡만 처리")
     args = ap.parse_args()
 
-    if not BEARER_TOKEN or BEARER_TOKEN == "여기에_토큰_붙여넣기":
-        print("❌ BEARER_TOKEN 을 먼저 넣으세요 (파일 상단 설정).")
+    if not BEARER_TOKEN:
+        print("❌ 토큰이 없습니다. tools/.suno_token 파일에 한 줄로 저장하거나 SUNO_TOKEN 환경변수로 넘기세요.")
         sys.exit(1)
 
     try:
