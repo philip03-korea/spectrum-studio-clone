@@ -3630,6 +3630,7 @@ const STYLE_PRESETS = {
   'oil-painting':     'classical oil painting style, visible brush strokes, Rembrandt-like dramatic lighting, rich earth tones',
   'watercolor':       'delicate watercolor illustration, soft washes, translucent layers, paper texture',
   'anime':            'modern anime illustration style, clean line art, vibrant colors, expressive eyes, dynamic composition',
+  'jp-anime':         'authentic Japanese anime key-visual style, clean bold 2D linework, flat cel-shading, vibrant saturated colors, large expressive anime eyes, detailed anime background art, NOT photorealistic, NOT 3D render',
   'biblical-classic': 'classical biblical fine art painting style, reminiscent of Caravaggio and Tissot, dramatic chiaroscuro, reverent atmosphere',
   'hopeful-modern':   'modern hopeful illustration, warm sunrise light, soft gradients, contemporary digital painting',
   'dreamy-soft':      'dreamy soft-focus illustration, ethereal glow, pastel palette, gentle bokeh, peaceful mood',
@@ -4035,7 +4036,7 @@ async function generateImageDispatch(model, prompt, aspect, styleFiles, frameIdx
     let p = prompt;
     if (styleFiles && styleFiles.length) {
       refs = await Promise.all(styleFiles.slice(0, 10).map(f => fileToDataURL(f)));
-      p += ' — Keep the same main character, outfit, and overall art style as the reference image(s).';
+      p += ' — CRITICAL: Reproduce the EXACT art style of the attached reference image(s) — same rendering technique, linework, color palette, shading, and mood. Do NOT reinterpret into a different medium (no oil painting, no photorealism, no extra dramatic chiaroscuro) unless that is literally what the reference shows. Keep the same main character, outfit, and identity as shown in the reference image(s).';
     }
     return generateImageViaHiggsfield(proxyUrl, p, aspect, refs);
   }
@@ -4530,7 +4531,10 @@ async function generateAllFrames() {
       return;
     }
   }
-  const appliedHints = (isHF ? (_lg.styleHints || '') : (useStyleVision ? _lg.styleHints : '')) || '';
+  // gpt_image_2 + 업로드 이미지: 실제 참조 이미지를 직접 보내므로, 비전이 뽑아낸 "스타일 설명 텍스트"는
+  // 프롬프트에 넣지 않는다 (텍스트 설명이 실제 이미지와 다른 어휘로 스타일을 왜곡시켜 충돌하는 것 방지).
+  const skipStyleHintText = (model === 'hf-gpt-image-2' && hasUpload);
+  const appliedHints = skipStyleHintText ? '' : ((isHF ? (_lg.styleHints || '') : (useStyleVision ? _lg.styleHints : '')) || '');
   const elementIds = (model === 'hf-gpt-image-2') ? getSelectedElementIds() : [];
   const elementId = elementIds[0] || '';
   const soulIds = isSoul2 ? getSelectedSoulIds() : [];
