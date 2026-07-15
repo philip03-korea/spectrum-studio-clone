@@ -132,6 +132,7 @@ export default {
       resolution: body.resolution || '1k',
       count: 1,
       references: Array.isArray(body.references) ? body.references : [],
+      model: (body.model === 'nano_banana_pro' || body.model === 'gpt_image_2') ? body.model : 'gpt_image_2',
     };
 
     try {

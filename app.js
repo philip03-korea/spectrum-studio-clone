@@ -3980,10 +3980,12 @@ async function analyzeReferenceImages(apiKey, files) {
 async function describeScenesFromLyrics(apiKey, scenes, theme, styleHint, fixedCharacter) {
   const list = scenes.map((s, i) =>
     `${i + 1}. ${((s.lyricFull || s.lyricSummary || '').trim()) || '(no lyric)'}`).join('\n');
+  const isBiblical = BIBLE_THEME_RE.test(theme || '');
   const step1 = fixedCharacter
     ? `STEP 1 — The main character is FIXED (from the user's uploaded reference). Use EXACTLY this character in EVERY shot — do NOT change gender, age, hair, or clothing: ${fixedCharacter}\n`
-    : 'STEP 1 — Design ONE consistent main character (the protagonist that recurs in EVERY shot). Write a fixed, detailed English appearance description: gender, age, hair, face, exact clothing/colors, body type. This MUST stay identical across all shots.\n';
-  const isBiblical = BIBLE_THEME_RE.test(theme || '');
+    : isBiblical
+      ? 'STEP 1 — This is a multi-character Bible story, so do NOT force one single protagonist. For EACH lyric line, identify which biblical figure(s) the line is about and depict THAT figure with the correct gender/role (see the known-figures list below). Return an empty "character" field.\n'
+      : 'STEP 1 — Design ONE consistent main character (the protagonist that recurs in EVERY shot). Write a fixed, detailed English appearance description: gender, age, hair, face, exact clothing/colors, body type. This MUST stay identical across all shots.\n';
   const bibleGuidance = isBiblical
     ? 'STEP 2 CHARACTER OVERRIDE — This is a Bible (Genesis) story. Use accurate biblical knowledge for each named figure\'s gender/role — never guess or invent an inconsistent gender. Known figures: ' +
       Object.entries(BIBLE_CHARACTER_GLOSSARY).map(([k, v]) => `${k}=${v}`).join(', ') + '. ' +
@@ -4062,6 +4064,11 @@ function getSelectedElementIds() {
   return ids;
 }
 function getSelectedElementId() { return getSelectedElementIds()[0] || ''; }
+// Higgsfield 이미지 모델(참조 이미지 지원) 판별 + 백엔드 실제 모델 ID 매핑
+//  • hf-gpt-image-2 → gpt_image_2 (저용량, 실사 성향 강함 — 애니/일러스트 화풍 재현 못함)
+//  • hf-nano-banana → nano_banana_pro (참조 이미지의 화풍을 충실히 재현 — 애니/일러스트에 적합)
+function isHfImgModel(m) { return m === 'hf-gpt-image-2' || m === 'hf-nano-banana'; }
+function hfImgModelId(m) { return m === 'hf-nano-banana' ? 'nano_banana_pro' : 'gpt_image_2'; }
 // 선택된 Soul ID 배열 — 체크박스 + 직접입력. Soul API는 1컷 1캐릭터이므로 프레임별 교대 배정.
 function getSelectedSoulIds() {
   const ids = [...document.querySelectorAll('input[name="lg-so"]:checked')].map(c => c.value);
@@ -4086,7 +4093,7 @@ function explainProxyError(msg) {
 // GPT Image 2 (Higgsfield) — Cloudflare Worker 프록시 경유로 생성.
 //  • resolution=1k + quality=low = 약 0.5 크레딧/장 (유튜브 저용량용)
 //  • refDataUrls: 업로드한 캐릭터/스타일 이미지(data:URL) → 참조로 전달
-async function generateImageViaHiggsfield(proxyUrl, prompt, aspect, refDataUrls) {
+async function generateImageViaHiggsfield(proxyUrl, prompt, aspect, refDataUrls, hfModel) {
   const base = proxyUrl.replace(/\/+$/, '');
   let res;
   try {
@@ -4099,6 +4106,7 @@ async function generateImageViaHiggsfield(proxyUrl, prompt, aspect, refDataUrls)
         resolution: '1k',
         quality: 'low',
         references: refDataUrls || [],
+        model: hfModel || 'gpt_image_2',
       }),
     });
   } catch (e) {
@@ -4144,7 +4152,7 @@ async function generateImageDispatch(model, prompt, aspect, styleFiles, frameIdx
     const soulId = soulIds[typeof frameIdx === 'number' ? (frameIdx % soulIds.length) : 0];
     return generateImageViaSoul2(proxyUrl, soulId, prompt, aspect);
   }
-  if (model === 'hf-gpt-image-2') {
+  if (isHfImgModel(model)) {
     const proxyUrl = getHfProxyUrl();
     if (!proxyUrl) throw new Error('Higgsfield 프록시 URL이 필요합니다 (Stage 1에서 입력)');
     let refs = [];
@@ -4153,7 +4161,7 @@ async function generateImageDispatch(model, prompt, aspect, styleFiles, frameIdx
       refs = await Promise.all(styleFiles.slice(0, 10).map(f => fileToDataURL(f)));
       p += ' — CRITICAL: Reproduce the EXACT art style of the attached reference image(s) — same rendering technique, linework, color palette, shading, and mood. Do NOT reinterpret into a different medium (no oil painting, no photorealism, no extra dramatic chiaroscuro) unless that is literally what the reference shows. Keep the same main character, outfit, and identity as shown in the reference image(s).';
     }
-    return generateImageViaHiggsfield(proxyUrl, p, aspect, refs);
+    return generateImageViaHiggsfield(proxyUrl, p, aspect, refs, hfImgModelId(model));
   }
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (!oaKey) throw new Error('OpenAI API 키가 필요합니다');
@@ -4565,7 +4573,7 @@ function openFrameLightbox(startIdx) {
 async function generateAllFrames() {
   const model = document.getElementById('lg-model').value;
   const isSoul2 = model === 'hf-soul-2';
-  const isHF = model === 'hf-gpt-image-2' || isSoul2;
+  const isHF = isHfImgModel(model) || isSoul2;
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
     if (!getHfProxyUrl()) {
@@ -4620,7 +4628,7 @@ async function generateAllFrames() {
   //  • dall-e-3: 업로드+프리셋없음일 때
   //  • GPT Image 2(HF): 업로드 이미지가 있으면 (OpenAI 키로 스타일 추출) — 캔버스/백엔드가 참조이미지 직접지원 안 하므로 스타일을 텍스트로 반영
   const theme = document.getElementById('lg-theme').value.trim();
-  if (model === 'hf-gpt-image-2' && hasUpload) {
+  if (isHfImgModel(model) && hasUpload) {
     document.getElementById('lg-progress').textContent = '🖼️ 업로드 이미지를 참조로 직접 사용합니다 (OpenAI 키 불필요).';
   } else if (isHF && hasUpload && !oaKey) {
     document.getElementById('lg-progress').textContent = '⚠️ 업로드 이미지(스타일)를 반영하려면 OpenAI 키가 필요합니다 (분석용).';
@@ -4648,20 +4656,24 @@ async function generateAllFrames() {
   }
   // gpt_image_2 + 업로드 이미지: 실제 참조 이미지를 직접 보내므로, 비전이 뽑아낸 "스타일 설명 텍스트"는
   // 프롬프트에 넣지 않는다 (텍스트 설명이 실제 이미지와 다른 어휘로 스타일을 왜곡시켜 충돌하는 것 방지).
-  const skipStyleHintText = (model === 'hf-gpt-image-2' && hasUpload);
+  const skipStyleHintText = (isHfImgModel(model) && hasUpload);
   const appliedHints = skipStyleHintText ? '' : ((isHF ? (_lg.styleHints || '') : (useStyleVision ? _lg.styleHints : '')) || '');
   const elementIds = (model === 'hf-gpt-image-2') ? getSelectedElementIds() : [];
   const elementId = elementIds[0] || '';
   const soulIds = isSoul2 ? getSelectedSoulIds() : [];
   const soulId = soulIds[0] || '';
   _lg._soulIds = soulIds; // 프레임 루프에서 교대 배정용
-  const fixedChar = (isHF && !elementIds.length && !soulIds.length) ? (_lg.character || '') : '';
+  // 성경 등 다인물(多人物) 테마: 한 명으로 고정하면 장면마다 인물이 바뀌어야 하는데 강제로
+  // 같은 인물(예: 잘못 추출된 '젊은 여성')이 덮어써 성별·인물이 틀어진다. 이 경우 단일 고정캐릭터를
+  // 쓰지 않고, 장면별로 성경지식이 올바른 인물을 고르게 한다.
+  const isBibleTheme = BIBLE_THEME_RE.test(theme || '');
+  const fixedChar = (isHF && !elementIds.length && !soulIds.length && !isBibleTheme) ? (_lg.character || '') : '';
   // ★ 가사-이미지 매칭 + 캐릭터 일관성
   if (oaKey && oaKey.startsWith('sk-') && !_lg.scenePlan._enriched) {
     try {
       document.getElementById('lg-progress').textContent = '🎬 주인공·장면 묘사 생성 중… (가사 매칭 + 캐릭터 일관성)';
       const res = await describeScenesFromLyrics(oaKey, _lg.scenePlan.scenes, theme, appliedHints, fixedChar);
-      _lg.scenePlan.character = (elementIds.length || soulIds.length) ? '' : (res.character || fixedChar || '');
+      _lg.scenePlan.character = (elementIds.length || soulIds.length || isBibleTheme) ? '' : (res.character || fixedChar || '');
       const elPrefix = elementIds.length
         ? elementIds.map(id => `<<<${id}>>>`).join(' ') + ' '
         : '';
@@ -4687,7 +4699,7 @@ async function generateAllFrames() {
   }));
   // gpt_image_2: 업로드 이미지를 실제 참조로 직접 전송 (백엔드가 medias로 반영)
   // gpt-image-1: edits 경로 / dall-e-3: 스타일 비전
-  const refFiles = (model === 'hf-gpt-image-2' && hasUpload) ? _lg.styleFiles
+  const refFiles = (isHfImgModel(model) && hasUpload) ? _lg.styleFiles
     : isHF ? null
     : (useRefEdits ? _lg.styleFiles : null);
   const modeTag = isHF
@@ -4753,7 +4765,7 @@ async function generateAllFrames() {
 async function regenerateFrame(idx) {
   const model = document.getElementById('lg-model').value;
   const isSoul2 = model === 'hf-soul-2';
-  const isHF = model === 'hf-gpt-image-2' || isSoul2;
+  const isHF = isHfImgModel(model) || isSoul2;
   const oaKey = (document.getElementById('lg-apikey').value || localStorage.getItem('ssc-openai-key') || '').trim();
   if (isHF) {
     if (!getHfProxyUrl()) {
@@ -4788,7 +4800,7 @@ async function regenerateFrame(idx) {
       if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints);
     }
     // HF(gpt_image_2)는 참조이미지 미지원 → 스타일은 프롬프트(styleHints)로 반영 / gpt-image-1 + 업로드 = edits / 그 외 = t2i
-    const refFiles = (model === 'hf-gpt-image-2' && hasUpload) ? _lg.styleFiles
+    const refFiles = (isHfImgModel(model) && hasUpload) ? _lg.styleFiles
       : isHF ? null
       : (useRefEdits ? _lg.styleFiles : null);
     const blob = await generateImageDispatch(model, promptObj.prompt, aspect, refFiles);
