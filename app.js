@@ -4077,26 +4077,39 @@ async function hfFetch(url, opts) {
 function getHfProxyUrl() {
   return (localStorage.getItem('ssc-hf-proxy-url') || document.getElementById('lg-hf-proxy')?.value || '').trim();
 }
-// 선택된 Higgsfield 캐릭터(Element) ID 배열 — 실시간 검색으로 고른 것 + 직접입력
+// Higgsfield 이미지 모델(참조 이미지 지원) 판별 + 백엔드 실제 모델 ID 매핑
+//  • hf-gpt-image-2 → gpt_image_2 (저용량, 실사 성향 강함 — 애니/일러스트 화풍 재현 못함)
+//  • hf-nano-banana → nano_banana_pro (참조 이미지의 화풍을 충실히 재현 — 애니/일러스트에 적합)
+function isHfImgModel(m) { return m === 'hf-gpt-image-2' || m === 'hf-nano-banana'; }
+function hfImgModelId(m) { return m === 'hf-nano-banana' ? 'nano_banana_pro' : 'gpt_image_2'; }
+// 현재 모델 기준 캐릭터 종류 — Soul 2면 'soul'(학습된 얼굴), 그 외 HF 이미지 모델이면 'element'
+function currentCharacterKind() {
+  return (document.getElementById('lg-model')?.value === 'hf-soul-2') ? 'soul' : 'element';
+}
+
+// 선택된 캐릭터(Element/Soul 통합) ID 배열 — 실시간 검색으로 고른 것 + 직접입력. kind로 필터링.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-function getSelectedElementIds() {
-  const ids = (_lg.selectedElements || []).map(e => e.id);
+function getSelectedCharacterIds(kind) {
+  const ids = (_lg.selectedCharacters || []).filter(c => c.kind === kind).map(c => c.id);
   const custom = (document.getElementById('lg-element-custom')?.value || '').match(UUID_RE);
   if (custom) custom.forEach(id => { if (!ids.includes(id)) ids.push(id); });
   return ids;
 }
+function getSelectedElementIds() { return getSelectedCharacterIds('element'); }
 function getSelectedElementId() { return getSelectedElementIds()[0] || ''; }
+function getSelectedSoulIds() { return getSelectedCharacterIds('soul'); }
+function getSelectedSoulId() { return getSelectedSoulIds()[0] || ''; }
 
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-// Element(캐릭터/환경/소품) 실시간 검색 — 프록시 /elements 에서 목록을 받아 이름/설명으로 필터링.
+// 캐릭터(Element + Soul) 실시간 검색 — 프록시 /characters 에서 통합 목록을 받아 이름/설명으로 필터링.
 async function fetchElementsCatalog(force) {
   const proxyUrl = getHfProxyUrl();
   if (!proxyUrl) throw new Error('Higgsfield 프록시 URL이 필요합니다 (Stage 1에서 입력)');
   const base = proxyUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/elements${force ? '?refresh=1' : ''}`);
-  if (!res.ok) throw new Error(`Element 목록 조회 실패 ${res.status}`);
+  const res = await fetch(`${base}/characters${force ? '?refresh=1' : ''}`);
+  if (!res.ok) throw new Error(`캐릭터 목록 조회 실패 ${res.status}`);
   const data = await res.json();
   if (data.error) throw new Error(data.error);
   _lg.elementsCatalog = Array.isArray(data.items) ? data.items : [];
@@ -4105,15 +4118,17 @@ async function fetchElementsCatalog(force) {
 function renderElementDropdown(query) {
   const dd = document.getElementById('lg-element-dropdown');
   if (!dd) return;
-  const list = _lg.elementsCatalog || [];
+  const kind = currentCharacterKind();
+  const list = (_lg.elementsCatalog || []).filter(it => it.kind === kind);
   const q = (query || '').trim().toLowerCase();
-  const selectedIds = new Set((_lg.selectedElements || []).map(e => e.id));
+  const selectedIds = new Set((_lg.selectedCharacters || []).map(e => e.id));
   const filtered = (q
     ? list.filter(it => (it.name || '').toLowerCase().includes(q) || (it.description || '').toLowerCase().includes(q) || (it.category || '').toLowerCase().includes(q))
     : list
   ).filter(it => !selectedIds.has(it.id)).slice(0, 40);
   if (!filtered.length) {
-    dd.innerHTML = `<div class="element-dropdown-empty">${list.length ? '일치하는 캐릭터 없음' : '목록 없음 — 🔄 새로고침을 눌러보세요'}</div>`;
+    const kindLabel = kind === 'soul' ? 'Soul 캐릭터' : 'Element';
+    dd.innerHTML = `<div class="element-dropdown-empty">${list.length ? `일치하는 ${kindLabel} 없음` : `${kindLabel} 없음 — 🔄 새로고침을 눌러보세요`}</div>`;
     dd.classList.remove('hidden');
     return;
   }
@@ -4124,7 +4139,7 @@ function renderElementDropdown(query) {
     row.innerHTML =
       (it.thumb ? `<img src="${it.thumb}" alt="" loading="lazy" />` : '<div class="element-thumb-empty">🧑</div>') +
       `<div class="element-dropdown-text">
-        <div class="element-dropdown-name">${escapeHtml(it.name || it.id)}</div>
+        <div class="element-dropdown-name">${it.kind === 'soul' ? '👤' : '🎭'} ${escapeHtml(it.name || it.id)}</div>
         <div class="element-dropdown-desc">${escapeHtml((it.description || it.category || '').slice(0, 60))}</div>
       </div>`;
     row.addEventListener('mousedown', (e) => { e.preventDefault(); addSelectedElement(it); });
@@ -4133,8 +4148,8 @@ function renderElementDropdown(query) {
   dd.classList.remove('hidden');
 }
 function addSelectedElement(it) {
-  if (!_lg.selectedElements.some(e => e.id === it.id)) {
-    _lg.selectedElements.push({ id: it.id, name: it.name || it.id, thumb: it.thumb || '' });
+  if (!_lg.selectedCharacters.some(e => e.id === it.id)) {
+    _lg.selectedCharacters.push({ id: it.id, name: it.name || it.id, thumb: it.thumb || '', kind: it.kind || 'element' });
   }
   renderSelectedElementChips();
   const search = document.getElementById('lg-element-search');
@@ -4143,20 +4158,20 @@ function addSelectedElement(it) {
   if (typeof window._lgSaveMeta === 'function') window._lgSaveMeta();
 }
 function removeSelectedElement(id) {
-  _lg.selectedElements = _lg.selectedElements.filter(e => e.id !== id);
+  _lg.selectedCharacters = _lg.selectedCharacters.filter(e => e.id !== id);
   renderSelectedElementChips();
   if (typeof window._lgSaveMeta === 'function') window._lgSaveMeta();
 }
 function renderSelectedElementChips() {
   const wrap = document.getElementById('lg-element-selected');
   if (!wrap) return;
-  if (!_lg.selectedElements.length) { wrap.innerHTML = ''; wrap.classList.add('hidden'); return; }
+  if (!_lg.selectedCharacters.length) { wrap.innerHTML = ''; wrap.classList.add('hidden'); return; }
   wrap.classList.remove('hidden');
   wrap.innerHTML = '';
-  _lg.selectedElements.forEach(e => {
+  _lg.selectedCharacters.forEach(e => {
     const chip = document.createElement('span');
     chip.className = 'element-chip';
-    chip.innerHTML = (e.thumb ? `<img src="${e.thumb}" alt="" />` : '') + `<span>${escapeHtml(e.name)}</span>`;
+    chip.innerHTML = (e.thumb ? `<img src="${e.thumb}" alt="" />` : '') + `<span>${e.kind === 'soul' ? '👤' : '🎭'} ${escapeHtml(e.name)}</span>`;
     const x = document.createElement('button');
     x.type = 'button'; x.className = 'element-chip-x'; x.textContent = '✕';
     x.addEventListener('click', () => removeSelectedElement(e.id));
@@ -4164,19 +4179,6 @@ function renderSelectedElementChips() {
     wrap.appendChild(chip);
   });
 }
-// Higgsfield 이미지 모델(참조 이미지 지원) 판별 + 백엔드 실제 모델 ID 매핑
-//  • hf-gpt-image-2 → gpt_image_2 (저용량, 실사 성향 강함 — 애니/일러스트 화풍 재현 못함)
-//  • hf-nano-banana → nano_banana_pro (참조 이미지의 화풍을 충실히 재현 — 애니/일러스트에 적합)
-function isHfImgModel(m) { return m === 'hf-gpt-image-2' || m === 'hf-nano-banana'; }
-function hfImgModelId(m) { return m === 'hf-nano-banana' ? 'nano_banana_pro' : 'gpt_image_2'; }
-// 선택된 Soul ID 배열 — 체크박스 + 직접입력. Soul API는 1컷 1캐릭터이므로 프레임별 교대 배정.
-function getSelectedSoulIds() {
-  const ids = [...document.querySelectorAll('input[name="lg-so"]:checked')].map(c => c.value);
-  const custom = (document.getElementById('lg-soul-custom')?.value || '').match(UUID_RE);
-  if (custom) custom.forEach(id => { if (!ids.includes(id)) ids.push(id); });
-  return ids;
-}
-function getSelectedSoulId() { return getSelectedSoulIds()[0] || ''; }
 
 // 백엔드 오류를 사람이 읽을 안내로 변환.
 // Cloudflare 530 + error 1016 = Origin DNS 오류 — Contabo Quick Tunnel이 재시작되어
@@ -4275,8 +4277,8 @@ const _lg = {
   prompts: [],               // scene별 프롬프트
   frames: [],                // [{ idx, blob, url, prompt }]
   projectId: '',             // 고유 ID
-  selectedElements: [],      // 실시간 검색으로 선택한 캐릭터 [{ id, name, thumb }]
-  elementsCatalog: null,     // /elements 응답 캐시 [{ id, name, category, description, thumb }]
+  selectedCharacters: [],    // 실시간 검색으로 선택한 캐릭터 [{ id, name, thumb, kind:'element'|'soul' }]
+  elementsCatalog: null,     // /characters 응답 캐시 [{ id, name, category, description, thumb, kind }]
 };
 
 function bindLyricImageGen() {
@@ -4414,21 +4416,12 @@ function bindLyricImageGen() {
         title: $L('lg-title')?.value || '', theme: $L('lg-theme')?.value || '',
         preset: $L('lg-preset')?.value || '', aspect: $L('lg-aspect')?.value || '',
         model: $L('lg-model')?.value || '',
-        elementSelected: _lg.selectedElements || [],
+        charactersSelected: _lg.selectedCharacters || [],
         elementCustom: $L('lg-element-custom')?.value || '',
-        soulIds: [...document.querySelectorAll('input[name="lg-so"]:checked')].map(c => c.value),
-        soulCustom: $L('lg-soul-custom')?.value || '',
       }));
     } catch {}
   };
   window._lgSaveMeta = saveLGMeta;
-  // Soul 섹션 표시/숨김 (hf-soul-2 선택 시)
-  const updateSoulSection = () => {
-    const isSoul2 = $L('lg-model')?.value === 'hf-soul-2';
-    ['lg-soul-section', 'lg-soul-group', 'lg-soul-custom', 'lg-soul-hint'].forEach(id => {
-      const el = $L(id); if (el) el.style.display = isSoul2 ? '' : 'none';
-    });
-  };
   const saveStyleFiles = async () => {
     try {
       const arr = await Promise.all((_lg.styleFiles || []).map(async f =>
@@ -4451,7 +4444,11 @@ function bindLyricImageGen() {
   });
   $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; saveLGMeta(); });
   $L('lg-aspect')?.addEventListener('change', saveLGMeta);
-  $L('lg-model')?.addEventListener('change', () => { saveLGMeta(); updateSoulSection(); });
+  $L('lg-model')?.addEventListener('change', () => {
+    saveLGMeta();
+    // 모델이 바뀌면 캐릭터 검색 결과도 해당 종류(Element/Soul)로 다시 필터링
+    if (!$L('lg-element-dropdown')?.classList.contains('hidden')) renderElementDropdown($L('lg-element-search')?.value || '');
+  });
   $L('lg-element-custom')?.addEventListener('input', saveLGMeta);
   // Element 실시간 검색 UI 바인딩
   let elementDropdownOpen = false;
@@ -4480,9 +4477,6 @@ function bindLyricImageGen() {
     catch (e) { alert('Element 목록 새로고침 실패: ' + e.message); }
     finally { if (btn) { btn.disabled = false; btn.textContent = '🔄 목록 새로고침'; } }
   });
-  document.querySelectorAll('input[name="lg-so"]').forEach(cb => cb.addEventListener('change', saveLGMeta));
-  $L('lg-soul-custom')?.addEventListener('input', saveLGMeta);
-
   // 저장된 메타 복원 (제목/테마/프리셋/비율/모델)
   try {
     const m = JSON.parse(localStorage.getItem(LG_META_KEY) || 'null');
@@ -4492,22 +4486,20 @@ function bindLyricImageGen() {
       if (m.preset && $L('lg-preset')) $L('lg-preset').value = m.preset;
       if (m.aspect && $L('lg-aspect')) $L('lg-aspect').value = m.aspect;
       if (m.model && $L('lg-model')) $L('lg-model').value = m.model;
-      if (Array.isArray(m.elementSelected) && m.elementSelected.length) {
-        _lg.selectedElements = m.elementSelected;
-      } else if (Array.isArray(m.elementIds) && m.elementIds.length) {
-        // 구버전 저장분(체크박스 시절) 호환 — 이름은 다음 검색 목록 로드 시 갱신됨
-        _lg.selectedElements = m.elementIds.map(id => ({ id, name: id, thumb: '' }));
+      if (Array.isArray(m.charactersSelected) && m.charactersSelected.length) {
+        _lg.selectedCharacters = m.charactersSelected;
+      } else {
+        // 구버전 저장분(Element 검색 UI/Soul 체크박스 도입 이전) 호환
+        const legacy = [];
+        if (Array.isArray(m.elementSelected)) legacy.push(...m.elementSelected.map(e => ({ ...e, kind: 'element' })));
+        if (Array.isArray(m.elementIds)) legacy.push(...m.elementIds.map(id => ({ id, name: id, thumb: '', kind: 'element' })));
+        if (Array.isArray(m.soulIds)) legacy.push(...m.soulIds.map(id => ({ id, name: id, thumb: '', kind: 'soul' })));
+        _lg.selectedCharacters = legacy;
       }
       renderSelectedElementChips();
       if (m.elementCustom && $L('lg-element-custom')) $L('lg-element-custom').value = m.elementCustom;
-      if (Array.isArray(m.soulIds)) m.soulIds.forEach(id => {
-        const cb = document.querySelector(`input[name="lg-so"][value="${id}"]`);
-        if (cb) cb.checked = true;
-      });
-      if (m.soulCustom && $L('lg-soul-custom')) $L('lg-soul-custom').value = m.soulCustom;
     }
   } catch {}
-  updateSoulSection(); // 복원 후 Soul 섹션 가시성 초기화
 
   // 스타일 이미지 다중 업로드 (최대 10)
   _lg.styleFiles = _lg.styleFiles || [];

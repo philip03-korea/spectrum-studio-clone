@@ -197,25 +197,15 @@
             </div>
             <div class="bg-thumbs hidden" id="lg-style-thumbs"></div>
 
-            <div class="sub-title">🧑 캐릭터 (Higgsfield Element) <span class="sub-tag">gpt_image_2 · Nano Banana Pro 일관성 · 복수 선택 가능</span></div>
+            <div class="sub-title">🧑 캐릭터 <span class="sub-tag" id="lg-character-mode-tag">gpt_image_2 · Nano Banana Pro · Soul 2 공통 — 선택한 모델에 맞춰 자동 필터링</span></div>
             <div class="element-chip-row hidden" id="lg-element-selected"></div>
             <div class="element-search-row">
               <input class="text-input" id="lg-element-search" placeholder="🔍 캐릭터 이름으로 검색... (예: 아브라함, 여주인공)" autocomplete="off" />
               <button type="button" id="lg-element-refresh" class="small-btn">🔄 목록 새로고침</button>
             </div>
             <div class="element-dropdown hidden" id="lg-element-dropdown"></div>
-            <input class="text-input" id="lg-element-custom" placeholder="직접 입력: Element ID (쉼표로 구분해 여러 개 가능)" autocomplete="off" style="margin-top:4px;" />
-            <div class="hint-text" style="margin-bottom:6px;">여러 명 선택하면 <b>같은 장면에 함께 등장</b>(<<<id>>> 다중 주입). Higgsfield에 새로 등록한 캐릭터는 🔄 새로고침 후 검색하면 바로 나옵니다.</div>
-
-            <!-- Soul 2 캐릭터 선택 — hf-soul-2 모델 선택 시에만 표시 -->
-            <div class="sub-title" id="lg-soul-section" style="display:none;">★ Soul 캐릭터 (Soul 2 전용) <span class="sub-tag">학습된 얼굴 · 복수 선택 시 교대 배정</span></div>
-            <div class="char-check-group" id="lg-soul-group" style="display:none;">
-              <label class="char-check"><input type="checkbox" name="lg-so" value="e77eaa54-a841-47fc-a518-37e1cd076bf2" /><span>★ 여주인공</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-so" value="ed8c7cb2-69e7-4b70-b619-dde39f8864c2" /><span>★ 예수님</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-so" value="c86400e4-799c-4907-b228-17df7dc276ca" /><span>★ 아들</span></label>
-            </div>
-            <input class="text-input" id="lg-soul-custom" placeholder="직접 입력: Soul ID" autocomplete="off" style="display:none;margin-top:4px;" />
-            <div class="hint-text" id="lg-soul-hint" style="display:none;margin-bottom:6px;">여러 명 체크하면 <b>프레임마다 교대 배정</b> (Soul API는 1컷 1캐릭터). 새 캐릭터는 채팅에서 학습 요청.</div>
+            <input class="text-input" id="lg-element-custom" placeholder="직접 입력: Element/Soul ID (쉼표로 구분해 여러 개 가능)" autocomplete="off" style="margin-top:4px;" />
+            <div class="hint-text" style="margin-bottom:6px;">모델이 <b>GPT Image 2 / Nano Banana Pro</b>면 Element를, <b>Soul 2</b>면 학습된 Soul 캐릭터를 검색합니다(🎭/👤로 구분 표시). 여러 명 선택하면 gpt_image_2는 <b>같은 장면에 함께 등장</b>, Soul 2는 <b>프레임마다 교대 배정</b>됩니다. Higgsfield에 새로 등록한 캐릭터는 🔄 새로고침 후 검색하면 바로 나옵니다.</div>
 
             <div class="sub-title">🖌️ 스타일 프리셋</div>
             <select class="text-input" id="lg-preset">
@@ -1135,6 +1125,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_21_element_search"></script>
+  <script type="module" src="app.js?v=v4_22_unified_character_search"></script>
 </body>
 </html>
