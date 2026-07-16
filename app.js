@@ -2702,8 +2702,9 @@ async function correctLyricsWithContext(apiKey, segs, theme) {
     ? ('성경(창세기) 이야기다. 등장인물: ' + Object.entries(BIBLE_CHARACTER_GLOSSARY).map(([k, v]) => `${k}(${v})`).join(', ') + '.')
     : '';
   const instr =
-    '다음은 노래 가사를 음성인식(Whisper)한 결과다. 발음이 비슷해 잘못 인식된 단어(특히 고유명사·인명)만 문맥에 맞게 교정하라. ' +
-    '의미를 임의로 바꾸지 말고, 줄 수와 순서를 그대로 유지하라. 이미 올바른 줄은 그대로 둔다. ' +
+    '다음은 노래 가사를 음성인식(Whisper)한 결과다. 앞뒤 줄의 문맥과 노래 가사로서의 자연스러움을 근거로, ' +
+    '발음이 비슷해서 잘못 인식됐다고 판단되는 단어·맞춤법·띄어쓰기·조사를 전부 교정하라(고유명사·인명뿐 아니라 일반 단어도 포함). ' +
+    '단, 확신이 서지 않는 줄은 원문을 그대로 두고, 가사의 의미·어감·줄 수·순서는 절대 바꾸지 마라. 이미 올바른 줄은 그대로 둔다. ' +
     (theme ? `테마: ${theme}. ` : '') + glossary +
     '\n각 줄은 "번호: 텍스트" 형식이다. 교정 결과만 같은 "번호: 텍스트" 형식으로, 같은 줄 수만큼 반환하라(설명 금지).\n\n' + lines;
   try {
@@ -2786,6 +2787,9 @@ async function transcribeCurrentAudio(opts = {}) {
     const json = await res.json();
     // no_speech_prob/avg_logprob/compression_ratio 로 보아 반주·무음일 확률이 높은 구간은 Whisper가
     // 흔히 텍스트를 "환각"으로 지어내므로, 그 가짜 텍스트 대신 "(간주중)"으로 표시한다.
+    // 곡 맨 앞(전주) 구간은 Whisper가 유독 자신만만하게(no_speech_prob 낮게) 가사를 지어내는 경우가
+    // 많아 일반 임계값을 못 넘기므로, 시작부(INTRO_LENIENT_SEC 이내)는 더 낮은 임계값을 따로 적용한다.
+    const INTRO_LENIENT_SEC = 4.0;
     let segs = (json.segments || [])
       .map(s => ({
         start: Math.max(0, s.start || 0), end: Math.max(0, s.end || 0),
@@ -2795,8 +2799,26 @@ async function transcribeCurrentAudio(opts = {}) {
         compRatio: typeof s.compression_ratio === 'number' ? s.compression_ratio : 0,
       }))
       .filter(s => s.text)
-      .map(s => ((s.noSpeech > 0.6 || s.logprob < -1.0 || s.compRatio > 2.4) ? { start: s.start, end: s.end, text: '(간주중)' } : { start: s.start, end: s.end, text: s.text }));
+      .map(s => {
+        const isIntro = s.start < INTRO_LENIENT_SEC;
+        const looksHallucinated = isIntro
+          ? (s.noSpeech > 0.35 || s.logprob < -0.6 || s.compRatio > 2.0)
+          : (s.noSpeech > 0.5 || s.logprob < -0.9 || s.compRatio > 2.2);
+        return looksHallucinated ? { start: s.start, end: s.end, text: '(간주중)' } : { start: s.start, end: s.end, text: s.text };
+      });
     if (!segs.length) throw new Error('인식된 가사가 없습니다 (반주만 있는 구간일 수 있음)');
+
+    // Whisper가 반주 구간에서 같은 문구를 반복해서 "환각"으로 지어내는 것도 흔한 패턴 —
+    // 바로 이전 구간과 텍스트가 (공백/문장부호 무시하고) 동일하면 반복 환각으로 간주해 "(간주중)" 처리.
+    const normText = t => t.replace(/[\s.,!?~…]/g, '');
+    segs = segs.map((s, i) => {
+      if (s.text === '(간주중)' || i === 0) return s;
+      const prev = segs[i - 1];
+      if (prev.text !== '(간주중)' && normText(prev.text) === normText(s.text)) {
+        return { start: s.start, end: s.end, text: '(간주중)' };
+      }
+      return s;
+    });
 
     // 앞/뒤 여백 보정: Whisper가 곡 맨 앞(보컬 시작 전)·맨 뒤(아웃트로) 구간을
     // 세그먼트로 아예 안 주는 경우가 많아, 그 구간이 "간주중" 없이 비거나 다음 가사에 붙어버린다.
@@ -4658,7 +4680,7 @@ async function generateAllFrames() {
   // 프롬프트에 넣지 않는다 (텍스트 설명이 실제 이미지와 다른 어휘로 스타일을 왜곡시켜 충돌하는 것 방지).
   const skipStyleHintText = (isHfImgModel(model) && hasUpload);
   const appliedHints = skipStyleHintText ? '' : ((isHF ? (_lg.styleHints || '') : (useStyleVision ? _lg.styleHints : '')) || '');
-  const elementIds = (model === 'hf-gpt-image-2') ? getSelectedElementIds() : [];
+  const elementIds = isHfImgModel(model) ? getSelectedElementIds() : [];
   const elementId = elementIds[0] || '';
   const soulIds = isSoul2 ? getSelectedSoulIds() : [];
   const soulId = soulIds[0] || '';
