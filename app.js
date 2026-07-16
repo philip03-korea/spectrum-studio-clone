@@ -2861,6 +2861,15 @@ const BIBLE_CHARACTER_GLOSSARY = {
   '리브가': 'female, Isaac\'s wife',
 };
 
+// 테마/성경 감지 + 장면 생성에 쓸 컨텍스트 — "테마" 칸뿐 아니라 "제목" 칸도 함께 반영한다.
+// (예전엔 제목에 "아브라함 연대기"라고만 적고 테마 칸을 비워두면 성경 지식이 전혀 적용되지 않았음.
+//  Soul 2든 gpt_image_2/Nano Banana Pro든 전부 이 값을 거쳐가므로 모델과 무관하게 동일하게 적용된다.)
+function getEffectiveThemeText() {
+  const title = (document.getElementById('lg-title')?.value || '').trim();
+  const theme = (document.getElementById('lg-theme')?.value || '').trim();
+  return [title, theme].filter(Boolean).join(' — ');
+}
+
 // Whisper STT 결과의 오인식(특히 고유명사)을 문맥으로 교정. 실패 시 원본 그대로 반환(안전).
 async function correctLyricsWithContext(apiKey, segs, theme) {
   const idxs = segs.map((_, i) => i).filter(i => segs[i].text !== '(간주중)');
@@ -2930,7 +2939,7 @@ async function transcribeCurrentAudio(opts = {}) {
   if (btn) { btn.disabled = true; btn.textContent = '🎙️ 인식 중...'; }
   setStatus('🎙️ Whisper로 가사 인식 중... (곡 길이에 따라 수십 초 걸립니다)');
   try {
-    const themeVal = ($('lg-theme')?.value || '').trim();
+    const themeVal = getEffectiveThemeText();
     const isBiblicalTheme = BIBLE_THEME_RE.test(themeVal);
     // Whisper 고유명사 인식 정확도 개선: 테마 + (성경 테마면) 등장인물 이름을 프롬프트 힌트로 제공
     const promptBias = [
@@ -4771,7 +4780,7 @@ function bindLyricImageGen() {
     N = Math.max(1, Math.min(N, lines.length));
     $L('lg-frames').value = N;
     $L('lg-frames-v').textContent = N;
-    const theme = $L('lg-theme').value.trim();
+    const theme = getEffectiveThemeText();
     const plan = buildScenePlan(lines, theme, N);
     _lg.scenePlan = plan;
     // 프롬프트 미리 생성
@@ -4952,7 +4961,7 @@ async function generateAllFrames() {
   // 스타일 비전 추출(업로드 이미지 → 스타일 텍스트 → 프롬프트 주입):
   //  • dall-e-3: 업로드+프리셋없음일 때
   //  • GPT Image 2(HF): 업로드 이미지가 있으면 (OpenAI 키로 스타일 추출) — 캔버스/백엔드가 참조이미지 직접지원 안 하므로 스타일을 텍스트로 반영
-  const theme = document.getElementById('lg-theme').value.trim();
+  const theme = getEffectiveThemeText();
   if (isHfImgModel(model) && hasUpload) {
     document.getElementById('lg-progress').textContent = '🖼️ 업로드 이미지를 참조로 직접 사용합니다 (OpenAI 키 불필요).';
   } else if (isHF && hasUpload && !oaKey) {
@@ -5121,7 +5130,7 @@ async function regenerateFrame(idx) {
     if (useStyleVision && !_lg.styleHints) {
       document.getElementById('lg-progress').textContent = `🎨 #${idx} — 업로드 스타일 분석 중…`;
       _lg.styleHints = await describeStyleFromImages(oaKey, _lg.styleFiles);
-      const theme = document.getElementById('lg-theme').value.trim();
+      const theme = getEffectiveThemeText();
       const scene = _lg.scenePlan?.scenes.find(s => s.idx === idx);
       if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints, model);
     }
