@@ -892,15 +892,19 @@ function bindAllSliders() {
 // ====================================================================
 // Lyrics
 // ====================================================================
-// LRC/SRT/TXT 안에 섞인 "비가사" 텍스트 판별 — 곡 구조 태그([Intro], [Verse 1]…)나
-// 연출/악기 지시문(장엄한 팀파니와…) 처럼 줄 전체가 대괄호/괄호 하나로만 이루어진 줄.
-// 실제로 부르는 가사만 남기기 위해 이런 줄은 시간+가사 목록에서 제외한다.
+// LRC/SRT/TXT 안에 섞인 곡 구조 태그([Intro], [Verse 1]…)나 연출/악기 지시문
+// ((장엄한 팀파니와…), (연출: …))을 줄 안 어디에 있든(다른 태그·지시문과 한 줄에 같이
+// 있어도, 전각 괄호／［］를 써도) 제거하고, 실제로 부르는 가사만 남긴다.
+function stripDirectionNotes(text) {
+  return String(text || '')
+    .replace(/[\[［][^\]］]*[\]］]/g, ' ')   // [Intro], [Verse 1] … (전각 대괄호 포함)
+    .replace(/[\(（][^\)）]*[\)）]/g, ' ')   // (연출: …), (멀리서 부는 바람 소리…) … (전각 괄호 포함)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+// 위 지시문을 다 걷어냈을 때 아무것도 안 남으면(=태그/지시문뿐인 줄) 비가사 줄로 판단.
 function isNonLyricLine(s) {
-  const t = String(s || '').trim();
-  if (!t) return true;
-  if (/^\[[^\]]+\]$/.test(t)) return true;   // [Intro], [Verse 1], [Chorus] …
-  if (/^\([^)]*\)$/.test(t)) return true;    // (장엄한 팀파니와…), (연출: …) …
-  return false;
+  return !stripDirectionNotes(s);
 }
 function parseLRC(text) {
   const lines = [];
@@ -908,8 +912,8 @@ function parseLRC(text) {
   for (const line of text.split(/\r?\n/)) {
     const matches = [...line.matchAll(re)];
     if (!matches.length) continue;
-    const lyric = line.replace(re, '').trim();
-    if (!lyric || isNonLyricLine(lyric)) continue;
+    const lyric = stripDirectionNotes(line.replace(re, ''));
+    if (!lyric) continue;
     for (const m of matches) {
       const min = +m[1], sec = +m[2];
       let frac = 0;
@@ -1023,8 +1027,8 @@ function parseAndCleanLrc(rawText) {
       if (!m) continue;                                  // 타임스탬프 없는 줄(헤더/메타 등) 건너뜀
       const [, mm, ss, frac] = m;
       const tsStr = `${mm}:${ss}` + (frac != null ? `.${frac}` : '');
-      const rest = line.replace(tsAnyRe, '').trim();
-      if (!rest || isNonLyricLine(rest)) continue;  // ts-only / 섹션태그·연출지시문 줄 제외
+      const rest = stripDirectionNotes(line.replace(tsAnyRe, ''));
+      if (!rest) continue;  // ts-only / 섹션태그·연출지시문 줄 제외 (한 줄에 섞여 있어도 제거됨)
       out.push(`[${tsStr}]${rest}`);
     }
     return mergeTooCloseLrcLines(out).join('\n');
@@ -1049,7 +1053,8 @@ function parseAndCleanLrc(rawText) {
     if (!tsMatch) {
       // No timestamp on this line. Could be a stray continuation; append as a word.
       // (Spec doesn't address this explicitly; safest is to attach to current group.)
-      if (line && !isNonLyricLine(line)) curWords.push(line);
+      const cleaned = stripDirectionNotes(line);
+      if (cleaned) curWords.push(cleaned);
       else flush();
       continue;
     }
@@ -1057,9 +1062,10 @@ function parseAndCleanLrc(rawText) {
     const [, mm, ss, frac] = tsMatch;
     const tsStr = `${mm}:${ss}` + (frac != null ? `.${frac}` : '');
     // Strip all timestamps to get the textual remainder.
-    const rest = line.replace(tsAnyRe, '').trim();
-    if (!rest) continue;                                         // Rule 4: ts-only
-    if (isNonLyricLine(rest)) { flush(); continue; }        // Rule 1+2: section tag·연출지시문 = boundary
+    const rawRest = line.replace(tsAnyRe, '').trim();
+    if (!rawRest) continue;                                      // Rule 4: ts-only
+    const rest = stripDirectionNotes(rawRest);
+    if (!rest) { flush(); continue; }        // Rule 1+2: section tag·연출지시문(한 줄에 섞여도) = boundary
     if (!curStartFormatted) curStartFormatted = tsStr;
     curWords.push(rest);
   }
