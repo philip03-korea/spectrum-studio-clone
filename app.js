@@ -864,6 +864,16 @@ function bindAllSliders() {
   onE('lyrics-lang',  'change',e => { state.lyrics.lang = e.target.value; debouncedSave(); });
   onE('lyrics-display','change',e => { state.lyrics.display = e.target.value; debouncedSave(); });
   onE('lyrics-translate','click', translateAllLyrics);
+  onE('lyrics-translate-reset','click', async () => {
+    const lines = state.lyrics.lines;
+    if (!lines.length) { alert('가사가 없습니다.'); return; }
+    if (!state.lyrics.lang) { state.lyrics.lang = 'en'; const langSel = $('lyrics-lang'); if (langSel) langSel.value = 'en'; }
+    lines.forEach(l => { l.translation = ''; l.translationLang = ''; });
+    state.lyrics.display = 'both';
+    const dispSel = $('lyrics-display'); if (dispSel) dispSel.value = 'both';
+    await translateAllLyrics();
+  });
+  onE('lyrics-sync-open', 'click', openLyricSyncTool);
   onE('slideshow-enabled', 'change', e => { state.slideshow.enabled = e.target.checked; debouncedSave(); });
   onE('slideshow-sync', 'change', e => { state.slideshow.syncLyrics = e.target.checked; debouncedSave(); });
   onE('slideshow-crossfade','change', e => { state.slideshow.crossfade = e.target.checked; debouncedSave(); });
@@ -1158,6 +1168,104 @@ async function translateAllLyrics() {
       : `✅ 완료 — ${lines.length}줄 번역됨 (${lang})`;
   }
   debouncedSave();
+}
+
+// ===== 가사-노래 싱크 맞춤 (탭으로 재동기화) =====
+// 노래를 재생하며 각 가사 줄이 시작되는 순간 탭 → 그 시점의 재생 시각을 새 타임스탬프로 기록.
+// 중간에 멈추면 그때까지 탭한 줄만 반영되고 나머지는 원래 타임스탬프를 유지한다.
+function openLyricSyncTool() {
+  const lines = state.lyrics.lines;
+  if (!lines || !lines.length) { alert('가사가 없습니다. 먼저 가사를 입력하세요.'); return; }
+  if (!state.audioEl) { alert('오디오가 없습니다. 먼저 "미디어 준비"에서 음원을 업로드하세요.'); return; }
+
+  const wasPlaying = !state.audioEl.paused;
+  state.audioEl.pause();
+  state.isPlaying = false;
+  const overlay = document.createElement('div');
+  overlay.className = 'lyric-sync-overlay';
+  overlay.innerHTML = `
+    <div class="lyric-sync-box">
+      <div class="lyric-sync-progress" id="lsync-progress"></div>
+      <div class="lyric-sync-current" id="lsync-current"></div>
+      <div class="lyric-sync-next" id="lsync-next"></div>
+      <button type="button" class="lyric-sync-tap" id="lsync-tap">⬇ 지금! (Space 또는 클릭)</button>
+      <div class="lyric-sync-controls">
+        <button type="button" id="lsync-playpause">▶ 재생</button>
+        <button type="button" id="lsync-undo">↩ 이전 줄로</button>
+        <button type="button" id="lsync-finish" disabled>✅ 여기까지 적용</button>
+        <button type="button" id="lsync-cancel">✕ 취소</button>
+      </div>
+      <div class="hint-text" style="margin-top:8px;">재생 버튼을 누르고, 각 가사 줄이 노래에서 실제로 시작되는 순간 [지금!]을 탭하세요(스페이스바도 됩니다). 끝까지 안 해도 [여기까지 적용]으로 탭한 부분만 저장할 수 있습니다.</div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const $l = sel => overlay.querySelector(sel);
+  let idx = 0;
+  const newTimes = new Array(lines.length).fill(null);
+
+  const render = () => {
+    $l('#lsync-progress').textContent = `${idx}/${lines.length}줄`;
+    $l('#lsync-current').textContent = idx < lines.length ? lines[idx].text : '🎉 마지막 줄까지 완료';
+    $l('#lsync-next').textContent = idx + 1 < lines.length ? '다음 줄: ' + lines[idx + 1].text : '';
+    $l('#lsync-finish').disabled = idx === 0;
+    $l('#lsync-tap').disabled = idx >= lines.length;
+  };
+  render();
+
+  const tap = () => {
+    if (idx >= lines.length) return;
+    newTimes[idx] = state.audioEl.currentTime;
+    idx++;
+    render();
+    if (idx >= lines.length) finish();
+  };
+  const undo = () => {
+    if (idx === 0) return;
+    idx--;
+    newTimes[idx] = null;
+    render();
+  };
+  const onKey = e => {
+    if (e.code === 'Space') { e.preventDefault(); tap(); }
+    else if (e.key === 'Escape') { cancel(); }
+  };
+  const updatePlayBtn = () => {
+    $l('#lsync-playpause').textContent = state.audioEl.paused ? '▶ 재생' : '❚❚ 일시정지';
+  };
+  const cleanup = () => {
+    document.removeEventListener('keydown', onKey);
+    state.audioEl.removeEventListener('play', updatePlayBtn);
+    state.audioEl.removeEventListener('pause', updatePlayBtn);
+    overlay.remove();
+  };
+  const cancel = () => { cleanup(); if (wasPlaying) state.audioEl.play(); };
+  const finish = () => {
+    const appliedCount = idx;
+    for (let i = 0; i < idx; i++) {
+      if (newTimes[i] != null) lines[i].time = newTimes[i];
+    }
+    lines.sort((a, b) => a.time - b.time);
+    const rebuilt = lines.map(l => `${lrcTimestamp(l.time)}${l.text}`).join('\n');
+    state.lyrics.rawText = rebuilt;
+    ['lyrics-text-ig', 'lyrics-text-stage1', 'lyrics-text'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = rebuilt;
+    });
+    refreshLyricsStats();
+    debouncedSave();
+    cleanup();
+    if (appliedCount) alert(`✅ ${appliedCount}줄 싱크가 재조정됐습니다.`);
+  };
+
+  $l('#lsync-tap').addEventListener('click', tap);
+  $l('#lsync-undo').addEventListener('click', undo);
+  $l('#lsync-finish').addEventListener('click', finish);
+  $l('#lsync-cancel').addEventListener('click', cancel);
+  $l('#lsync-playpause').addEventListener('click', () => {
+    if (state.audioEl.paused) state.audioEl.play(); else state.audioEl.pause();
+  });
+  state.audioEl.addEventListener('play', updatePlayBtn);
+  state.audioEl.addEventListener('pause', updatePlayBtn);
+  document.addEventListener('keydown', onKey);
 }
 
 function getLyricAt(time) {
@@ -4509,6 +4617,11 @@ function bindLyricImageGen() {
     saveLGMeta();
     // 모델이 바뀌면 캐릭터 검색 결과도 해당 종류(Element/Soul)로 다시 필터링
     if (!$L('lg-element-dropdown')?.classList.contains('hidden')) renderElementDropdown($L('lg-element-search')?.value || '');
+    // Soul 2로 바꿨는데 아직 아무 캐릭터도 안 골랐으면, 바로 고를 수 있게 목록을 띄워준다
+    if ($L('lg-model')?.value === 'hf-soul-2' && !getSelectedSoulIds().length) {
+      $L('lg-element-search')?.focus();
+      openElementDropdown('');
+    }
   });
   $L('lg-element-custom')?.addEventListener('input', saveLGMeta);
   // Element 실시간 검색 UI 바인딩
@@ -4786,7 +4899,8 @@ async function generateAllFrames() {
       return;
     }
     if (isSoul2 && !getSelectedSoulId()) {
-      alert('Soul 2 — "★ Soul 캐릭터" 목록에서 학습된 캐릭터를 선택하세요.\n(여주인공 / 예수님 / 아들 중 선택)');
+      alert('Soul 2 — 위 캐릭터 검색창에서 학습된 Soul 캐릭터를 먼저 선택하세요.');
+      document.getElementById('lg-element-search')?.focus();
       return;
     }
   } else {
@@ -4958,7 +5072,8 @@ async function regenerateFrame(idx) {
       return;
     }
     if (isSoul2 && !getSelectedSoulIds().length) {
-      alert('Soul 2 — "★ Soul 캐릭터" 목록에서 학습된 캐릭터를 선택하세요.');
+      alert('Soul 2 — 위 캐릭터 검색창에서 학습된 Soul 캐릭터를 먼저 선택하세요.');
+      document.getElementById('lg-element-search')?.focus();
       return;
     }
   } else {
