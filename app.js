@@ -37,7 +37,7 @@ const DEFAULT_STATE = () => ({
   title: { text: '벼량끝 On the Brink Studio', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'none', position: 'top-right', xFine: 0, yFine: 0 },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
-  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'dual' },
+  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'ko' },
   slideshow: { enabled: true, interval: 5, crossfade: true, syncLyrics: false },
   frame: { style: 'none', intensity: 50 },
   filter: { preset: 'none' },
@@ -1017,7 +1017,7 @@ function parseAndCleanLrc(rawText) {
       if (!rest || isNonLyricLine(rest)) continue;  // ts-only / 섹션태그·연출지시문 줄 제외
       out.push(`[${tsStr}]${rest}`);
     }
-    return out.join('\n');
+    return mergeTooCloseLrcLines(out).join('\n');
   }
 
   // 단어 단위: 빈 줄/섹션태그를 경계로 단어들을 문장으로 병합
@@ -1054,7 +1054,31 @@ function parseAndCleanLrc(rawText) {
     curWords.push(rest);
   }
   flush();
-  return out.join('\n');
+  return mergeTooCloseLrcLines(out).join('\n');
+}
+// 타임스탬프 간격이 너무 촘촘한(사람이 읽을 수 없는 속도) 줄들을 하나로 합친다.
+// 원인 예: LRC 파싱이 문장을 잘못 쪼갰거나, Whisper가 짧은 구간을 여러 줄로 과분할한 경우.
+// 그대로 두면 재생 시 가사가 순식간에 스쳐 지나가는 것처럼 보인다.
+const LRC_MIN_LINE_GAP_SEC = 0.6;
+function mergeTooCloseLrcLines(formattedLines) {
+  const tsRe = /^\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\](.*)$/;
+  const parsed = formattedLines.map(l => {
+    const m = l.match(tsRe);
+    if (!m) return null;
+    const [, mm, ss, frac, text] = m;
+    const time = (+mm) * 60 + (+ss) + (frac ? +('0.' + frac) : 0);
+    return { time, text, tsStr: `${mm}:${ss}` + (frac != null ? `.${frac}` : '') };
+  }).filter(Boolean);
+  const merged = [];
+  for (const cur of parsed) {
+    const prev = merged[merged.length - 1];
+    if (prev && cur.time - prev.time < LRC_MIN_LINE_GAP_SEC) {
+      prev.text = (prev.text + ' ' + cur.text).replace(/\s+/g, ' ').trim();
+    } else {
+      merged.push({ ...cur });
+    }
+  }
+  return merged.map(l => `[${l.tsStr}]${l.text}`);
 }
 function updateLyrics(text, opts = {}) {
   state.lyrics.rawText = text;
@@ -1075,9 +1099,30 @@ function bindLyrics() {
   // 가사 텍스트박스/파일/비우기 바인딩은 모두 bindStage1Lyrics()의
   // 통합 매니저에서 처리한다 (3개 단계 textarea 양방향 동기화).
 }
-// ===== 자동 번역 (MyMemory free API) =====
+// ===== 자동 번역 (OpenAI 키 있으면 우선 사용 — 훨씬 정확·안정적, 없으면 MyMemory 무료 API 폴백) =====
+const TRANSLATE_LANG_NAMES = { en: 'English', ja: 'Japanese', zh: 'Chinese', es: 'Spanish', fr: 'French', de: 'German', vi: 'Vietnamese', th: 'Thai' };
+async function translateTextOpenAI(apiKey, text, target) {
+  const targetName = TRANSLATE_LANG_NAMES[target] || target;
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: `다음 한국어 노래 가사 한 줄을 자연스러운 ${targetName}로 번역하라. 설명 없이 번역 결과만 출력하라.\n\n${text}` }],
+      temperature: 0.3, max_tokens: 200,
+    }),
+  });
+  if (!r.ok) throw new Error(`OpenAI 번역 오류 ${r.status}`);
+  const j = await r.json();
+  return (j.choices?.[0]?.message?.content || '').trim();
+}
 async function translateText(text, target) {
   if (!text || !target) return '';
+  const oaKey = (localStorage.getItem('ssc-openai-key') || '').trim();
+  if (oaKey && oaKey.startsWith('sk-')) {
+    try { return await translateTextOpenAI(oaKey, text, target); }
+    catch (e) { console.warn('OpenAI 번역 실패, MyMemory로 폴백:', e.message); }
+  }
   try {
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=ko|${target}`;
     const r = await fetch(url);
@@ -1093,15 +1138,25 @@ async function translateAllLyrics() {
   const lines = state.lyrics.lines;
   if (!lines.length) { alert('가사가 비어 있습니다'); return; }
   const statusEl = $('trans-status');
-  if (statusEl) statusEl.textContent = `번역 준비 중... (${lines.length}줄)`;
-  for (let i = 0; i < lines.length; i++) {
-    lines[i].translation = await translateText(lines[i].text, lang);
-    lines[i].translationLang = lang;
-    if (statusEl) statusEl.textContent = `번역 중 ${i + 1}/${lines.length}...`;
+  // 재시도 시 이미 번역된(같은 언어) 줄은 건너뛰고 실패분만 다시 시도
+  const todo = lines.map((_, i) => i).filter(i => !(lines[i].translation && lines[i].translationLang === lang));
+  if (!todo.length) { if (statusEl) statusEl.textContent = `✅ 이미 ${lines.length}줄 전부 번역됨 (${lang})`; return; }
+  if (statusEl) statusEl.textContent = `번역 준비 중... (${todo.length}/${lines.length}줄)`;
+  let failed = 0;
+  for (let k = 0; k < todo.length; k++) {
+    const i = todo[k];
+    const t = await translateText(lines[i].text, lang);
+    if (t) { lines[i].translation = t; lines[i].translationLang = lang; }
+    else failed++;
+    if (statusEl) statusEl.textContent = `번역 중 ${k + 1}/${todo.length}...`;
     // Throttle slightly to avoid hammering the free API
-    if (i % 3 === 2) await new Promise(r => setTimeout(r, 120));
+    if (k % 3 === 2) await new Promise(r => setTimeout(r, 120));
   }
-  if (statusEl) statusEl.textContent = `✅ 완료 — ${lines.length}줄 번역됨 (${lang})`;
+  if (statusEl) {
+    statusEl.textContent = failed
+      ? `⚠️ ${lines.length}줄 중 ${failed}줄 번역 실패 — [번역] 버튼을 다시 누르면 실패분만 재시도합니다`
+      : `✅ 완료 — ${lines.length}줄 번역됨 (${lang})`;
+  }
   debouncedSave();
 }
 
@@ -2038,7 +2093,8 @@ function drawLyrics(c, W, H, time) {
     }
   };
 
-  const display = state.lyrics.display || 'ko';
+  // 'dual'은 예전 버그로 저장된 값(정상 값은 'both') — 방어적으로 보정
+  const display = (state.lyrics.display === 'dual' ? 'both' : state.lyrics.display) || 'ko';
   // Helper: get the text to display for a given line based on display mode
   const txtFor = (l, includeBoth) => {
     if (!l) return null;
@@ -2546,6 +2602,11 @@ function bindSidebarBottomButtons() {
   if (devBtn) devBtn.addEventListener('click', e => e.preventDefault());
   const offBtn = $('btn-official');
   if (offBtn) offBtn.addEventListener('click', e => e.preventDefault());
+  // 개발자(ha21)에게 실시간 문의 — 텔레그램 봇으로 연결. 오류·수정 요청을 바로 채팅으로 전달.
+  const devChatBtn = $('btn-dev-chat');
+  if (devChatBtn) devChatBtn.addEventListener('click', () => {
+    window.open('https://t.me/widace_ha21_bot', '_blank', 'noopener');
+  });
 }
 
 // 가사 통합 매니저 — 3개 단계(가사 이미지 / 미디어 준비 / 비주얼 편집)의
@@ -2575,9 +2636,9 @@ function bindStage1Lyrics() {
     updateLyrics(cleaned);
     // 자동 영어 번역 + 한글+영어 모드
     state.lyrics.lang = 'en';
-    state.lyrics.display = 'dual';
+    state.lyrics.display = 'both';
     const langSel = $('lyrics-lang'); if (langSel) langSel.value = 'en';
-    const dispSel = $('lyrics-display'); if (dispSel) dispSel.value = 'dual';
+    const dispSel = $('lyrics-display'); if (dispSel) dispSel.value = 'both';
     setAllTrans(`🌐 영어로 자동 번역 중... (${state.lyrics.lines.length}줄)`);
     try {
       await translateAllLyrics();

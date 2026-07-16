@@ -146,6 +146,7 @@ body {
 .side-btn-warn { background: var(--orange); }
 .side-btn-danger { background: var(--danger); }
 .side-btn-purple { background: var(--accent); }
+.side-btn-telegram { background: #229ED9; }
 
 /* ===== Stage 1 right column ===== */
 .bg-card { display: flex; flex-direction: column; }
