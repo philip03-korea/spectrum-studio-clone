@@ -3991,10 +3991,16 @@ function buildScenePlan(lyrics, theme, N) {
   return { theme, character: arc?.name || null, scenes };
 }
 
-function buildPromptForScene(scene, theme, preset, styleHints) {
+function buildPromptForScene(scene, theme, preset, styleHints, model) {
   const parts = [];
+  // Soul 2는 백엔드가 자체 금지문구(NEG_PREFIX)를 따로 붙이고, 대괄호 지시문/CRITICAL 문단을
+  // 문자열 검색으로 잘라내려다 실제 장면 내용까지 잘라먹는 사고가 났었다(예: 장면 설명에 우연히
+  // "critical"이라는 단어가 들어가면 그 뒤 전부가 삭제됨). Soul 2용은 애초에 이 문구들을 안 보낸다.
+  const isSoul2Model = model === 'hf-soul-2';
   // ★ 프롬프트 맨 앞에 핵심 금지사항 — 모델이 가장 먼저 읽게
-  parts.push('[ONE single full-frame image of ONE character in ONE scene. Absolutely NO text/letters/numbers/watermarks, NO split panels/grids/collage, NO character sheet / turnaround / multiple poses or views.]');
+  if (!isSoul2Model) {
+    parts.push('[ONE single full-frame image of ONE character in ONE scene. Absolutely NO text/letters/numbers/watermarks, NO split panels/grids/collage, NO character sheet / turnaround / multiple poses or views.]');
+  }
   const emotionMap = {
     'hopeful': 'hopeful, warm light streaming down',
     'somber': 'solemn, soft cool light',
@@ -4017,8 +4023,8 @@ function buildPromptForScene(scene, theme, preset, styleHints) {
   parts.push('Mood: ' + (emotionMap[scene.emotion] || emotionMap.neutral) + '.');
   if (preset && STYLE_PRESETS[preset]) parts.push('Rendering style: ' + STYLE_PRESETS[preset]);
   if (styleHints) parts.push(`Rendering art style only (copy the look, NOT the subjects): ${styleHints}.`);
-  // ★ 프롬프트 끝에도 상세 금지사항 반복
-  parts.push(LG_NEG_PROMPT);
+  // ★ 프롬프트 끝에도 상세 금지사항 반복 (Soul 2는 백엔드가 자체 처리하므로 생략)
+  if (!isSoul2Model) parts.push(LG_NEG_PROMPT);
   return parts.join(' ');
 }
 
@@ -4246,6 +4252,10 @@ async function hfFetch(url, opts) {
 function getHfProxyUrl() {
   return (localStorage.getItem('ssc-hf-proxy-url') || document.getElementById('lg-hf-proxy')?.value || '').trim();
 }
+// 로컬 ComfyUI 영상화 브릿지 — proxy.cjs가 /comfy/*로 중계 (기본값: node proxy.cjs 실행 시 포트 8766)
+function getComfyProxyUrl() {
+  return (localStorage.getItem('ssc-comfy-proxy-url') || 'http://localhost:8766/comfy').trim();
+}
 // Higgsfield 이미지 모델(참조 이미지 지원) 판별 + 백엔드 실제 모델 ID 매핑
 //  • hf-gpt-image-2 → gpt_image_2 (저용량, 실사 성향 강함 — 애니/일러스트 화풍 재현 못함)
 //  • hf-nano-banana → nano_banana_pro (참조 이미지의 화풍을 충실히 재현 — 애니/일러스트에 적합)
@@ -4444,7 +4454,7 @@ const _lg = {
   styleHints: '',           // 업로드 스타일 이미지에서 추출한 텍스트 (현재는 사용자가 지정 가능; 추후 vision API)
   scenePlan: null,           // { theme, character, scenes: [...] }
   prompts: [],               // scene별 프롬프트
-  frames: [],                // [{ idx, blob, url, prompt }]
+  frames: [],                // [{ idx, blob, url, prompt, videoBlob?, videoUrl?, videoStatus?, videoError? }] — video* 필드는 🎬 영상화(로컬 ComfyUI) 결과
   projectId: '',             // 고유 ID
   selectedCharacters: [],    // 실시간 검색으로 선택한 캐릭터 [{ id, name, thumb, kind:'element'|'soul' }]
   elementsCatalog: null,     // /characters 응답 캐시 [{ id, name, category, description, thumb, kind }]
@@ -4767,7 +4777,7 @@ function bindLyricImageGen() {
     // 프롬프트 미리 생성
     const preset = $L('lg-preset').value;
     _lg.prompts = plan.scenes.map(s => ({
-      idx: s.idx, prompt: buildPromptForScene(s, theme, preset, _lg.styleHints),
+      idx: s.idx, prompt: buildPromptForScene(s, theme, preset, _lg.styleHints, $L('lg-model').value),
     }));
     renderScenePlan();
     $L('lg-analyze-status').textContent = `✅ ${plan.scenes.length}장면 ${plan.character ? '(' + plan.character + ' 아크 매칭됨)' : ''}`;
@@ -4797,21 +4807,33 @@ function renderScenePlan() {
     row.style.cssText = 'font-size: 11px;';
     const frame = _lg.frames.find(f => f.idx === s.idx);
     const isGen = _lg.generatingIdx === s.idx;
+    const vStatus = frame?.videoStatus;
+    const vBusy = vStatus === 'starting' || vStatus === 'queued' || vStatus === 'running';
+    const vBusyLabel = { starting: '⏳ 준비 중…', queued: '⏳ 대기열…', running: '⏳ 생성 중…(수십 분)' }[vStatus] || '⏳ 처리 중…';
+    const animateBtnHtml = !frame ? '' : vBusy
+      ? `<button class="btn-mini lg-animate-btn" data-idx="${s.idx}" disabled title="로컬 ComfyUI에서 영상 생성 중" style="opacity:.6; cursor:default;">${vBusyLabel}</button>`
+      : `<button class="btn-mini lg-animate-btn" data-idx="${s.idx}" title="${vStatus === 'error' ? ('실패: ' + (frame.videoError || '')) : '로컬 ComfyUI로 이 장면을 짧은 영상으로 변환'}">${vStatus === 'done' ? '🎬 다시 영상화' : vStatus === 'error' ? '🎬 재시도' : '🎬 영상화'}</button>`;
     row.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:4px; flex-wrap:wrap;">
         <b style="color: var(--accent-hover);">#${String(s.idx).padStart(2,'0')}</b>
-        ${isGen
-          ? `<button class="btn-mini lg-regen-btn" data-idx="${s.idx}" disabled style="opacity:.6; cursor:default;">⏳ 재생성 중…</button>`
-          : `<button class="btn-mini lg-regen-btn" data-idx="${s.idx}">🔄 재생성</button>`}
+        <div style="display:flex; gap:4px;">
+          ${animateBtnHtml}
+          ${isGen
+            ? `<button class="btn-mini lg-regen-btn" data-idx="${s.idx}" disabled style="opacity:.6; cursor:default;">⏳ 재생성 중…</button>`
+            : `<button class="btn-mini lg-regen-btn" data-idx="${s.idx}">🔄 재생성</button>`}
+        </div>
       </div>
       ${s.biblicalEvent ? `<div style="color: var(--warn); font-weight:600;">📖 ${s.biblicalEvent}</div>` : ''}
       <div style="color: var(--text-2); margin-top: 2px;">🎵 ${s.lyricSummary || '(가사 없음)'}</div>
       <div style="color: var(--text-2); font-size: 10px;">감정: ${s.emotion}</div>
+      ${vStatus === 'error' ? `<div style="color: var(--warn); font-size: 10px; margin-top:2px;">❌ 영상화 실패: ${frame.videoError || ''}</div>` : ''}
       ${isGen
         ? `<div class="lg-gen-spin" style="position:relative; margin-top:6px;">${frame ? `<img src="${frame.url}" style="width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; display:block; opacity:.3;" />` : ''}<div style="${frame ? 'position:absolute; inset:0; ' : ''}display:flex; align-items:center; justify-content:center; gap:6px; color:var(--accent-hover); font-weight:700;"><span class="lg-spin-emoji">🔄</span> ${frame ? '재생성 중…' : '생성 중…'}</div></div>`
-        : (frame
-          ? `<img class="lg-frame-img" data-idx="${s.idx}" src="${frame.url}" title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;" />`
-          : '')}
+        : (frame?.videoUrl
+          ? `<video class="lg-frame-video" data-idx="${s.idx}" src="${frame.videoUrl}" muted loop autoplay playsinline title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;"></video>`
+          : (frame
+            ? `<img class="lg-frame-img" data-idx="${s.idx}" src="${frame.url}" title="클릭하면 크게 보기" style="margin-top:6px; width:100%; height:auto; object-fit:contain; background:#000; border-radius:6px; cursor:zoom-in; display:block;" />`
+            : ''))}
     `;
     wrap.appendChild(row);
   });
@@ -4819,9 +4841,13 @@ function renderScenePlan() {
   wrap.querySelectorAll('.lg-regen-btn').forEach(b => {
     b.addEventListener('click', () => regenerateFrame(Number(b.dataset.idx)));
   });
-  // 이미지 클릭 → 전체화면 라이트박스 (방향키/버튼으로 이동)
-  wrap.querySelectorAll('.lg-frame-img').forEach(img => {
-    img.addEventListener('click', () => openFrameLightbox(Number(img.dataset.idx)));
+  // 영상화 버튼 (로컬 ComfyUI)
+  wrap.querySelectorAll('.lg-animate-btn').forEach(b => {
+    b.addEventListener('click', () => animateFrame(Number(b.dataset.idx)));
+  });
+  // 이미지/영상 클릭 → 전체화면 라이트박스 (방향키/버튼으로 이동)
+  wrap.querySelectorAll('.lg-frame-img, .lg-frame-video').forEach(el => {
+    el.addEventListener('click', () => openFrameLightbox(Number(el.dataset.idx)));
   });
 }
 
@@ -4994,7 +5020,7 @@ async function generateAllFrames() {
     _lg.scenePlan._enriched = true;
   }
   _lg.prompts = _lg.scenePlan.scenes.map(s => ({
-    idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints),
+    idx: s.idx, prompt: buildPromptForScene(s, theme, preset, appliedHints, model),
   }));
   // gpt_image_2: 업로드 이미지를 실제 참조로 직접 전송 (백엔드가 medias로 반영)
   // gpt-image-1: edits 경로 / dall-e-3: 스타일 비전
@@ -5097,7 +5123,7 @@ async function regenerateFrame(idx) {
       _lg.styleHints = await describeStyleFromImages(oaKey, _lg.styleFiles);
       const theme = document.getElementById('lg-theme').value.trim();
       const scene = _lg.scenePlan?.scenes.find(s => s.idx === idx);
-      if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints);
+      if (scene) promptObj.prompt = buildPromptForScene(scene, theme, preset, _lg.styleHints, model);
     }
     // HF(gpt_image_2)는 참조이미지 미지원 → 스타일은 프롬프트(styleHints)로 반영 / gpt-image-1 + 업로드 = edits / 그 외 = t2i
     const refFiles = (isHfImgModel(model) && hasUpload) ? _lg.styleFiles
@@ -5121,11 +5147,64 @@ async function regenerateFrame(idx) {
   }
 }
 
+// ====================================================================
+// 로컬 ComfyUI 영상화 — 장면 이미지 한 장을 짧은 영상 클립(기본 ~3초)으로 변환
+// (node proxy.cjs 실행 중이어야 함 — comfyui-local-studio 스킬로 세팅한 로컬 ComfyUI를 자동 기동/호출)
+// ====================================================================
+async function animateFrame(idx) {
+  const frame = _lg.frames.find(f => f.idx === idx);
+  if (!frame) { alert('먼저 이 장면의 이미지를 생성하세요.'); return; }
+  const proxyBase = getComfyProxyUrl().replace(/\/+$/, '');
+  frame.videoStatus = 'starting';
+  frame.videoError = null;
+  renderScenePlan();
+  try {
+    const imageDataUrl = await fileToDataURL(frame.blob);
+    const scene = _lg.scenePlan?.scenes.find(s => s.idx === idx);
+    const motionPrompt = (scene?.lyricSummary || frame.prompt || '').slice(0, 300)
+      + ', subtle natural motion, gentle cinematic camera movement';
+    const submitRes = await fetch(`${proxyBase}/animate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageDataUrl, prompt: motionPrompt, width: 640, height: 640, length: 49 }),
+    });
+    if (!submitRes.ok) throw new Error(`영상화 브릿지 응답 오류 (${submitRes.status}) — "node proxy.cjs" 실행 중인지 확인하세요`);
+    const { jobId } = await submitRes.json();
+
+    // 폴링 — 이 PC(8GB VRAM)에서는 클립 하나에 20분 이상 걸릴 수 있음
+    for (;;) {
+      await new Promise(r => setTimeout(r, 5000));
+      const statRes = await fetch(`${proxyBase}/status?id=${jobId}`);
+      const stat = await statRes.json();
+      frame.videoStatus = stat.status;
+      renderScenePlan();
+      if (stat.status === 'done') break;
+      if (stat.status === 'error') throw new Error(stat.error || '알 수 없는 오류');
+    }
+    const resultRes = await fetch(`${proxyBase}/result?id=${jobId}`);
+    if (!resultRes.ok) throw new Error('영상 결과를 가져오지 못했습니다');
+    const videoBlob = await resultRes.blob();
+    if (frame.videoUrl) URL.revokeObjectURL(frame.videoUrl);
+    frame.videoBlob = videoBlob;
+    frame.videoUrl = URL.createObjectURL(videoBlob);
+    frame.videoStatus = 'done';
+  } catch (e) {
+    frame.videoStatus = 'error';
+    frame.videoError = e.message;
+  } finally {
+    renderScenePlan();
+  }
+}
+
 async function addFramesToBackgrounds() {
   if (!_lg.frames.length) return;
   // 프레임 순서대로 배경에 추가 + 각 배경에 해당 가사 장면의 시작 시간을 태그
   for (const f of _lg.frames.sort((a,b)=>a.idx-b.idx)) {
-    const file = new File([f.blob], `frame-${String(f.idx).padStart(2,'0')}.png`, { type: 'image/png' });
+    // 영상화된 장면은 정지 이미지 대신 생성된 영상 클립을 배경으로 등록 (kind:'video'는
+    // handleBackgrounds가 MIME 타입으로 자동 판별 — Stage 2/3/4는 수정 불필요)
+    const file = f.videoBlob
+      ? new File([f.videoBlob], `frame-${String(f.idx).padStart(2,'0')}.mp4`, { type: 'video/mp4' })
+      : new File([f.blob], `frame-${String(f.idx).padStart(2,'0')}.png`, { type: 'image/png' });
     await handleBackgrounds([file]);
     const bg = state.backgrounds[state.backgrounds.length - 1];
     const scene = _lg.scenePlan?.scenes.find(s => s.idx === f.idx);
@@ -5140,7 +5219,8 @@ async function addFramesToBackgrounds() {
   const sc = document.getElementById('slideshow-sync'); if (sc) sc.checked = true;
   renderBgSyncList();
   debouncedSave();
-  alert(`${_lg.frames.length}개 프레임이 배경에 추가됐습니다.\n"가사 타이밍 동기화"가 켜져서 각 이미지가 가사 시간에 맞춰 전환됩니다.\n(비주얼 편집 → 배경 탭 아래 "가사↔이미지 싱크"에서 시간 직접 조정 가능)`);
+  const videoCount = _lg.frames.filter(f => f.videoBlob).length;
+  alert(`${_lg.frames.length}개 프레임이 배경에 추가됐습니다${videoCount ? ` (그중 ${videoCount}개는 영상 클립)` : ''}.\n"가사 타이밍 동기화"가 켜져서 각 장면이 가사 시간에 맞춰 전환됩니다.\n(비주얼 편집 → 배경 탭 아래 "가사↔이미지 싱크"에서 시간 직접 조정 가능)`);
 }
 
 // 가사↔이미지 싱크 정렬 에디터 — 각 배경의 시작 시간을 mm:ss로 편집
