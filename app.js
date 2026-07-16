@@ -4077,15 +4077,93 @@ async function hfFetch(url, opts) {
 function getHfProxyUrl() {
   return (localStorage.getItem('ssc-hf-proxy-url') || document.getElementById('lg-hf-proxy')?.value || '').trim();
 }
-// 선택된 Higgsfield 캐릭터(Element) ID 배열 — 체크박스 + 직접입력
+// 선택된 Higgsfield 캐릭터(Element) ID 배열 — 실시간 검색으로 고른 것 + 직접입력
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 function getSelectedElementIds() {
-  const ids = [...document.querySelectorAll('input[name="lg-el"]:checked')].map(c => c.value);
+  const ids = (_lg.selectedElements || []).map(e => e.id);
   const custom = (document.getElementById('lg-element-custom')?.value || '').match(UUID_RE);
   if (custom) custom.forEach(id => { if (!ids.includes(id)) ids.push(id); });
   return ids;
 }
 function getSelectedElementId() { return getSelectedElementIds()[0] || ''; }
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+// Element(캐릭터/환경/소품) 실시간 검색 — 프록시 /elements 에서 목록을 받아 이름/설명으로 필터링.
+async function fetchElementsCatalog(force) {
+  const proxyUrl = getHfProxyUrl();
+  if (!proxyUrl) throw new Error('Higgsfield 프록시 URL이 필요합니다 (Stage 1에서 입력)');
+  const base = proxyUrl.replace(/\/+$/, '');
+  const res = await fetch(`${base}/elements${force ? '?refresh=1' : ''}`);
+  if (!res.ok) throw new Error(`Element 목록 조회 실패 ${res.status}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  _lg.elementsCatalog = Array.isArray(data.items) ? data.items : [];
+  return _lg.elementsCatalog;
+}
+function renderElementDropdown(query) {
+  const dd = document.getElementById('lg-element-dropdown');
+  if (!dd) return;
+  const list = _lg.elementsCatalog || [];
+  const q = (query || '').trim().toLowerCase();
+  const selectedIds = new Set((_lg.selectedElements || []).map(e => e.id));
+  const filtered = (q
+    ? list.filter(it => (it.name || '').toLowerCase().includes(q) || (it.description || '').toLowerCase().includes(q) || (it.category || '').toLowerCase().includes(q))
+    : list
+  ).filter(it => !selectedIds.has(it.id)).slice(0, 40);
+  if (!filtered.length) {
+    dd.innerHTML = `<div class="element-dropdown-empty">${list.length ? '일치하는 캐릭터 없음' : '목록 없음 — 🔄 새로고침을 눌러보세요'}</div>`;
+    dd.classList.remove('hidden');
+    return;
+  }
+  dd.innerHTML = '';
+  filtered.forEach(it => {
+    const row = document.createElement('div');
+    row.className = 'element-dropdown-item';
+    row.innerHTML =
+      (it.thumb ? `<img src="${it.thumb}" alt="" loading="lazy" />` : '<div class="element-thumb-empty">🧑</div>') +
+      `<div class="element-dropdown-text">
+        <div class="element-dropdown-name">${escapeHtml(it.name || it.id)}</div>
+        <div class="element-dropdown-desc">${escapeHtml((it.description || it.category || '').slice(0, 60))}</div>
+      </div>`;
+    row.addEventListener('mousedown', (e) => { e.preventDefault(); addSelectedElement(it); });
+    dd.appendChild(row);
+  });
+  dd.classList.remove('hidden');
+}
+function addSelectedElement(it) {
+  if (!_lg.selectedElements.some(e => e.id === it.id)) {
+    _lg.selectedElements.push({ id: it.id, name: it.name || it.id, thumb: it.thumb || '' });
+  }
+  renderSelectedElementChips();
+  const search = document.getElementById('lg-element-search');
+  if (search) { search.value = ''; search.focus(); }
+  renderElementDropdown('');
+  if (typeof window._lgSaveMeta === 'function') window._lgSaveMeta();
+}
+function removeSelectedElement(id) {
+  _lg.selectedElements = _lg.selectedElements.filter(e => e.id !== id);
+  renderSelectedElementChips();
+  if (typeof window._lgSaveMeta === 'function') window._lgSaveMeta();
+}
+function renderSelectedElementChips() {
+  const wrap = document.getElementById('lg-element-selected');
+  if (!wrap) return;
+  if (!_lg.selectedElements.length) { wrap.innerHTML = ''; wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '';
+  _lg.selectedElements.forEach(e => {
+    const chip = document.createElement('span');
+    chip.className = 'element-chip';
+    chip.innerHTML = (e.thumb ? `<img src="${e.thumb}" alt="" />` : '') + `<span>${escapeHtml(e.name)}</span>`;
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'element-chip-x'; x.textContent = '✕';
+    x.addEventListener('click', () => removeSelectedElement(e.id));
+    chip.appendChild(x);
+    wrap.appendChild(chip);
+  });
+}
 // Higgsfield 이미지 모델(참조 이미지 지원) 판별 + 백엔드 실제 모델 ID 매핑
 //  • hf-gpt-image-2 → gpt_image_2 (저용량, 실사 성향 강함 — 애니/일러스트 화풍 재현 못함)
 //  • hf-nano-banana → nano_banana_pro (참조 이미지의 화풍을 충실히 재현 — 애니/일러스트에 적합)
@@ -4197,6 +4275,8 @@ const _lg = {
   prompts: [],               // scene별 프롬프트
   frames: [],                // [{ idx, blob, url, prompt }]
   projectId: '',             // 고유 ID
+  selectedElements: [],      // 실시간 검색으로 선택한 캐릭터 [{ id, name, thumb }]
+  elementsCatalog: null,     // /elements 응답 캐시 [{ id, name, category, description, thumb }]
 };
 
 function bindLyricImageGen() {
@@ -4334,13 +4414,14 @@ function bindLyricImageGen() {
         title: $L('lg-title')?.value || '', theme: $L('lg-theme')?.value || '',
         preset: $L('lg-preset')?.value || '', aspect: $L('lg-aspect')?.value || '',
         model: $L('lg-model')?.value || '',
-        elementIds: [...document.querySelectorAll('input[name="lg-el"]:checked')].map(c => c.value),
+        elementSelected: _lg.selectedElements || [],
         elementCustom: $L('lg-element-custom')?.value || '',
         soulIds: [...document.querySelectorAll('input[name="lg-so"]:checked')].map(c => c.value),
         soulCustom: $L('lg-soul-custom')?.value || '',
       }));
     } catch {}
   };
+  window._lgSaveMeta = saveLGMeta;
   // Soul 섹션 표시/숨김 (hf-soul-2 선택 시)
   const updateSoulSection = () => {
     const isSoul2 = $L('lg-model')?.value === 'hf-soul-2';
@@ -4371,8 +4452,34 @@ function bindLyricImageGen() {
   $L('lg-theme').addEventListener('input', e => { _lg.theme = e.target.value; saveLGMeta(); });
   $L('lg-aspect')?.addEventListener('change', saveLGMeta);
   $L('lg-model')?.addEventListener('change', () => { saveLGMeta(); updateSoulSection(); });
-  document.querySelectorAll('input[name="lg-el"]').forEach(cb => cb.addEventListener('change', saveLGMeta));
   $L('lg-element-custom')?.addEventListener('input', saveLGMeta);
+  // Element 실시간 검색 UI 바인딩
+  let elementDropdownOpen = false;
+  const openElementDropdown = async (query) => {
+    if (!_lg.elementsCatalog) {
+      const dd = $L('lg-element-dropdown');
+      if (dd) { dd.innerHTML = '<div class="element-dropdown-empty">불러오는 중…</div>'; dd.classList.remove('hidden'); }
+      try { await fetchElementsCatalog(false); }
+      catch (e) {
+        if (dd) dd.innerHTML = `<div class="element-dropdown-empty">${e.message}</div>`;
+        return;
+      }
+    }
+    renderElementDropdown(query);
+  };
+  $L('lg-element-search')?.addEventListener('focus', e => { elementDropdownOpen = true; openElementDropdown(e.target.value); });
+  $L('lg-element-search')?.addEventListener('input', e => { openElementDropdown(e.target.value); });
+  $L('lg-element-search')?.addEventListener('blur', () => {
+    elementDropdownOpen = false;
+    setTimeout(() => { if (!elementDropdownOpen) $L('lg-element-dropdown')?.classList.add('hidden'); }, 150);
+  });
+  $L('lg-element-refresh')?.addEventListener('click', async () => {
+    const btn = $L('lg-element-refresh');
+    if (btn) { btn.disabled = true; btn.textContent = '🔄 불러오는 중…'; }
+    try { await fetchElementsCatalog(true); renderElementDropdown($L('lg-element-search')?.value || ''); }
+    catch (e) { alert('Element 목록 새로고침 실패: ' + e.message); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '🔄 목록 새로고침'; } }
+  });
   document.querySelectorAll('input[name="lg-so"]').forEach(cb => cb.addEventListener('change', saveLGMeta));
   $L('lg-soul-custom')?.addEventListener('input', saveLGMeta);
 
@@ -4385,10 +4492,13 @@ function bindLyricImageGen() {
       if (m.preset && $L('lg-preset')) $L('lg-preset').value = m.preset;
       if (m.aspect && $L('lg-aspect')) $L('lg-aspect').value = m.aspect;
       if (m.model && $L('lg-model')) $L('lg-model').value = m.model;
-      if (Array.isArray(m.elementIds)) m.elementIds.forEach(id => {
-        const cb = document.querySelector(`input[name="lg-el"][value="${id}"]`);
-        if (cb) cb.checked = true;
-      });
+      if (Array.isArray(m.elementSelected) && m.elementSelected.length) {
+        _lg.selectedElements = m.elementSelected;
+      } else if (Array.isArray(m.elementIds) && m.elementIds.length) {
+        // 구버전 저장분(체크박스 시절) 호환 — 이름은 다음 검색 목록 로드 시 갱신됨
+        _lg.selectedElements = m.elementIds.map(id => ({ id, name: id, thumb: '' }));
+      }
+      renderSelectedElementChips();
       if (m.elementCustom && $L('lg-element-custom')) $L('lg-element-custom').value = m.elementCustom;
       if (Array.isArray(m.soulIds)) m.soulIds.forEach(id => {
         const cb = document.querySelector(`input[name="lg-so"][value="${id}"]`);

@@ -16,8 +16,8 @@
  *
  * 엔드포인트:
  *   GET  /         → 헬스 { ok:true, backend: <Contabo /health 결과> }
+ *   GET  /elements → Higgsfield Element(캐릭터/환경/소품) 목록 { items:[{id,name,category,description,thumb}] }
  *   POST /generate → { prompt, aspect_ratio?, quality?, resolution? } → 이미지 바이너리
- *     (references[] 는 현재 Contabo 백엔드 미지원 → 무시. 캐릭터 참조는 백엔드 확장 후 연결)
  */
 
 export default {
@@ -42,6 +42,24 @@ export default {
         backend = await h.json();
       } catch (e) { backend = { error: e.message }; }
       return json({ ok: true, service: 'gpt-image2-proxy', backend }, 200, cors);
+    }
+    // ============ Element(캐릭터/환경/소품) 목록 — 실시간 검색용 ============
+    if (request.method === 'GET' && url.pathname === '/elements') {
+      if (!base || !key) {
+        return json({ error: 'Worker 미설정 — CONTABO_URL / CONTABO_KEY 를 설정하세요.' }, 500, cors);
+      }
+      try {
+        const refresh = url.searchParams.get('refresh') === '1' ? '?refresh=1' : '';
+        const eRes = await fetch(`${base}/elements${refresh}`, { headers: { 'X-API-Key': key } });
+        const eText = await eRes.text();
+        let eData; try { eData = JSON.parse(eText); } catch { eData = null; }
+        if (!eRes.ok || !eData) {
+          return json({ error: `Element 목록 오류 ${eRes.status}: ${eText.slice(0, 300)}` }, 502, cors);
+        }
+        return json(eData, 200, cors);
+      } catch (e) {
+        return json({ error: `Element 프록시 오류: ${e.message}` }, 500, cors);
+      }
     }
     // ============ Higgsfield 영상 생성 경로 (Seedance 2.0 / Grok Imagine 1.5) ============
     if (request.method === 'POST' && url.pathname === '/generate-video') {

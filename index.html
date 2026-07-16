@@ -197,23 +197,15 @@
             </div>
             <div class="bg-thumbs hidden" id="lg-style-thumbs"></div>
 
-            <div class="sub-title">🧑 캐릭터 (Higgsfield Element) <span class="sub-tag">gpt_image_2 일관성 · 복수 선택 가능</span></div>
-            <div class="char-check-group" id="lg-element-group">
-              <label class="char-check"><input type="checkbox" name="lg-el" value="5b8a7006-aeca-42f9-96ca-9f6cfa608f4b" /><span>★ 여주인공</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="8e29ef74-0c3b-46a5-b648-0b8f4e035781" /><span>★ 예수님</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="7248d960-ffa2-422e-b649-57b66d24a201" /><span>★ 아들</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="c3314a7f-097c-4336-add6-adfe06acd475" /><span>여아 8세 (Jiyul)</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="f07f3163-57ba-47b7-8fb7-8dfe622b5ba5" /><span>아빠 (Hyeonwoo)</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="1fb4e4ac-7c0c-4dcf-8cdf-446e4821fc4a" /><span>아빠 (Junho)</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="cbeac423-20a9-4fc9-b917-1a2804885d04" /><span>남아 (Doyun)</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="5bea8ba8-4691-4cda-b6ae-27e2ca8468ce" /><span>할아버지</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="5e6604c6-da04-401e-aa24-6f7707301207" /><span>할머니</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="69b264df-c091-4d25-bcf4-027ced2678bb" /><span>소방관</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="566395e9-a6f6-49be-b05c-9df5745d62da" /><span>EIDO 기린</span></label>
-              <label class="char-check"><input type="checkbox" name="lg-el" value="8520a5ce-dad1-46d6-a6e5-1dce4701fdc3" /><span>EIDO 그린</span></label>
+            <div class="sub-title">🧑 캐릭터 (Higgsfield Element) <span class="sub-tag">gpt_image_2 · Nano Banana Pro 일관성 · 복수 선택 가능</span></div>
+            <div class="element-chip-row hidden" id="lg-element-selected"></div>
+            <div class="element-search-row">
+              <input class="text-input" id="lg-element-search" placeholder="🔍 캐릭터 이름으로 검색... (예: 아브라함, 여주인공)" autocomplete="off" />
+              <button type="button" id="lg-element-refresh" class="small-btn">🔄 목록 새로고침</button>
             </div>
+            <div class="element-dropdown hidden" id="lg-element-dropdown"></div>
             <input class="text-input" id="lg-element-custom" placeholder="직접 입력: Element ID (쉼표로 구분해 여러 개 가능)" autocomplete="off" style="margin-top:4px;" />
-            <div class="hint-text" style="margin-bottom:6px;">여러 명 체크하면 <b>같은 장면에 함께 등장</b>(gpt_image_2 <<<id>>> 다중 주입). 새 캐릭터는 깨끗한 단일 이미지로 Element 등록 권장.</div>
+            <div class="hint-text" style="margin-bottom:6px;">여러 명 선택하면 <b>같은 장면에 함께 등장</b>(<<<id>>> 다중 주입). Higgsfield에 새로 등록한 캐릭터는 🔄 새로고침 후 검색하면 바로 나옵니다.</div>
 
             <!-- Soul 2 캐릭터 선택 — hf-soul-2 모델 선택 시에만 표시 -->
             <div class="sub-title" id="lg-soul-section" style="display:none;">★ Soul 캐릭터 (Soul 2 전용) <span class="sub-tag">학습된 얼굴 · 복수 선택 시 교대 배정</span></div>
@@ -1143,6 +1135,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_20_lyrics_element_fix"></script>
+  <script type="module" src="app.js?v=v4_21_element_search"></script>
 </body>
 </html>
