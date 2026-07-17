@@ -5366,6 +5366,16 @@ async function regenerateFrame(idx) {
 // 로컬 ComfyUI 영상화 — 장면 이미지 한 장을 짧은 영상 클립(기본 ~3초)으로 변환
 // (node proxy.cjs 실행 중이어야 함 — comfyui-local-studio 스킬로 세팅한 로컬 ComfyUI를 자동 기동/호출)
 // ====================================================================
+// "16:9"/"9:16" 같은 비율 문자열 → ComfyUI에 넘길 (width,height). 긴 변을 base로 고정하고
+// 짧은 변은 8의 배수로 반올림(대부분의 diffusion/video 모델이 8의 배수를 요구).
+function aspectToDims(aspect, base = 640) {
+  const m = /^(\d+)\s*:\s*(\d+)$/.exec(String(aspect || '').trim());
+  const [rw, rh] = m ? [+m[1], +m[2]] : [1, 1];
+  const round8 = n => Math.max(8, Math.round(n / 8) * 8);
+  if (rw >= rh) return { width: base, height: round8(base * rh / rw) };
+  return { width: round8(base * rw / rh), height: base };
+}
+
 async function animateFrame(idx) {
   const frame = _lg.frames.find(f => f.idx === idx);
   if (!frame) { alert('먼저 이 장면의 이미지를 생성하세요.'); return; }
@@ -5378,10 +5388,12 @@ async function animateFrame(idx) {
     const scene = _lg.scenePlan?.scenes.find(s => s.idx === idx);
     const motionPrompt = (scene?.lyricSummary || frame.prompt || '').slice(0, 300)
       + ', subtle natural motion, gentle cinematic camera movement';
+    const aspect = document.getElementById('lg-aspect')?.value || '9:16';
+    const { width, height } = aspectToDims(aspect);
     const submitRes = await fetch(`${proxyBase}/animate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageDataUrl, prompt: motionPrompt, width: 640, height: 640, length: 49 }),
+      body: JSON.stringify({ imageDataUrl, prompt: motionPrompt, width, height, length: 49 }),
     });
     if (!submitRes.ok) throw new Error(`영상화 브릿지 응답 오류 (${submitRes.status}) — "node proxy.cjs" 실행 중인지 확인하세요`);
     const { jobId } = await submitRes.json();
@@ -5450,9 +5462,13 @@ function renderBgSyncList() {
     const row = document.createElement('div');
     row.className = 'bg-sync-row';
     const mmss = fmtTime(bg.time || 0);
+    // 영상 배경(kind:'video')은 <img>로 못 그린다 — object URL이 mp4라 깨진 이미지로만 보임.
+    const thumbHtml = bg.kind === 'video'
+      ? `<video class="bg-sync-thumb" src="${bg.url}" muted playsinline preload="metadata"></video>`
+      : `<img class="bg-sync-thumb" src="${bg.url}" />`;
     row.innerHTML =
-      `<img class="bg-sync-thumb" src="${bg.url}" />` +
-      `<div class="bg-sync-info"><div class="bg-sync-lyric">${(bg.lyric || bg.name || ('#' + (i+1))).slice(0,30)}</div>` +
+      thumbHtml +
+      `<div class="bg-sync-info"><div class="bg-sync-lyric">${bg.kind === 'video' ? '🎬 ' : ''}${(bg.lyric || bg.name || ('#' + (i+1))).slice(0,30)}</div>` +
       `<input class="bg-sync-time" data-bgidx="${i}" value="${mmss}" placeholder="mm:ss" /></div>`;
     wrap.appendChild(row);
   });
