@@ -278,6 +278,13 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  // Private Network Access(PNA): 앱이 GitHub Pages(공개 HTTPS 사이트)에서 이 로컬 서버로
+  // 요청을 보내는 건 크롬 입장에서 "공개 사이트 → 사설망(localhost)" 요청이라, 이 헤더가
+  // 없으면 프리플라이트에서 조용히 막아버린다 — curl은 이 검사를 안 하므로 성공하는데
+  // 실제 브라우저에서만 "Failed to fetch"가 나는 원인이 이것이었다.
+  if (req.headers['access-control-request-private-network']) {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  }
   if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
 
   if (req.url.startsWith('/hf')) return handleHfRoute(req, res);
