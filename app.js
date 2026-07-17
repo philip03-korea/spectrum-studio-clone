@@ -1430,15 +1430,18 @@ function canvasPointFromEvent(e) {
   };
 }
 // z가 큰 것(위에 그려진 것)부터 히트테스트 — 겹칠 때 위쪽 요소가 먼저 잡힌다.
+function editCorners(b) {
+  return [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]];
+}
 function hitTestEditEl(px, py) {
-  const hs = Math.max(10, canvas.width / 90);
+  const hs = Math.max(12, canvas.width / 80);
   const order = allOverlayKeys().sort((a, b) => overlayZ(b) - overlayZ(a));
   for (const key of order) {
     const b = _editBounds[key];
     if (!b) continue;
-    const hx0 = b.x + b.w - hs, hy0 = b.y + b.h - hs;
-    if (px >= hx0 - hs / 2 && px <= b.x + b.w + hs / 2 && py >= hy0 - hs / 2 && py <= b.y + b.h + hs / 2) {
-      return { key, mode: 'resize' };
+    // 네 모서리 어디든 핸들 근처면 크기조절
+    for (const [hx, hy] of editCorners(b)) {
+      if (Math.abs(px - hx) <= hs && Math.abs(py - hy) <= hs) return { key, mode: 'resize' };
     }
     if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
       return { key, mode: 'move' };
@@ -1456,47 +1459,57 @@ function snapshotEditState(key) {
     return { x: s.x ?? 50, y: s.y ?? 50, size: s.size ?? 100 };
   }
 }
+// 크기조절: 어느 모서리를 잡든 요소 중심 기준으로 "중심에서 마우스까지의 거리 비율"로 확대/축소.
+function resizeRatio(drag, dPX, dPY) {
+  const b0 = drag.origBounds;
+  if (!b0) return 1;
+  const cx = b0.x + b0.w / 2, cy = b0.y + b0.h / 2;
+  const startDist = Math.hypot(drag.startPX - cx, drag.startPY - cy) || 1;
+  const curDist = Math.hypot((drag.startPX + dPX) - cx, (drag.startPY + dPY) - cy);
+  return curDist / startDist;
+}
 function applyEditDrag(drag, dPX, dPY) {
   const { key, mode, orig } = drag;
   const W = canvas.width, H = canvas.height;
+  const ratio = mode === 'resize' ? resizeRatio(drag, dPX, dPY) : 1;
   if (key.startsWith('sticker:')) {
     const s = state.stickers[+key.split(':')[1]];
     if (!s) return;
-    const b = _editBounds[key] || { w: 100, h: 100 };
     if (mode === 'move') {
-      s.x = clamp(0, 100, orig.x + dPX / Math.max(1, W - b.w) * 100);
-      s.y = clamp(0, 100, orig.y + dPY / Math.max(1, H - b.h) * 100);
+      // s.x/s.y = 캔버스 대비 "중심" 위치(%) — 미디어 밖(음수/100 초과)으로도 이동 허용.
+      s.x = clamp(-50, 150, orig.x + dPX / W * 100);
+      s.y = clamp(-50, 150, orig.y + dPY / H * 100);
     } else {
-      s.size = clamp(20, 400, orig.size + dPX / (W / 1280));
+      s.size = clamp(20, 1200, orig.size * ratio);
     }
     if (typeof syncStickerEditToActive === 'function' && state.selectedStickerIdx === +key.split(':')[1]) syncStickerEditToActive();
     return;
   }
   if (key === 'logo') {
     if (mode === 'move') {
-      state.logoPos.x = clamp(0, 100, orig.x + dPX / Math.max(1, W - orig.w) * 100);
-      state.logoPos.y = clamp(0, 100, orig.y + dPY / Math.max(1, H - orig.h) * 100);
+      state.logoPos.x = clamp(-50, 150, orig.x + dPX / Math.max(1, W - orig.w) * 100);
+      state.logoPos.y = clamp(-50, 150, orig.y + dPY / Math.max(1, H - orig.h) * 100);
     } else {
-      state.logoPos.size = clamp(20, 300, orig.size + dPX / (W / 1280));
+      state.logoPos.size = clamp(20, 800, orig.size * ratio);
     }
   } else if (key === 'title') {
     if (mode === 'move') {
-      state.title.xFine = clamp(-20, 20, orig.xFine + dPX / W * 100);
-      state.title.yFine = clamp(-20, 20, orig.yFine + dPY / H * 100);
+      state.title.xFine = clamp(-50, 50, orig.xFine + dPX / W * 100);
+      state.title.yFine = clamp(-50, 50, orig.yFine + dPY / H * 100);
     } else {
-      state.title.size = clamp(20, 160, orig.size + dPX);
+      state.title.size = clamp(20, 300, orig.size * ratio);
     }
   } else if (key === 'lyrics') {
     if (mode === 'move') {
-      state.lyrics.y = clamp(0, 100, orig.y + dPY / H * 100);
+      state.lyrics.y = clamp(-20, 120, orig.y + dPY / H * 100);
     } else {
-      state.lyrics.size = clamp(20, 120, orig.size + dPX);
+      state.lyrics.size = clamp(20, 200, orig.size * ratio);
     }
   } else if (key === 'spectrum') {
     if (mode === 'move') {
-      state.spectrum.y = clamp(0, 100, orig.y + dPY / H * 100);
+      state.spectrum.y = clamp(-20, 120, orig.y + dPY / H * 100);
     } else {
-      state.spectrum.size = clamp(20, 100, orig.size + dPX / W * 150);
+      state.spectrum.size = clamp(20, 100, orig.size * ratio);
     }
   }
 }
@@ -1531,7 +1544,7 @@ function bindCanvasDragEdit() {
       if (typeof renderStickerToolList === 'function') renderStickerToolList();
       syncChromaEdit();
     }
-    _editDrag = { key: hit.key, mode: hit.mode, startPX: p.x, startPY: p.y, orig: snapshotEditState(hit.key) };
+    _editDrag = { key: hit.key, mode: hit.mode, startPX: p.x, startPY: p.y, orig: snapshotEditState(hit.key), origBounds: { ..._editBounds[hit.key] } };
     updateEditToolbar();
     e.preventDefault();
   });
@@ -1613,8 +1626,8 @@ async function pasteSticker() {
   const file = new File([src.blob], src.name || 'sticker', { type });
   await addSticker(file, src.layer || 'front');
   const ns = state.stickers[state.stickers.length - 1];
-  ns.x = clamp(0, 100, (src.x ?? 50) + 5);
-  ns.y = clamp(0, 100, (src.y ?? 50) + 5);
+  ns.x = clamp(-50, 150, (src.x ?? 50) + 5);
+  ns.y = clamp(-50, 150, (src.y ?? 50) + 5);
   ns.size = src.size; ns.opacity = src.opacity;
   if (src.chromaKey) ns.chromaKey = { ...src.chromaKey };
   renderStickerThumbs(); renderStickerToolList();
@@ -1913,8 +1926,9 @@ function drawOneSticker(c, W, H, time, i) {
   const size = (s.size ?? 100) * (W / 1280);
   const ratio = s.height / s.width;
   const w = size, h = size * ratio;
-  const x = (W - w) * ((s.x ?? 50) / 100);
-  const y = (H - h) * ((s.y ?? 50) / 100);
+  // s.x/s.y = 캔버스 대비 "중심" 위치(%). 크기가 커지거나 밖으로 나가도 일관되게 동작.
+  const x = W * ((s.x ?? 50) / 100) - w / 2;
+  const y = H * ((s.y ?? 50) / 100) - h / 2;
   _editBounds['sticker:' + i] = { x, y, w, h };
   c.save();
   c.globalAlpha = (s.opacity ?? 100) / 100;
@@ -2835,7 +2849,13 @@ function drawEditSelectionOverlay(c, W, H) {
   c.setLineDash([]);
   const hs = Math.max(10, W / 90); // 핸들 크기
   c.fillStyle = '#7c5cff';
-  c.fillRect(b.x + b.w - hs / 2, b.y + b.h - hs / 2, hs, hs);
+  c.strokeStyle = '#fff';
+  c.lineWidth = Math.max(1, W / 900);
+  // 네 모서리 모두에 크기조절 핸들 표시
+  for (const [hx, hy] of editCorners(b)) {
+    c.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+    c.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
+  }
   c.restore();
 }
 
