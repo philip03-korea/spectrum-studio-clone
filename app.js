@@ -4559,6 +4559,29 @@ function explainProxyError(msg) {
   return msg;
 }
 
+// 네트워크 순간 끊김(fetch 자체 실패) / 게이트웨이 일시 오류(502/503/504)는
+// 사용자가 매번 수동으로 "재생성"을 누르지 않도록 자동 재시도한다.
+// 인증/설정 오류(4xx 등)는 재시도해도 의미가 없으므로 그대로 던진다.
+async function fetchWithRetry(url, opts, tries = 3, waitMs = 4000) {
+  let lastNetErr = null;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, opts);
+    } catch (e) {
+      lastNetErr = e;
+      if (attempt < tries) { await new Promise(r => setTimeout(r, waitMs)); continue; }
+      throw e;
+    }
+    if ([502, 503, 504].includes(res.status) && attempt < tries) {
+      await new Promise(r => setTimeout(r, waitMs));
+      continue;
+    }
+    return res;
+  }
+  throw lastNetErr;
+}
+
 // GPT Image 2 (Higgsfield) — Cloudflare Worker 프록시 경유로 생성.
 //  • resolution=1k + quality=low = 약 0.5 크레딧/장 (유튜브 저용량용)
 //  • refDataUrls: 업로드한 캐릭터/스타일 이미지(data:URL) → 참조로 전달
@@ -4566,7 +4589,7 @@ async function generateImageViaHiggsfield(proxyUrl, prompt, aspect, refDataUrls,
   const base = proxyUrl.replace(/\/+$/, '');
   let res;
   try {
-    res = await fetch(`${base}/generate`, {
+    res = await fetchWithRetry(`${base}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4579,7 +4602,7 @@ async function generateImageViaHiggsfield(proxyUrl, prompt, aspect, refDataUrls,
       }),
     });
   } catch (e) {
-    throw new Error('프록시에 연결할 수 없습니다 — 프록시 URL과 배포 상태를 확인하세요');
+    throw new Error('프록시에 연결할 수 없습니다 — 프록시 URL과 배포 상태를 확인하세요 (네트워크 연결이 불안정하면 재생성 버튼으로 다시 시도해보세요)');
   }
   if (!res.ok) {
     let msg = `프록시 오류 ${res.status}`;
@@ -4595,13 +4618,13 @@ async function generateImageViaSoul2(proxyUrl, soulId, prompt, aspect) {
   const base = proxyUrl.replace(/\/+$/, '');
   let res;
   try {
-    res = await fetch(`${base}/generate`, {
+    res = await fetchWithRetry(`${base}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ engine: 'soul_2', soul_id: soulId, prompt, aspect_ratio: aspect, negative_prompt: SOUL_NEG_PROMPT, enhance_prompt: false }),
     });
   } catch (e) {
-    throw new Error('Soul 2 프록시에 연결할 수 없습니다 — 프록시 URL과 배포 상태를 확인하세요');
+    throw new Error('Soul 2 프록시에 연결할 수 없습니다 — 프록시 URL과 배포 상태를 확인하세요 (네트워크 연결이 불안정하면 재생성 버튼으로 다시 시도해보세요)');
   }
   if (!res.ok) {
     let msg = `Soul 2 프록시 오류 ${res.status}`;
