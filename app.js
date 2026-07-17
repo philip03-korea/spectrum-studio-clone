@@ -1387,10 +1387,15 @@ function canvasPointFromEvent(e) {
     y: (e.clientY - rect.top) * (canvas.height / rect.height),
   };
 }
-// 화면상 z-order 기준(위→아래): 로고 > 가사 > 타이틀 > 스펙트럼. 먼저 맞는 요소를 선택.
+// 화면상 z-order 기준(위→아래): front 스티커 > 로고 > 가사 > 타이틀 > 스펙트럼 > back 스티커.
+// 먼저 맞는 요소를 선택. 스티커는 나중에 그려진 것(배열 뒤쪽)이 위에 있으므로 역순 탐색.
 function hitTestEditEl(px, py) {
   const hs = Math.max(10, canvas.width / 90);
-  for (const key of ['logo', 'lyrics', 'title', 'spectrum']) {
+  const stickerKeys = (state.stickers || []).map((s, i) => 'sticker:' + i);
+  const frontStickers = stickerKeys.filter(k => (state.stickers[+k.split(':')[1]].layer || 'front') === 'front').reverse();
+  const backStickers = stickerKeys.filter(k => (state.stickers[+k.split(':')[1]].layer || 'front') === 'back').reverse();
+  const order = [...frontStickers, 'logo', 'lyrics', 'title', 'spectrum', ...backStickers];
+  for (const key of order) {
     const b = _editBounds[key];
     if (!b) continue;
     const hx0 = b.x + b.w - hs, hy0 = b.y + b.h - hs;
@@ -1408,10 +1413,27 @@ function snapshotEditState(key) {
   if (key === 'title') return { xFine: state.title.xFine || 0, yFine: state.title.yFine || 0, size: state.title.size };
   if (key === 'lyrics') return { y: state.lyrics.y, size: state.lyrics.size };
   if (key === 'spectrum') return { y: state.spectrum.y, size: state.spectrum.size };
+  if (key.startsWith('sticker:')) {
+    const s = state.stickers[+key.split(':')[1]];
+    return { x: s.x ?? 50, y: s.y ?? 50, size: s.size ?? 100 };
+  }
 }
 function applyEditDrag(drag, dPX, dPY) {
   const { key, mode, orig } = drag;
   const W = canvas.width, H = canvas.height;
+  if (key.startsWith('sticker:')) {
+    const s = state.stickers[+key.split(':')[1]];
+    if (!s) return;
+    const b = _editBounds[key] || { w: 100, h: 100 };
+    if (mode === 'move') {
+      s.x = clamp(0, 100, orig.x + dPX / Math.max(1, W - b.w) * 100);
+      s.y = clamp(0, 100, orig.y + dPY / Math.max(1, H - b.h) * 100);
+    } else {
+      s.size = clamp(20, 400, orig.size + dPX / (W / 1280));
+    }
+    if (typeof syncStickerEditToActive === 'function' && state.selectedStickerIdx === +key.split(':')[1]) syncStickerEditToActive();
+    return;
+  }
   if (key === 'logo') {
     if (mode === 'move') {
       state.logoPos.x = clamp(0, 100, orig.x + dPX / Math.max(1, W - orig.w) * 100);
@@ -1446,6 +1468,11 @@ function bindCanvasDragEdit() {
     const hit = hitTestEditEl(p.x, p.y);
     _selectedEditEl = hit ? hit.key : null;
     if (!hit) return;
+    // 스티커를 클릭하면 스티커 편집 패널도 해당 스티커를 선택 상태로.
+    if (hit.key.startsWith('sticker:')) {
+      state.selectedStickerIdx = +hit.key.split(':')[1];
+      if (typeof renderStickerToolList === 'function') renderStickerToolList();
+    }
     _editDrag = { key: hit.key, mode: hit.mode, startPX: p.x, startPY: p.y, orig: snapshotEditState(hit.key) };
     e.preventDefault();
   });
@@ -1570,18 +1597,21 @@ function drawBackgrounds(c, W, H, time) {
 // ====== 스티커 (layer: 'back'=배경 바로 위/텍스트류보다 아래, 'front'=최상단 — 기본) ======
 function drawStickers(c, W, H, time, layer = 'front') {
   if (!state.stickers || !state.stickers.length) return;
-  for (const s of state.stickers) {
-    if (!s.el) continue;
-    if ((s.layer || 'front') !== layer) continue;
+  state.stickers.forEach((s, i) => {
+    if (!s.el) return;
+    if ((s.layer || 'front') !== layer) return;
     const size = (s.size ?? 100) * (W / 1280);
     const ratio = s.height / s.width;
     const w = size, h = size * ratio;
     const x = (W - w) * ((s.x ?? 50) / 100);
     const y = (H - h) * ((s.y ?? 50) / 100);
+    _editBounds['sticker:' + i] = { x, y, w, h };
     c.globalAlpha = (s.opacity ?? 100) / 100;
+    // 영상 스티커: <video> 요소는 재생 중이어야 프레임이 그려진다.
+    if (s.kind === 'video' && s.el.paused) { s.el.play().catch(()=>{}); }
     c.drawImage(s.el, x, y, w, h);
     c.globalAlpha = 1;
-  }
+  });
 }
 
 // vfx state (visualizer 효과: 글로우펄스/비트펀치/그라디언트스윕/컬러사이클)
@@ -2474,6 +2504,10 @@ function drawScene(c, W, H, freqData, time) {
 // renderInProgress(실제 MP4 렌더링 중)일 때는 절대 그리지 않음 — 결과 영상에 안 들어가야 함.
 function drawEditSelectionOverlay(c, W, H) {
   if (renderInProgress || !_selectedEditEl) return;
+  // 선택된 스티커가 삭제돼 인덱스가 사라졌으면 선택 해제(엉뚱한 상자 방지).
+  if (_selectedEditEl.startsWith('sticker:') && !state.stickers[+_selectedEditEl.split(':')[1]]) {
+    _selectedEditEl = null; return;
+  }
   const b = _editBounds[_selectedEditEl];
   if (!b) return;
   c.save();
@@ -3729,9 +3763,15 @@ async function addSticker(file, layer = 'front') {
 }
 // 이미 만들어진 mp4 Blob(ComfyUI 영상화 결과)을 "배경 앞" 오버레이 스티커로 바로 추가.
 async function addVideoBlobAsOverlaySticker(blob, name, layer = 'back') {
+  if (state.stickers.length >= 5) { alert('스티커는 최대 5개까지입니다. 기존 스티커를 지우고 다시 시도하세요.'); return; }
   const file = new File([blob], name, { type: 'video/mp4' });
   await addSticker(file, layer);
   renderStickerThumbs();
+  renderStickerToolList();
+  // 새로고침 후에도 남도록 IndexedDB에 파일 저장(위치/레이어는 세션 한정 — 기존 스티커와 동일한 한계).
+  const stored = await dbGet('stickers') || [];
+  stored.push(file);
+  await dbSet('stickers', stored);
   debouncedSave();
 }
 // 스티커 썸네일 <img>/<video> 생성 — 영상 스티커를 <img>로 그리면 깨진 아이콘만 보인다.
@@ -5655,9 +5695,11 @@ function parseMmss(s) {
   return isNaN(n) ? null : n;
 }
 
-// 비주얼 편집 → 배경 조정 패널의 "이미지 → 영상 변환" — Stage1과 별개로, 지금 편집 중인
-// 곡의 배경 탭에서 바로 이미지를 골라 로컬 ComfyUI로 영상화하고, 배경/오버레이 중 선택해 넣는다.
-let _img2vidState = null; // { file, dataUrl, videoBlob }
+// 비주얼 편집 → 배경 조정 패널의 "이미지 → 영상 변환" — 지금 편집 중인 곡의 배경 탭에서
+//  · 이미지 업로드 → 로컬 ComfyUI로 영상 생성  또는
+//  · 다른 곳에서 만든 영상 파일 직접 업로드 → 바로 사용
+// 후, 배경/오버레이 중 골라 넣는다.
+let _img2vidState = null; // { name, dataUrl?, videoBlob }
 function bindImg2Vid() {
   const fileInput = document.getElementById('file-img2vid');
   const preview = document.getElementById('img2vid-preview');
@@ -5670,23 +5712,42 @@ function bindImg2Vid() {
   const useOverlayBtn = document.getElementById('img2vid-use-overlay');
   if (!fileInput) return;
 
+  const showResult = (blob) => {
+    _img2vidState.videoBlob = blob;
+    if (resultVideo.src) URL.revokeObjectURL(resultVideo.src);
+    resultVideo.src = URL.createObjectURL(blob);
+    resultBox.classList.remove('hidden');
+  };
+
   wireDrop('drop-img2vid', 'file-img2vid', async (files) => {
     const file = files[0];
-    if (!file || !file.type.startsWith('image/')) return;
-    const dataUrl = await fileToDataURL(file);
-    _img2vidState = { file, dataUrl, videoBlob: null };
-    thumb.src = dataUrl;
-    preview.classList.remove('hidden');
+    if (!file) return;
+    preview.classList.add('hidden');
     resultBox.classList.add('hidden');
     statusEl.textContent = '';
+    const baseName = (file.name || 'video').replace(/\.[^.]+$/, '');
+    if (file.type.startsWith('video/')) {
+      // 이미 만들어진 영상 — 생성 단계 건너뛰고 바로 "추가" 버튼 노출
+      _img2vidState = { name: baseName, dataUrl: null, videoBlob: null };
+      showResult(file);
+    } else if (file.type.startsWith('image/')) {
+      const dataUrl = await fileToDataURL(file);
+      _img2vidState = { name: baseName, dataUrl, videoBlob: null };
+      thumb.src = dataUrl;
+      preview.classList.remove('hidden');
+    }
   });
 
   genBtn?.addEventListener('click', async () => {
-    if (!_img2vidState) return;
+    if (!_img2vidState?.dataUrl) return;
     genBtn.disabled = true;
     resultBox.classList.add('hidden');
     const promptEl = document.getElementById('img2vid-prompt');
-    const prompt = (promptEl?.value || '').trim() || 'subtle natural motion, gentle cinematic camera movement';
+    let prompt = (promptEl?.value || '').trim() || 'subtle natural motion, gentle cinematic camera movement';
+    const useBg = document.getElementById('img2vid-usebg')?.checked !== false;
+    // "배경 이미지 없이" 선택 시: 입력 이미지의 배경을 빼고 인물/소재만 움직이도록 프롬프트로 유도
+    // (Wan2.2 I2V는 항상 입력 이미지가 필요해 완전한 text2video는 아니지만, 배경 제거를 지시).
+    if (!useBg) prompt += ', plain solid neutral background, isolated subject, no scenery, no background elements';
     try {
       const [w, h] = getCanvasSize();
       const statusLabel = { starting: '⏳ ComfyUI 준비 중…', queued: '⏳ 대기열…', running: '⏳ 생성 중…(수 분~수십 분)' };
@@ -5694,10 +5755,8 @@ function bindImg2Vid() {
       const videoBlob = await runComfyAnimate(_img2vidState.dataUrl, prompt, w, h, st => {
         statusEl.textContent = statusLabel[st] || `상태: ${st}`;
       });
-      _img2vidState.videoBlob = videoBlob;
-      resultVideo.src = URL.createObjectURL(videoBlob);
+      showResult(videoBlob);
       statusEl.textContent = '✅ 완료';
-      resultBox.classList.remove('hidden');
     } catch (e) {
       statusEl.textContent = '❌ 실패: ' + e.message;
     } finally {
@@ -5707,15 +5766,15 @@ function bindImg2Vid() {
 
   useBgBtn?.addEventListener('click', async () => {
     if (!_img2vidState?.videoBlob) return;
-    const file = new File([_img2vidState.videoBlob], (_img2vidState.file.name || 'video').replace(/\.[^.]+$/, '') + '.mp4', { type: 'video/mp4' });
+    const file = new File([_img2vidState.videoBlob], (_img2vidState.name || 'video') + '.mp4', { type: 'video/mp4' });
     await handleBackgrounds([file]);
     renderBgSyncList();
     alert('배경으로 추가했습니다.');
   });
   useOverlayBtn?.addEventListener('click', async () => {
     if (!_img2vidState?.videoBlob) return;
-    await addVideoBlobAsOverlaySticker(_img2vidState.videoBlob, (_img2vidState.file.name || 'video').replace(/\.[^.]+$/, '') + '.mp4', 'back');
-    alert('배경 앞 오버레이로 추가했습니다. "스티커" 탭에서 위치/크기를 조정할 수 있습니다.');
+    await addVideoBlobAsOverlaySticker(_img2vidState.videoBlob, (_img2vidState.name || 'video') + '.mp4', 'back');
+    alert('배경 앞 오버레이로 추가했습니다.\n프리뷰에서 영상을 클릭하면 위치 이동/크기 조절이 되고, "스티커" 탭에서도 조정할 수 있습니다.');
   });
 }
 

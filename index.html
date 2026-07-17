@@ -756,24 +756,30 @@
               <div class="adjust-divider">🎬 이미지 → 영상 변환 (로컬 ComfyUI)</div>
               <div class="bg-img2vid">
                 <div class="drop-area drop-mini" id="drop-img2vid">
-                  <input type="file" id="file-img2vid" accept="image/*" hidden />
+                  <input type="file" id="file-img2vid" accept="image/*,video/*" hidden />
                   <label for="file-img2vid" class="drop-label">
-                    <div class="drop-icon">🖼️</div>
-                    <div class="drop-text">변환할 이미지 선택</div>
+                    <div class="drop-icon">🖼️🎬</div>
+                    <div class="drop-text">이미지 또는 영상 선택</div>
+                    <div class="drop-hint">이미지 → 영상 생성 · 영상 → 바로 사용</div>
                   </label>
                 </div>
+                <!-- 이미지 업로드 시: 영상 생성 옵션 -->
                 <div class="bg-img2vid-preview hidden" id="img2vid-preview">
                   <img id="img2vid-thumb" alt="" />
                   <input type="text" class="text-input" id="img2vid-prompt" placeholder="움직임 설명 (예: 노래하는 여자가수, 부드러운 카메라 이동)" />
+                  <label class="check-row">
+                    <input type="checkbox" id="img2vid-usebg" checked /> 이 이미지를 바탕으로 생성 (끄면 프롬프트만으로 생성)
+                  </label>
                   <button class="btn btn-ghost" id="img2vid-generate">🎬 영상 생성</button>
                   <div class="hint-text" id="img2vid-status"></div>
-                  <div class="bg-img2vid-result hidden" id="img2vid-result">
-                    <video id="img2vid-result-video" muted loop autoplay playsinline></video>
-                    <div class="hint-text">생성된 영상을 배경 자체로 쓸지, 배경 위(전경)에 올릴지 선택하세요.</div>
-                    <div class="viz-grid grid2">
-                      <button class="btn btn-ghost" id="img2vid-use-bg">배경으로 추가</button>
-                      <button class="btn btn-ghost" id="img2vid-use-overlay">배경 앞에 오버레이로 추가</button>
-                    </div>
+                </div>
+                <!-- 결과(생성됨 또는 직접 업로드한 영상): 배경/오버레이로 추가 -->
+                <div class="bg-img2vid-result hidden" id="img2vid-result">
+                  <video id="img2vid-result-video" muted loop autoplay playsinline></video>
+                  <div class="hint-text">이 영상을 배경 자체로 쓸지, 배경 위(전경)에 올릴지 선택하세요.</div>
+                  <div class="viz-grid grid2">
+                    <button class="btn btn-ghost" id="img2vid-use-bg">배경으로 추가</button>
+                    <button class="btn btn-ghost" id="img2vid-use-overlay">배경 앞에 오버레이로 추가</button>
                   </div>
                 </div>
               </div>
@@ -1165,6 +1171,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_33_overlay_img2vid_dragedit"></script>
+  <script type="module" src="app.js?v=v4_34_video_upload_sticker_drag"></script>
 </body>
 </html>
