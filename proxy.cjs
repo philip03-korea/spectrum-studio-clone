@@ -55,7 +55,7 @@ async function comfyIsUp() {
 }
 
 function startComfyServer() {
-  console.log('[proxy] ComfyUI가 꺼져 있어 백그라운드로 기동합니다 (최초 1회, 15~30초 소요)…');
+  console.log('[proxy] ComfyUI가 꺼져 있어 백그라운드로 기동합니다 (최초 1회, CUDA 초기화 때문에 이 PC에서는 5분 이상 걸릴 수 있음)…');
   const logDir = path.join(__dirname, 'proxy');
   fs.mkdirSync(logDir, { recursive: true });
   const out = fs.openSync(path.join(logDir, 'comfy-stdout.log'), 'a');
@@ -64,6 +64,9 @@ function startComfyServer() {
     cwd: COMFY_ROOT,
     detached: true,
     stdio: ['ignore', out, err],
+    // PYTHONUNBUFFERED: 파일로 리다이렉트하면 파이썬이 출력을 통째로 버퍼링해서
+    // 실제로는 진행 중인데 로그가 몇 분씩 멈춘 것처럼 보인다 — 실시간 진단을 위해 끔.
+    env: { ...process.env, PYTHONUNBUFFERED: '1' },
   });
   child.on('error', e => console.error('[proxy] ComfyUI 기동 실패:', e.message));
   child.unref();
@@ -72,12 +75,20 @@ function startComfyServer() {
 async function ensureComfyRunning() {
   if (await comfyIsUp()) return;
   startComfyServer();
-  const deadline = Date.now() + 90_000;
+  // 최초 콜드 스타트는 CUDA 커널/comfy_kitchen 백엔드 초기화 때문에 이 PC(RTX 2070)에서
+  // 5분 넘게 걸리는 걸 실측함 — 90초는 항상 실패하는 값이라 8분으로 늘림.
+  // (ComfyUI가 이미 떠 있으면 위 comfyIsUp() 체크에서 즉시 반환되므로 재요청은 빠르다.)
+  const deadline = Date.now() + 480_000;
+  let lastLog = 0;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 2000));
     if (await comfyIsUp()) return;
+    if (Date.now() - lastLog > 20_000) {
+      console.log(`[proxy] ComfyUI 기동 대기 중… (${Math.round((Date.now() - (deadline - 480_000)) / 1000)}초 경과)`);
+      lastLog = Date.now();
+    }
   }
-  throw new Error('ComfyUI가 90초 내에 기동되지 않았습니다 (D:\\ComfyUI 설치를 확인하세요)');
+  throw new Error('ComfyUI가 8분 내에 기동되지 않았습니다 (D:\\ComfyUI 설치를 확인하세요)');
 }
 
 function saveInputImage(dataUrl) {
