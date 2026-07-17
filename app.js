@@ -437,7 +437,15 @@ function goToStep(n) {
 qsa('.step, [data-goto], .pill').forEach(el => {
   el.addEventListener('click', () => {
     const target = el.dataset.step || el.dataset.goto;
-    if (target) goToStep(target);
+    if (!target) return;
+    // 가사 이미지 생성(Step1)에서 프레임을 만들고 "→ 배경에 추가"를 누르지 않은 채
+    // 바로 다음 단계로 넘어가면 이미지가 배경에 반영되지 않아 "생성은 됐는데 안 보인다"는
+    // 혼란이 생긴다 — 다른 단계로 이동할 때 아직 반영 안 된 프레임이 있으면 자동으로 추가한다.
+    if (target !== '1' && typeof _lg !== 'undefined' && _lg.frames && _lg.frames.length && !_lg.bgAdded) {
+      addFramesToBackgrounds().finally(() => goToStep(target));
+    } else {
+      goToStep(target);
+    }
   });
 });
 
@@ -4638,6 +4646,7 @@ const _lg = {
   projectId: '',             // 고유 ID
   selectedCharacters: [],    // 실시간 검색으로 선택한 캐릭터 [{ id, name, thumb, kind:'element'|'soul' }]
   elementsCatalog: null,     // /characters 응답 캐시 [{ id, name, category, description, thumb, kind }]
+  bgAdded: false,             // addFramesToBackgrounds() 실행 여부 — "→ 배경에 추가" 누르는 걸 잊고 바로 다음 단계로 넘어가는 걸 방지
 };
 
 function bindLyricImageGen() {
@@ -5402,6 +5411,7 @@ async function addFramesToBackgrounds() {
   const sc = document.getElementById('slideshow-sync'); if (sc) sc.checked = true;
   renderBgSyncList();
   debouncedSave();
+  _lg.bgAdded = true;
   const videoCount = _lg.frames.filter(f => f.videoBlob).length;
   alert(`${_lg.frames.length}개 프레임이 배경에 추가됐습니다${videoCount ? ` (그중 ${videoCount}개는 영상 클립)` : ''}.\n"가사 타이밍 동기화"가 켜져서 각 장면이 가사 시간에 맞춰 전환됩니다.\n(비주얼 편집 → 배경 탭 아래 "가사↔이미지 싱크"에서 시간 직접 조정 가능)`);
 }
