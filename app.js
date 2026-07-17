@@ -1373,6 +1373,91 @@ function updateTimeline() {
 // ====================================================================
 const canvas = $('preview-canvas');
 const ctx = canvas.getContext('2d');
+// 캔버스 직접 드래그 편집(로고/타이틀/가사/스펙트럼): 매 프레임 draw*()가 자신의 화면상
+// 위치(x,y,w,h)를 여기 채워 넣고, 마우스 드래그가 이를 히트테스트/이동/크기조절에 쓴다.
+const _editBounds = {};
+let _selectedEditEl = null;   // 'logo'|'title'|'lyrics'|'spectrum'|null
+let _editDrag = null;         // { key, mode:'move'|'resize', startPX, startPY, orig }
+const clamp = (lo, hi, v) => Math.min(hi, Math.max(lo, v));
+
+function canvasPointFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (canvas.width / rect.width),
+    y: (e.clientY - rect.top) * (canvas.height / rect.height),
+  };
+}
+// 화면상 z-order 기준(위→아래): 로고 > 가사 > 타이틀 > 스펙트럼. 먼저 맞는 요소를 선택.
+function hitTestEditEl(px, py) {
+  const hs = Math.max(10, canvas.width / 90);
+  for (const key of ['logo', 'lyrics', 'title', 'spectrum']) {
+    const b = _editBounds[key];
+    if (!b) continue;
+    const hx0 = b.x + b.w - hs, hy0 = b.y + b.h - hs;
+    if (px >= hx0 - hs / 2 && px <= b.x + b.w + hs / 2 && py >= hy0 - hs / 2 && py <= b.y + b.h + hs / 2) {
+      return { key, mode: 'resize' };
+    }
+    if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+      return { key, mode: 'move' };
+    }
+  }
+  return null;
+}
+function snapshotEditState(key) {
+  if (key === 'logo') return { x: state.logoPos.x, y: state.logoPos.y, size: state.logoPos.size, w: _editBounds.logo.w, h: _editBounds.logo.h };
+  if (key === 'title') return { xFine: state.title.xFine || 0, yFine: state.title.yFine || 0, size: state.title.size };
+  if (key === 'lyrics') return { y: state.lyrics.y, size: state.lyrics.size };
+  if (key === 'spectrum') return { y: state.spectrum.y, size: state.spectrum.size };
+}
+function applyEditDrag(drag, dPX, dPY) {
+  const { key, mode, orig } = drag;
+  const W = canvas.width, H = canvas.height;
+  if (key === 'logo') {
+    if (mode === 'move') {
+      state.logoPos.x = clamp(0, 100, orig.x + dPX / Math.max(1, W - orig.w) * 100);
+      state.logoPos.y = clamp(0, 100, orig.y + dPY / Math.max(1, H - orig.h) * 100);
+    } else {
+      state.logoPos.size = clamp(20, 300, orig.size + dPX / (W / 1280));
+    }
+  } else if (key === 'title') {
+    if (mode === 'move') {
+      state.title.xFine = clamp(-20, 20, orig.xFine + dPX / W * 100);
+      state.title.yFine = clamp(-20, 20, orig.yFine + dPY / H * 100);
+    } else {
+      state.title.size = clamp(20, 160, orig.size + dPX);
+    }
+  } else if (key === 'lyrics') {
+    if (mode === 'move') {
+      state.lyrics.y = clamp(0, 100, orig.y + dPY / H * 100);
+    } else {
+      state.lyrics.size = clamp(20, 120, orig.size + dPX);
+    }
+  } else if (key === 'spectrum') {
+    if (mode === 'move') {
+      state.spectrum.y = clamp(0, 100, orig.y + dPY / H * 100);
+    } else {
+      state.spectrum.size = clamp(20, 100, orig.size + dPX / W * 150);
+    }
+  }
+}
+function bindCanvasDragEdit() {
+  canvas.addEventListener('mousedown', (e) => {
+    const p = canvasPointFromEvent(e);
+    const hit = hitTestEditEl(p.x, p.y);
+    _selectedEditEl = hit ? hit.key : null;
+    if (!hit) return;
+    _editDrag = { key: hit.key, mode: hit.mode, startPX: p.x, startPY: p.y, orig: snapshotEditState(hit.key) };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!_editDrag) return;
+    const p = canvasPointFromEvent(e);
+    applyEditDrag(_editDrag, p.x - _editDrag.startPX, p.y - _editDrag.startPY);
+  });
+  window.addEventListener('mouseup', () => {
+    if (_editDrag) { _editDrag = null; debouncedSave(); }
+  });
+}
 
 function getCanvasSize() {
   const [w, h] = state.encoding.resolution.split('x').map(Number);
@@ -1482,11 +1567,12 @@ function drawBackgrounds(c, W, H, time) {
   }
 }
 
-// ====== 스티커 ======
-function drawStickers(c, W, H, time) {
+// ====== 스티커 (layer: 'back'=배경 바로 위/텍스트류보다 아래, 'front'=최상단 — 기본) ======
+function drawStickers(c, W, H, time, layer = 'front') {
   if (!state.stickers || !state.stickers.length) return;
   for (const s of state.stickers) {
     if (!s.el) continue;
+    if ((s.layer || 'front') !== layer) continue;
     const size = (s.size ?? 100) * (W / 1280);
     const ratio = s.height / s.width;
     const w = size, h = size * ratio;
@@ -1634,6 +1720,8 @@ function drawSpectrum(c, W, H, data) {
   // Don't early-return on missing data — still draw baseline so user sees layout
   const sizePct = state.spectrum.size / 100;
   const cy = H * (state.spectrum.y / 100);
+  // 편집용 대략적 히트박스 — 시각화 종류별 정확한 형태 대신 넉넉한 대역으로 잡는다.
+  _editBounds.spectrum = { x: W * 0.05, y: cy - H * 0.15 * sizePct, w: W * 0.9, h: H * 0.3 * sizePct };
   switch (state.viz) {
     case 'none':       return;
     case 'bars':       return drawBars(c, data, W, H, sizePct, cy);
@@ -1964,6 +2052,13 @@ function drawTitle(c, W, H, data) {
   const color = state.title.color || '#fff';
   const styleKey = state.title.style || 'bold';
   const deco = state.title.deco || 'none';
+  c.save(); c.font = `bold ${size}px ${fam}`;
+  const _tw = c.measureText(text).width, _th = size * 1.3;
+  c.restore();
+  _editBounds.title = {
+    x: pos.align === 'left' ? x : (pos.align === 'right' ? x - _tw : x - _tw / 2),
+    y: y - _th / 2, w: _tw, h: _th,
+  };
   c.save();
   c.textAlign = pos.align; c.textBaseline = 'middle';
   switch (styleKey) {
@@ -2173,6 +2268,8 @@ function drawLyrics(c, W, H, time) {
   const mode = state.lyrics.mode || 'three';
   const cy = H * (state.lyrics.y / 100);
   const baseSize = state.lyrics.size;
+  // 편집용 대략적 히트박스(정확한 줄바꿈/모드별 폭 계산 대신 넉넉한 영역으로 잡기 — 드래그 잡기 쉽게)
+  _editBounds.lyrics = { x: W * 0.05, y: cy - baseSize * 2.2, w: W * 0.9, h: baseSize * 4.4 };
   const gap = (state.lyrics.gap || 150) / 100;
   const lh = baseSize * gap;
   const color = state.lyrics.color || '#ffffff';
@@ -2299,6 +2396,7 @@ function drawLogo(c, W, H) {
   const ratio = state.logo.height / state.logo.width;
   const w = size, h = size * ratio;
   const x = (W - w) * (state.logoPos.x / 100), y = (H - h) * (state.logoPos.y / 100);
+  _editBounds.logo = { x, y, w, h };
   c.save();
   c.globalAlpha = state.logoPos.opacity / 100;
   if (state.logoPos.shadow) {
@@ -2356,17 +2454,38 @@ function drawScene(c, W, H, freqData, time) {
     c.translate(-W/2, -H/2);
   }
   drawBackgrounds(c, W, H, time);
+  drawStickers(c, W, H, time, 'back');
   applyVfxOverlay(c, W, H);
   drawSpectrum(c, W, H, freqData);
   drawTitle(c, W, H, freqData);
   drawLyrics(c, W, H, time);
   drawLogo(c, W, H);
-  drawStickers(c, W, H, time);
+  drawStickers(c, W, H, time, 'front');
+  // 편집 선택 테두리는 위 요소들과 같은 변형(비트펄스/줌펄스) 안에서 그려야 위치가 안 어긋난다.
+  drawEditSelectionOverlay(c, W, H);
   c.restore();
   // 파티클 / 포스트프로세싱은 변형 밖에서
   drawParticles(c, W, H, time, freqData);
   drawPostProcessing(c, W, H, time, freqData);
   drawFrame(c, W, H);
+}
+
+// 선택된 요소(로고/타이틀/가사/스펙트럼)에 편집용 테두리+크기조절 핸들을 그린다.
+// renderInProgress(실제 MP4 렌더링 중)일 때는 절대 그리지 않음 — 결과 영상에 안 들어가야 함.
+function drawEditSelectionOverlay(c, W, H) {
+  if (renderInProgress || !_selectedEditEl) return;
+  const b = _editBounds[_selectedEditEl];
+  if (!b) return;
+  c.save();
+  c.strokeStyle = '#7c5cff';
+  c.lineWidth = Math.max(1.5, W / 640);
+  c.setLineDash([6, 4]);
+  c.strokeRect(b.x, b.y, b.w, b.h);
+  c.setLineDash([]);
+  const hs = Math.max(10, W / 90); // 핸들 크기
+  c.fillStyle = '#7c5cff';
+  c.fillRect(b.x + b.w - hs / 2, b.y + b.h - hs / 2, hs, hs);
+  c.restore();
 }
 
 // ===== 이펙트: 포스트 프로세싱 + 파티클 =====
@@ -3573,7 +3692,7 @@ function renderAnimList() {
 // 스티커
 // ====================================================================
 async function handleStickers(files, opts = {}) {
-  const accepted = files.filter(f => f.type.startsWith('image/'));
+  const accepted = files.filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
   if (!accepted.length) return;
   const remaining = 5 - state.stickers.length;
   const toAdd = accepted.slice(0, Math.max(0, remaining));
@@ -3586,19 +3705,44 @@ async function handleStickers(files, opts = {}) {
   }
   debouncedSave();
 }
-async function addSticker(file) {
+// layer: 'front'(기본, 로고/자막보다 위) | 'back'(배경 바로 위, 텍스트류보다 아래) — "배경 앞" 오버레이용.
+async function addSticker(file, layer = 'front') {
+  const isVideo = file.type.startsWith('video/');
   const url = URL.createObjectURL(file);
   return new Promise(res => {
-    const img = new Image(); img.src = url;
-    img.addEventListener('load', () => {
+    const push = (w, h, el) => {
       state.stickers.push({
-        name: file.name, url, el: img,
-        width: img.naturalWidth, height: img.naturalHeight,
-        x: 70, y: 70, size: 80, opacity: 100,
+        name: file.name, url, el, kind: isVideo ? 'video' : 'image',
+        width: w, height: h, x: 70, y: 70, size: 80, opacity: 100, layer,
       });
       res();
-    }, { once: true });
+    };
+    if (isVideo) {
+      const v = document.createElement('video');
+      v.muted = true; v.loop = true; v.playsInline = true; v.src = url;
+      v.addEventListener('loadedmetadata', () => { v.play().catch(()=>{}); push(v.videoWidth, v.videoHeight, v); }, { once: true });
+    } else {
+      const img = new Image(); img.src = url;
+      img.addEventListener('load', () => push(img.naturalWidth, img.naturalHeight, img), { once: true });
+    }
   });
+}
+// 이미 만들어진 mp4 Blob(ComfyUI 영상화 결과)을 "배경 앞" 오버레이 스티커로 바로 추가.
+async function addVideoBlobAsOverlaySticker(blob, name, layer = 'back') {
+  const file = new File([blob], name, { type: 'video/mp4' });
+  await addSticker(file, layer);
+  renderStickerThumbs();
+  debouncedSave();
+}
+// 스티커 썸네일 <img>/<video> 생성 — 영상 스티커를 <img>로 그리면 깨진 아이콘만 보인다.
+function makeStickerThumbEl(s) {
+  if (s.kind === 'video') {
+    const v = document.createElement('video');
+    v.src = s.url; v.muted = true; v.playsInline = true; v.preload = 'metadata';
+    return v;
+  }
+  const im = document.createElement('img'); im.src = s.url;
+  return im;
 }
 function renderStickerThumbs() {
   const wrap = $('sticker-thumbs');
@@ -3612,7 +3756,7 @@ function renderStickerThumbs() {
     const t = document.createElement('div');
     t.className = 'bg-thumb';
     t.title = s.name;
-    const im = document.createElement('img'); im.src = s.url; t.appendChild(im);
+    t.appendChild(makeStickerThumbEl(s));
     const x = document.createElement('button');
     x.className = 'bg-thumb-x'; x.textContent = '×';
     x.addEventListener('click', async (e) => {
@@ -3649,7 +3793,7 @@ function renderStickerToolList() {
     const it = document.createElement('div');
     it.className = 'sticker-list-item' + (i === state.selectedStickerIdx ? ' active' : '');
     it.title = s.name;
-    const im = document.createElement('img'); im.src = s.url; it.appendChild(im);
+    it.appendChild(makeStickerThumbEl(s));
     it.addEventListener('click', () => {
       state.selectedStickerIdx = i;
       renderStickerToolList();
@@ -3672,6 +3816,8 @@ function syncStickerEditToActive() {
   set('sticker-y', s.y, v => v + '%');
   set('sticker-size', s.size, v => v + 'px');
   set('sticker-opacity', s.opacity, v => v + '%');
+  const layer = s.layer || 'front';
+  qsa('[data-sticker-layer]').forEach(b => b.classList.toggle('active', b.dataset.stickerLayer === layer));
 }
 function bindStickerEdit() {
   const bind = (id, key, fmt) => {
@@ -3688,6 +3834,15 @@ function bindStickerEdit() {
   bind('sticker-y', 'y', v => v + '%');
   bind('sticker-size', 'size', v => v + 'px');
   bind('sticker-opacity', 'opacity', v => v + '%');
+  qsa('[data-sticker-layer]').forEach(b => {
+    b.addEventListener('click', () => {
+      const s = state.stickers[state.selectedStickerIdx];
+      if (!s) return;
+      s.layer = b.dataset.stickerLayer;
+      qsa('[data-sticker-layer]').forEach(x => x.classList.toggle('active', x === b));
+      debouncedSave();
+    });
+  });
 }
 
 // ====================================================================
@@ -5376,10 +5531,35 @@ function aspectToDims(aspect, base = 640) {
   return { width: round8(base * rw / rh), height: base };
 }
 
+// 로컬 ComfyUI 영상화 공통 파이프라인 — Stage1(장면 카드)과 Stage2(배경 탭)가 공유한다.
+// onStatus(status): 폴링 중 상태 변화마다 호출(옵션, UI 갱신용). 완료 시 mp4 Blob 반환.
+async function runComfyAnimate(imageDataUrl, prompt, width, height, onStatus) {
+  const proxyBase = getComfyProxyUrl().replace(/\/+$/, '');
+  const submitRes = await fetch(`${proxyBase}/animate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageDataUrl, prompt, width, height, length: 49 }),
+  });
+  if (!submitRes.ok) throw new Error(`영상화 브릿지 응답 오류 (${submitRes.status}) — "node proxy.cjs" 실행 중인지 확인하세요`);
+  const { jobId } = await submitRes.json();
+
+  // 폴링 — 이 PC(8GB VRAM)에서는 클립 하나에 20분 이상 걸릴 수 있음
+  for (;;) {
+    await new Promise(r => setTimeout(r, 5000));
+    const statRes = await fetch(`${proxyBase}/status?id=${jobId}`);
+    const stat = await statRes.json();
+    if (onStatus) onStatus(stat.status);
+    if (stat.status === 'done') break;
+    if (stat.status === 'error') throw new Error(stat.error || '알 수 없는 오류');
+  }
+  const resultRes = await fetch(`${proxyBase}/result?id=${jobId}`);
+  if (!resultRes.ok) throw new Error('영상 결과를 가져오지 못했습니다');
+  return await resultRes.blob();
+}
+
 async function animateFrame(idx) {
   const frame = _lg.frames.find(f => f.idx === idx);
   if (!frame) { alert('먼저 이 장면의 이미지를 생성하세요.'); return; }
-  const proxyBase = getComfyProxyUrl().replace(/\/+$/, '');
   frame.videoStatus = 'starting';
   frame.videoError = null;
   renderScenePlan();
@@ -5390,27 +5570,10 @@ async function animateFrame(idx) {
       + ', subtle natural motion, gentle cinematic camera movement';
     const aspect = document.getElementById('lg-aspect')?.value || '9:16';
     const { width, height } = aspectToDims(aspect);
-    const submitRes = await fetch(`${proxyBase}/animate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageDataUrl, prompt: motionPrompt, width, height, length: 49 }),
-    });
-    if (!submitRes.ok) throw new Error(`영상화 브릿지 응답 오류 (${submitRes.status}) — "node proxy.cjs" 실행 중인지 확인하세요`);
-    const { jobId } = await submitRes.json();
-
-    // 폴링 — 이 PC(8GB VRAM)에서는 클립 하나에 20분 이상 걸릴 수 있음
-    for (;;) {
-      await new Promise(r => setTimeout(r, 5000));
-      const statRes = await fetch(`${proxyBase}/status?id=${jobId}`);
-      const stat = await statRes.json();
-      frame.videoStatus = stat.status;
+    const videoBlob = await runComfyAnimate(imageDataUrl, motionPrompt, width, height, st => {
+      frame.videoStatus = st;
       renderScenePlan();
-      if (stat.status === 'done') break;
-      if (stat.status === 'error') throw new Error(stat.error || '알 수 없는 오류');
-    }
-    const resultRes = await fetch(`${proxyBase}/result?id=${jobId}`);
-    if (!resultRes.ok) throw new Error('영상 결과를 가져오지 못했습니다');
-    const videoBlob = await resultRes.blob();
+    });
     if (frame.videoUrl) URL.revokeObjectURL(frame.videoUrl);
     frame.videoBlob = videoBlob;
     frame.videoUrl = URL.createObjectURL(videoBlob);
@@ -5492,6 +5655,70 @@ function parseMmss(s) {
   return isNaN(n) ? null : n;
 }
 
+// 비주얼 편집 → 배경 조정 패널의 "이미지 → 영상 변환" — Stage1과 별개로, 지금 편집 중인
+// 곡의 배경 탭에서 바로 이미지를 골라 로컬 ComfyUI로 영상화하고, 배경/오버레이 중 선택해 넣는다.
+let _img2vidState = null; // { file, dataUrl, videoBlob }
+function bindImg2Vid() {
+  const fileInput = document.getElementById('file-img2vid');
+  const preview = document.getElementById('img2vid-preview');
+  const thumb = document.getElementById('img2vid-thumb');
+  const genBtn = document.getElementById('img2vid-generate');
+  const statusEl = document.getElementById('img2vid-status');
+  const resultBox = document.getElementById('img2vid-result');
+  const resultVideo = document.getElementById('img2vid-result-video');
+  const useBgBtn = document.getElementById('img2vid-use-bg');
+  const useOverlayBtn = document.getElementById('img2vid-use-overlay');
+  if (!fileInput) return;
+
+  wireDrop('drop-img2vid', 'file-img2vid', async (files) => {
+    const file = files[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const dataUrl = await fileToDataURL(file);
+    _img2vidState = { file, dataUrl, videoBlob: null };
+    thumb.src = dataUrl;
+    preview.classList.remove('hidden');
+    resultBox.classList.add('hidden');
+    statusEl.textContent = '';
+  });
+
+  genBtn?.addEventListener('click', async () => {
+    if (!_img2vidState) return;
+    genBtn.disabled = true;
+    resultBox.classList.add('hidden');
+    const promptEl = document.getElementById('img2vid-prompt');
+    const prompt = (promptEl?.value || '').trim() || 'subtle natural motion, gentle cinematic camera movement';
+    try {
+      const [w, h] = getCanvasSize();
+      const statusLabel = { starting: '⏳ ComfyUI 준비 중…', queued: '⏳ 대기열…', running: '⏳ 생성 중…(수 분~수십 분)' };
+      statusEl.textContent = statusLabel.starting;
+      const videoBlob = await runComfyAnimate(_img2vidState.dataUrl, prompt, w, h, st => {
+        statusEl.textContent = statusLabel[st] || `상태: ${st}`;
+      });
+      _img2vidState.videoBlob = videoBlob;
+      resultVideo.src = URL.createObjectURL(videoBlob);
+      statusEl.textContent = '✅ 완료';
+      resultBox.classList.remove('hidden');
+    } catch (e) {
+      statusEl.textContent = '❌ 실패: ' + e.message;
+    } finally {
+      genBtn.disabled = false;
+    }
+  });
+
+  useBgBtn?.addEventListener('click', async () => {
+    if (!_img2vidState?.videoBlob) return;
+    const file = new File([_img2vidState.videoBlob], (_img2vidState.file.name || 'video').replace(/\.[^.]+$/, '') + '.mp4', { type: 'video/mp4' });
+    await handleBackgrounds([file]);
+    renderBgSyncList();
+    alert('배경으로 추가했습니다.');
+  });
+  useOverlayBtn?.addEventListener('click', async () => {
+    if (!_img2vidState?.videoBlob) return;
+    await addVideoBlobAsOverlaySticker(_img2vidState.videoBlob, (_img2vidState.file.name || 'video').replace(/\.[^.]+$/, '') + '.mp4', 'back');
+    alert('배경 앞 오버레이로 추가했습니다. "스티커" 탭에서 위치/크기를 조정할 수 있습니다.');
+  });
+}
+
 async function downloadFramesZip() {
   if (!_lg.frames.length) { alert('아직 생성된 이미지가 없습니다. 먼저 "① 가사 분석" → "④ 전체 프레임 생성"으로 이미지를 만들어주세요.'); return; }
   if (typeof JSZip === 'undefined') { alert('JSZip 라이브러리 미로드'); return; }
@@ -5550,6 +5777,8 @@ async function init() {
   bindStage1Lyrics();
   bindStage1AudioTranscribe();
   bindLyricImageGen();
+  bindImg2Vid();
+  bindCanvasDragEdit();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);

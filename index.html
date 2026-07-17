@@ -384,11 +384,11 @@
               <div class="card mini-drop">
                 <div class="card-head"><h3>🏷️ 스티커</h3><span class="bg-count" id="sticker-count">0/5</span></div>
                 <div class="drop-area drop-mini drop-tiny" id="drop-sticker">
-                  <input type="file" id="file-sticker" accept="image/*" multiple hidden />
+                  <input type="file" id="file-sticker" accept="image/*,video/*" multiple hidden />
                   <label for="file-sticker" class="drop-label">
                     <div class="drop-icon">🏷️</div>
                     <div class="drop-text">스티커</div>
-                    <div class="drop-hint">GIF · PNG · 최대 5개</div>
+                    <div class="drop-hint">GIF · PNG · 영상 · 최대 5개</div>
                   </label>
                 </div>
                 <div class="bg-thumbs hidden" id="sticker-thumbs"></div>
@@ -752,6 +752,32 @@
               <div class="adjust-divider">가사 ↔ 이미지 싱크</div>
               <div class="hint-text" style="margin-bottom:6px;">각 배경이 나타날 <b>시작 시간(mm:ss)</b>. 위 "가사 타이밍" ON일 때 적용. 가사와 안 맞으면 여기서 직접 조정하세요.</div>
               <div id="bg-sync-list" class="bg-sync-list"></div>
+
+              <div class="adjust-divider">🎬 이미지 → 영상 변환 (로컬 ComfyUI)</div>
+              <div class="bg-img2vid">
+                <div class="drop-area drop-mini" id="drop-img2vid">
+                  <input type="file" id="file-img2vid" accept="image/*" hidden />
+                  <label for="file-img2vid" class="drop-label">
+                    <div class="drop-icon">🖼️</div>
+                    <div class="drop-text">변환할 이미지 선택</div>
+                  </label>
+                </div>
+                <div class="bg-img2vid-preview hidden" id="img2vid-preview">
+                  <img id="img2vid-thumb" alt="" />
+                  <input type="text" class="text-input" id="img2vid-prompt" placeholder="움직임 설명 (예: 노래하는 여자가수, 부드러운 카메라 이동)" />
+                  <button class="btn btn-ghost" id="img2vid-generate">🎬 영상 생성</button>
+                  <div class="hint-text" id="img2vid-status"></div>
+                  <div class="bg-img2vid-result hidden" id="img2vid-result">
+                    <video id="img2vid-result-video" muted loop autoplay playsinline></video>
+                    <div class="hint-text">생성된 영상을 배경 자체로 쓸지, 배경 위(전경)에 올릴지 선택하세요.</div>
+                    <div class="viz-grid grid2">
+                      <button class="btn btn-ghost" id="img2vid-use-bg">배경으로 추가</button>
+                      <button class="btn btn-ghost" id="img2vid-use-overlay">배경 앞에 오버레이로 추가</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div class="adjust-divider">프레임</div>
               <label class="slider-row" style="grid-template-columns: 60px 1fr;">
                 <span>스타일</span>
@@ -1025,6 +1051,13 @@
                   <input type="range" min="0" max="100" id="sticker-opacity" />
                   <span class="slider-val" id="sticker-opacity-v">100%</span>
                 </label>
+                <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                  <span>배치</span>
+                  <div class="color-mode-row">
+                    <button class="seg-btn" data-sticker-layer="back">배경 앞</button>
+                    <button class="seg-btn active" data-sticker-layer="front">맨 위(로고·자막 위)</button>
+                  </div>
+                </label>
               </div>
             </div>
 
@@ -1132,6 +1165,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_32_video_aspect_sync_fix"></script>
+  <script type="module" src="app.js?v=v4_33_overlay_img2vid_dragedit"></script>
 </body>
 </html>
