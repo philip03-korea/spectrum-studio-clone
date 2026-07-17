@@ -1503,6 +1503,21 @@ function applyEditDrag(drag, dPX, dPY) {
 function bindCanvasDragEdit() {
   canvas.addEventListener('mousedown', (e) => {
     const p = canvasPointFromEvent(e);
+    // 크로마키 배경색 스포이드 모드: 클릭 지점의 색을 배경색으로 지정
+    if (_chromaPickMode) {
+      const s = state.stickers[state.selectedStickerIdx];
+      const b = s && _editBounds['sticker:' + state.selectedStickerIdx];
+      if (s && s.chromaKey && b) {
+        const u = (p.x - b.x) / b.w, v = (p.y - b.y) / b.h;
+        const col = (u >= 0 && u <= 1 && v >= 0 && v <= 1) ? sampleStickerColor(s, u, v) : null;
+        if (col) { s.chromaKey.r = col.r; s.chromaKey.g = col.g; s.chromaKey.b = col.b; debouncedSave(); syncChromaEdit(); }
+      }
+      _chromaPickMode = false;
+      const pk = document.getElementById('chroma-pick');
+      if (pk) { pk.style.background = ''; pk.textContent = '🎯 화면에서 색 찍기'; }
+      e.preventDefault();
+      return;
+    }
     const hit = hitTestEditEl(p.x, p.y);
     _selectedEditEl = hit ? hit.key : null;
     if (!hit) { updateEditToolbar(); return; }  // 빈 곳 클릭 = 선택 해제 → 툴바 숨김
@@ -1510,6 +1525,7 @@ function bindCanvasDragEdit() {
     if (hit.key.startsWith('sticker:')) {
       state.selectedStickerIdx = +hit.key.split(':')[1];
       if (typeof renderStickerToolList === 'function') renderStickerToolList();
+      syncChromaEdit();
     }
     _editDrag = { key: hit.key, mode: hit.mode, startPX: p.x, startPY: p.y, orig: snapshotEditState(hit.key) };
     updateEditToolbar();
@@ -1637,10 +1653,15 @@ function drawChromaKeyed(c, s, x, y, w, h) {
     const img = _chromaCtx.getImageData(0, 0, cw, ch);
     const d = img.data;
     const key = s.chromaKey;
-    const t2 = (key.threshold ?? 110) ** 2;
+    const t1 = key.threshold ?? 70;          // 이 거리 안쪽은 완전 투명
+    const soft = Math.max(1, key.softness ?? 30); // t1~t1+soft 구간은 점점 불투명(경계 부드럽게)
+    const t1sq = t1 * t1, t2sq = (t1 + soft) * (t1 + soft);
+    // 성능: 대부분 픽셀은 제곱거리 비교로 처리하고, 경계(soft 구간) 픽셀만 sqrt 계산.
     for (let i = 0; i < d.length; i += 4) {
       const dr = d[i] - key.r, dg = d[i + 1] - key.g, db = d[i + 2] - key.b;
-      if (dr * dr + dg * dg + db * db < t2) d[i + 3] = 0;
+      const distSq = dr * dr + dg * dg + db * db;
+      if (distSq <= t1sq) d[i + 3] = 0;
+      else if (distSq < t2sq) d[i + 3] = Math.round(d[i + 3] * ((Math.sqrt(distSq) - t1) / soft));
     }
     _chromaCtx.putImageData(img, 0, 0);
     c.drawImage(_chromaCanvas, x, y, w, h);
@@ -1648,11 +1669,23 @@ function drawChromaKeyed(c, s, x, y, w, h) {
     c.drawImage(s.el, x, y, w, h); // 오류 시 원본
   }
 }
+// 스티커 소스의 특정 지점(0~1 정규화 좌표) 색을 샘플. 실패 시 null.
+function sampleStickerColor(s, u, v) {
+  const sw = Math.min(256, s.width || 256), sh = Math.min(256, s.height || 256);
+  _chromaCanvas.width = sw; _chromaCanvas.height = sh;
+  try {
+    _chromaCtx.drawImage(s.el, 0, 0, sw, sh);
+    const px = clamp(0, sw - 1, Math.round(u * sw));
+    const py = clamp(0, sh - 1, Math.round(v * sh));
+    const p = _chromaCtx.getImageData(px, py, 1, 1).data;
+    return { r: p[0], g: p[1], b: p[2] };
+  } catch (e) { return null; }
+}
 function toggleStickerChroma(i) {
   const s = state.stickers[i];
   if (!s) return;
-  if (s.chromaKey) { s.chromaKey = null; debouncedSave(); return; }
-  // 네 모서리 색 평균을 배경색으로 추정해서 키 컬러로 사용
+  if (s.chromaKey) { s.chromaKey = null; debouncedSave(); syncChromaEdit(); return; }
+  // 네 모서리 색 평균을 배경색으로 추정해서 키 컬러로 사용(기본 감도는 낮게 — 과다 제거 방지)
   const sw = Math.min(64, s.width || 64), sh = Math.min(64, s.height || 64);
   _chromaCanvas.width = sw; _chromaCanvas.height = sh;
   try {
@@ -1660,11 +1693,63 @@ function toggleStickerChroma(i) {
     const corners = [[0, 0], [sw - 1, 0], [0, sh - 1], [sw - 1, sh - 1]];
     let r = 0, g = 0, b = 0;
     for (const [cx, cy] of corners) { const p = _chromaCtx.getImageData(cx, cy, 1, 1).data; r += p[0]; g += p[1]; b += p[2]; }
-    s.chromaKey = { r: Math.round(r / 4), g: Math.round(g / 4), b: Math.round(b / 4), threshold: 115 };
+    s.chromaKey = { r: Math.round(r / 4), g: Math.round(g / 4), b: Math.round(b / 4), threshold: 70, softness: 30 };
     debouncedSave();
+    // 세부 조정 패널을 로고설정 탭에 열어서 바로 미세조정 가능하게
+    openLogoTabForSticker(i);
+    syncChromaEdit();
   } catch (e) {
     alert('배경색 감지 실패: ' + e.message + '\n(영상이 완전히 로드된 뒤 다시 시도하세요)');
   }
+}
+function openLogoTabForSticker(i) {
+  const tabBtn = document.querySelector('.right-tab[data-right-tab="logo"]');
+  if (tabBtn) tabBtn.click();
+  state.selectedStickerIdx = i;
+  if (typeof renderStickerToolList === 'function') renderStickerToolList();
+}
+// 크로마키 세부 조정 패널 표시/값 동기화
+function syncChromaEdit() {
+  const box = document.getElementById('chroma-edit');
+  if (!box) return;
+  const s = state.stickers[state.selectedStickerIdx];
+  const active = s && s.kind === 'video' && s.chromaKey;
+  box.classList.toggle('hidden', !active);
+  if (!active) return;
+  const ck = s.chromaKey;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; const ve = document.getElementById(id + '-v'); if (ve) ve.textContent = v; };
+  set('chroma-threshold', ck.threshold ?? 70);
+  set('chroma-softness', ck.softness ?? 30);
+  const sw = document.getElementById('chroma-swatch');
+  if (sw) sw.style.background = `rgb(${ck.r},${ck.g},${ck.b})`;
+}
+let _chromaPickMode = false;
+function bindChromaEdit() {
+  const thr = document.getElementById('chroma-threshold');
+  const soft = document.getElementById('chroma-softness');
+  const pick = document.getElementById('chroma-pick');
+  const off = document.getElementById('chroma-off');
+  const bindSlider = (el, key) => {
+    el?.addEventListener('input', () => {
+      const s = state.stickers[state.selectedStickerIdx];
+      if (!s || !s.chromaKey) return;
+      s.chromaKey[key] = Number(el.value);
+      const ve = document.getElementById(el.id + '-v'); if (ve) ve.textContent = el.value;
+      debouncedSave();
+    });
+  };
+  bindSlider(thr, 'threshold');
+  bindSlider(soft, 'softness');
+  pick?.addEventListener('click', () => {
+    _chromaPickMode = !_chromaPickMode;
+    pick.style.background = _chromaPickMode ? 'rgba(124,92,255,0.6)' : '';
+    pick.textContent = _chromaPickMode ? '🎯 화면에서 배경 클릭…' : '🎯 화면에서 색 찍기';
+  });
+  off?.addEventListener('click', () => {
+    const s = state.stickers[state.selectedStickerIdx];
+    if (s) { s.chromaKey = null; debouncedSave(); }
+    syncChromaEdit(); updateEditToolbar();
+  });
 }
 
 function getCanvasSize() {
@@ -4044,6 +4129,7 @@ function syncStickerEditToActive() {
   set('sticker-opacity', s.opacity, v => v + '%');
   const layer = s.layer || 'front';
   qsa('[data-sticker-layer]').forEach(b => b.classList.toggle('active', b.dataset.stickerLayer === layer));
+  syncChromaEdit();
 }
 function bindStickerEdit() {
   const bind = (id, key, fmt) => {
@@ -6032,6 +6118,7 @@ async function init() {
   bindCanvasDragEdit();
   bindEditToolbar();
   bindEditKeyboard();
+  bindChromaEdit();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);

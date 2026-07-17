@@ -1075,6 +1075,29 @@
                     <button class="seg-btn active" data-sticker-layer="front">맨 위(로고·자막 위)</button>
                   </div>
                 </label>
+                <!-- 크로마키(영상 배경 지우기) 세부 조정 — 영상 스티커에 배경지우기 켜졌을 때만 표시 -->
+                <div id="chroma-edit" class="hidden">
+                  <div class="adjust-divider">🪄 배경 지우기 세부 조정</div>
+                  <div class="hint-text" style="margin-bottom:6px;">너무 많이 지워지면 <b>감도</b>를 낮추세요. 인물 경계가 거칠면 <b>부드럽게</b>를 올리세요. 배경색이 잘못 잡혔으면 <b>색 찍기</b>로 화면에서 배경을 직접 클릭하세요.</div>
+                  <label class="slider-row">
+                    <span>감도</span>
+                    <input type="range" min="0" max="200" value="70" id="chroma-threshold" />
+                    <span class="slider-val" id="chroma-threshold-v">70</span>
+                  </label>
+                  <label class="slider-row">
+                    <span>부드럽게</span>
+                    <input type="range" min="0" max="150" value="30" id="chroma-softness" />
+                    <span class="slider-val" id="chroma-softness-v">30</span>
+                  </label>
+                  <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                    <span>배경색</span>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                      <span id="chroma-swatch" style="width:24px; height:24px; border-radius:4px; border:1px solid #555; display:inline-block;"></span>
+                      <button class="btn-mini" id="chroma-pick">🎯 화면에서 색 찍기</button>
+                    </div>
+                  </label>
+                  <button class="btn-mini" id="chroma-off" style="margin-top:4px;">배경 지우기 끄기</button>
+                </div>
               </div>
             </div>
 
@@ -1182,6 +1205,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_35_zorder_toolbar_chroma"></script>
+  <script type="module" src="app.js?v=v4_36_chroma_fine_controls"></script>
 </body>
 </html>
