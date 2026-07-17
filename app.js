@@ -2721,6 +2721,171 @@ function bindSidebarBottomButtons() {
   if (devChatBtn) devChatBtn.addEventListener('click', () => {
     window.open('https://t.me/widace_ha21_bot', '_blank', 'noopener');
   });
+  // 노래하는 다윗(ha19)과 인라인 대화 — 팝업/텔레그램 이동 없이 그 자리에서 채팅.
+  const davidChatBtn = $('btn-david-chat');
+  if (davidChatBtn) davidChatBtn.addEventListener('click', openDavidChat);
+}
+
+// ====================================================================
+// 노래하는 다윗(ha19) 인라인 채팅 — 가사·컨셉·카피 문의용. 코딩/사이트 오류는 ha21로 안내.
+// ====================================================================
+const DAVID_CHAT_API = 'https://hermes.thezoller.com/api/publicchat';
+const DAVID_PASS_KEY = 'ssc-david-pass';
+const DAVID_THREAD_KEY = 'ssc-david-thread';
+const DAVID_GREETING = '무엇을 도와드릴까요? 가사·컨셉·카피 수정은 바로 도와드리고, 사이트 기능 오류는 "개발자에게 실시간 문의"로 안내해드립니다.';
+const DAVID_POLL_INTERVAL_MS = 8000;   // 서버 속도제한(분당 8회)에 안 걸리게 여유있게 폴링
+const DAVID_POLL_MAX_TRIES = 38;       // 8초 * 38 ≈ 304초, 서버 최대 대기(300초)와 맞춤
+
+function getDavidThreadId() {
+  let id = sessionStorage.getItem(DAVID_THREAD_KEY);
+  if (!id) {
+    id = 'spectrum-studio-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    sessionStorage.setItem(DAVID_THREAD_KEY, id);
+  }
+  return id;
+}
+
+function openDavidChat() {
+  const overlay = document.createElement('div');
+  overlay.className = 'david-chat-overlay';
+  overlay.innerHTML = `
+    <div class="david-chat-box">
+      <div class="david-chat-head">
+        <h3>🕊️ 노래하는 다윗과 대화</h3>
+        <button type="button" class="david-chat-close" id="david-close">✕</button>
+      </div>
+      <div id="david-chat-content"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#david-close').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  const savedPass = sessionStorage.getItem(DAVID_PASS_KEY) || '';
+  if (savedPass) renderDavidChatScreen(overlay);
+  else renderDavidPassScreen(overlay);
+}
+
+function renderDavidPassScreen(overlay) {
+  const content = overlay.querySelector('#david-chat-content');
+  content.innerHTML = `
+    <div class="david-pass-screen">
+      <div>🔒 비밀번호를 입력하면 대화를 시작합니다.</div>
+      <input type="password" id="david-pass-input" placeholder="비밀번호" autocomplete="off" />
+      <button type="button" class="btn-mini" id="david-pass-ok" style="padding:9px 20px;background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;">확인</button>
+      <div class="david-pass-error" id="david-pass-err"></div>
+    </div>`;
+  const input = content.querySelector('#david-pass-input');
+  const err = content.querySelector('#david-pass-err');
+  const submit = () => {
+    const v = input.value.trim();
+    if (!v) { err.textContent = '비밀번호를 입력하세요.'; return; }
+    sessionStorage.setItem(DAVID_PASS_KEY, v);
+    renderDavidChatScreen(overlay);
+  };
+  content.querySelector('#david-pass-ok').addEventListener('click', submit);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  input.focus();
+}
+
+function renderDavidChatScreen(overlay) {
+  const content = overlay.querySelector('#david-chat-content');
+  content.innerHTML = `
+    <div class="david-chat-body" id="david-body"></div>
+    <div class="david-chat-foot">
+      <input type="text" id="david-input" placeholder="메시지를 입력하세요…" autocomplete="off" />
+      <button type="button" id="david-send">전송</button>
+    </div>`;
+  const body = content.querySelector('#david-body');
+  const addMsg = (text, cls) => {
+    const el = document.createElement('div');
+    el.className = 'david-msg ' + cls;
+    el.textContent = text;
+    body.appendChild(el);
+    body.scrollTop = body.scrollHeight;
+    return el;
+  };
+  addMsg(DAVID_GREETING, 'david-msg-bot');
+
+  const input = content.querySelector('#david-input');
+  const sendBtn = content.querySelector('#david-send');
+  let busy = false;
+
+  const resetPassAndReprompt = (msg) => {
+    sessionStorage.removeItem(DAVID_PASS_KEY);
+    addMsg(msg || '비밀번호가 틀렸습니다. 다시 입력해 주세요.', 'david-msg-bot error');
+    setTimeout(() => renderDavidPassScreen(overlay), 1200);
+  };
+
+  const pollResult = async (job, passVal, pendingEl) => {
+    for (let i = 0; i < DAVID_POLL_MAX_TRIES; i++) {
+      await new Promise(r => setTimeout(r, DAVID_POLL_INTERVAL_MS));
+      let res, data;
+      try {
+        res = await fetch(`${DAVID_CHAT_API}/result?job=${encodeURIComponent(job)}&pass=${encodeURIComponent(passVal)}`);
+        data = await res.json();
+      } catch (e) {
+        pendingEl.textContent = '⚠️ 연결 오류 — 잠시 후 다시 시도해 주세요.';
+        pendingEl.className = 'david-msg david-msg-bot error';
+        return;
+      }
+      if (res.status === 401) { pendingEl.remove(); resetPassAndReprompt(); return; }
+      if (!data || data.ok === false) {
+        pendingEl.textContent = '⚠️ ' + (data?.error || '응답 오류');
+        pendingEl.className = 'david-msg david-msg-bot error';
+        return;
+      }
+      if (data.done) {
+        pendingEl.textContent = data.reply || '(빈 응답)';
+        pendingEl.className = 'david-msg david-msg-bot';
+        return;
+      }
+      // 아직 처리 중이면 계속 폴링
+    }
+    pendingEl.textContent = '⚠️ 응답이 너무 오래 걸립니다. 잠시 후 다시 시도해 주세요.';
+    pendingEl.className = 'david-msg david-msg-bot error';
+  };
+
+  const send = async () => {
+    if (busy) return;
+    const text = input.value.trim();
+    if (!text) return;
+    const passVal = sessionStorage.getItem(DAVID_PASS_KEY) || '';
+    busy = true;
+    sendBtn.disabled = true;
+    input.value = '';
+    addMsg(text, 'david-msg-user');
+    const pendingEl = addMsg('생각 중… (몇 초~1분 정도 걸릴 수 있어요)', 'david-msg-bot pending');
+    try {
+      const res = await fetch(DAVID_CHAT_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Ceo-Pass': passVal },
+        body: JSON.stringify({ message: text, thread: getDavidThreadId() }),
+      });
+      if (res.status === 401) { pendingEl.remove(); resetPassAndReprompt(); return; }
+      if (res.status === 429) {
+        pendingEl.textContent = '⚠️ 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.';
+        pendingEl.className = 'david-msg david-msg-bot error';
+        return;
+      }
+      const data = await res.json();
+      if (!data || data.ok === false || !data.job) {
+        pendingEl.textContent = '⚠️ ' + (data?.error || '전송 실패');
+        pendingEl.className = 'david-msg david-msg-bot error';
+        return;
+      }
+      pendingEl.className = 'david-msg david-msg-bot pending';
+      await pollResult(data.job, passVal, pendingEl);
+    } catch (e) {
+      pendingEl.textContent = '⚠️ 연결 오류 — 네트워크 상태를 확인해 주세요.';
+      pendingEl.className = 'david-msg david-msg-bot error';
+    } finally {
+      busy = false;
+      sendBtn.disabled = false;
+    }
+  };
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  input.focus();
 }
 
 // 가사 통합 매니저 — 3개 단계(가사 이미지 / 미디어 준비 / 비주얼 편집)의
@@ -5069,8 +5234,11 @@ async function generateAllFrames() {
       console.error('frame gen err', e);
       fails.push(s.idx);
       lastErr = e.message;
-      // 안전 시스템 거부/인증/프록시 오류는 모든 프레임에 동일하게 적용 → 즉시 중단
-      if (/안전 시스템|API 401|API 키|프록시|키 미설정|크레딧/.test(e.message)) {
+      // 안전 시스템 거부/인증/프록시 설정 오류는 모든 프레임에 동일하게 적용되므로 즉시 중단한다.
+      // 주의: 그냥 "프록시"라는 단어만 보고 걸면 "프록시 오류 502" 같은 일시적 타임아웃까지
+      // 걸려서 남은 프레임 전부가 생성 시도조차 안 되고 중단되는 사고가 났었다(실제 발생 사례) —
+      // 그래서 "설정이 잘못됨/연결이 아예 안 됨" 케이스만 구체적으로 골라서 중단시킨다.
+      if (/안전 시스템 거부|API 401|API 키가 필요|프록시 URL이 필요|프록시에 연결할 수 없|프록시 미설정|키 미설정|크레딧/.test(e.message)) {
         document.getElementById('lg-progress').textContent = `❌ 중단: ${e.message}`;
         btn.disabled = false;
         if (stopBtn) stopBtn.style.display = 'none';
