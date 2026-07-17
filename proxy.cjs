@@ -45,13 +45,18 @@ const COMFY_WORKFLOW_TEMPLATE = JSON.parse(
 // jobId -> { status: 'starting'|'queued'|'running'|'done'|'error', error?, resultPath? }
 const comfyJobs = new Map();
 
+// ComfyUI가 생성 작업으로 바쁘면(GIL/GPU 부하) 헬스체크 응답이 몇 초 늦을 수 있다.
+// 타임아웃이 너무 짧으면 "죽었다"고 오판해서 이미 떠 있는 프로세스 위에 또 하나를
+// 띄우게 되고, 두 프로세스가 같은 포트/DB/GPU를 다퉈서 실제로 크래시가 났던 적이 있다
+// (Windows fatal exception / "Port 8188 is already in use") — 그래서 넉넉히 재시도한다.
 async function comfyIsUp() {
-  try {
-    const r = await fetch(COMFY_BASE + '/system_stats', { signal: AbortSignal.timeout(3000) });
-    return r.ok;
-  } catch (_) {
-    return false;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const r = await fetch(COMFY_BASE + '/system_stats', { signal: AbortSignal.timeout(8000) });
+      if (r.ok) return true;
+    } catch (_) {}
   }
+  return false;
 }
 
 function startComfyServer() {
@@ -72,23 +77,37 @@ function startComfyServer() {
   child.unref();
 }
 
+// 동시에 여러 /comfy/animate 요청이 들어오면(장면 여러 개를 빠르게 연달아 누르는 등)
+// comfyIsUp() 오판과 겹쳐 startComfyServer()가 두 번 불려서 ComfyUI 프로세스가 중복
+// 기동되는 사고가 실제로 났다 — 같은 포트/DB/GPU를 두 프로세스가 다투면서 크래시로
+// 이어짐. 그래서 기동 로직 전체를 한 번에 하나만 실행되도록 잠근다(뮤텍스).
+let comfyEnsurePromise = null;
+
 async function ensureComfyRunning() {
-  if (await comfyIsUp()) return;
-  startComfyServer();
-  // 최초 콜드 스타트는 CUDA 커널/comfy_kitchen 백엔드 초기화 때문에 이 PC(RTX 2070)에서
-  // 5분 넘게 걸리는 걸 실측함 — 90초는 항상 실패하는 값이라 8분으로 늘림.
-  // (ComfyUI가 이미 떠 있으면 위 comfyIsUp() 체크에서 즉시 반환되므로 재요청은 빠르다.)
-  const deadline = Date.now() + 480_000;
-  let lastLog = 0;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 2000));
+  if (comfyEnsurePromise) return comfyEnsurePromise;
+  comfyEnsurePromise = (async () => {
     if (await comfyIsUp()) return;
-    if (Date.now() - lastLog > 20_000) {
-      console.log(`[proxy] ComfyUI 기동 대기 중… (${Math.round((Date.now() - (deadline - 480_000)) / 1000)}초 경과)`);
-      lastLog = Date.now();
+    startComfyServer();
+    // 최초 콜드 스타트는 CUDA 커널/comfy_kitchen 백엔드 초기화 때문에 이 PC(RTX 2070)에서
+    // 5분 넘게 걸리는 걸 실측함 — 90초는 항상 실패하는 값이라 8분으로 늘림.
+    // (ComfyUI가 이미 떠 있으면 위 comfyIsUp() 체크에서 즉시 반환되므로 재요청은 빠르다.)
+    const deadline = Date.now() + 480_000;
+    let lastLog = 0;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 2000));
+      if (await comfyIsUp()) return;
+      if (Date.now() - lastLog > 20_000) {
+        console.log(`[proxy] ComfyUI 기동 대기 중… (${Math.round((Date.now() - (deadline - 480_000)) / 1000)}초 경과)`);
+        lastLog = Date.now();
+      }
     }
+    throw new Error('ComfyUI가 8분 내에 기동되지 않았습니다 (D:\\ComfyUI 설치를 확인하세요)');
+  })();
+  try {
+    await comfyEnsurePromise;
+  } finally {
+    comfyEnsurePromise = null;
   }
-  throw new Error('ComfyUI가 8분 내에 기동되지 않았습니다 (D:\\ComfyUI 설치를 확인하세요)');
 }
 
 function saveInputImage(dataUrl) {
