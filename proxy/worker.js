@@ -32,6 +32,19 @@ export default {
     };
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
+    try {
+      return await handleRequest(request, env, cors);
+    } catch (e) {
+      // 아래 라우트 어딘가에서 못 잡은 예외가 여기까지 새어나오면(예: Soul 2 경로의
+      // `throw e`), Worker가 CORS 헤더 없는 기본 에러 페이지를 반환해서 브라우저에는
+      // "CORS 정책에 의해 차단됨"으로만 보이고 진짜 원인이 안 드러난다 — 항상 cors
+      // 헤더가 붙은 응답을 주도록 마지막 안전망을 둔다.
+      return json({ error: `Worker 처리 중 예외: ${e && e.message || e}` }, 500, cors);
+    }
+  },
+};
+
+async function handleRequest(request, env, cors) {
     const base = (env.CONTABO_URL || '').replace(/\/+$/, '');
     const key = env.CONTABO_KEY || '';
     const url = new URL(request.url);
@@ -182,8 +195,7 @@ export default {
     } catch (e) {
       return json({ error: `프록시 오류: ${e.message}` }, 500, cors);
     }
-  },
-};
+}
 
 function json(obj, status, cors) {
   return new Response(JSON.stringify(obj), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
