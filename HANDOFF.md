@@ -1,7 +1,74 @@
 # 🤝 HANDOFF — 벼량끝 On the Brink Studio PRO V2.1
 
 > 다른 컴퓨터에서 이어서 작업하기 위한 인수인계 문서.
-> 마지막 업데이트: 2026-07-06
+> 마지막 업데이트: 2026-07-17
+
+---
+
+## ⭐ 2026-07-17 — 로컬 ComfyUI 영상화 (장면 이미지 → 짧은 영상 클립)
+
+### 무엇을 만들었나
+Stage 1(가사→이미지)에 "🎬 영상화" 단계 추가. 사용자가 원하는 장면만 골라서, 이 PC에 설치된
+로컬 ComfyUI(FLUX Krea + Wan2.2 I2V)로 정지 이미지를 3~5초 짧은 영상 클립으로 변환. 결과는
+기존 배경 슬라이드쇼(가사 타이밍 동기화 포함)에 자동으로 편입되어 Stage 2/3/4는 수정 없이
+그대로 최종 뮤직비디오 렌더링에 쓰인다.
+
+### 왜 이렇게 설계했나 (핵심 발견)
+`state.backgrounds`가 원래 이미지/영상을 `kind` 필드로만 구분해서 동일하게 처리하고
+있었고(`addBackgroundFile()`), `addFramesToBackgrounds()`가 이미 가사 타임스탬프(`bg.time`)를
+태깅해 슬라이드쇼 동기화를 켜고 있었다. 즉 "영상 생성 기능을 새로 만드는" 게 아니라
+"기존 파이프라인에 소스를 하나 더 꽂는" 일이었다.
+
+### 아키텍처
+```
+브라우저(app.js)
+  → node proxy.cjs (localhost:8766) — 기존 Higgsfield /hf 프록시와 같은 프로세스, /comfy/* 신규 추가
+      → 로컬 ComfyUI (D:\ComfyUI, 127.0.0.1:8188) — 꺼져있으면 자동 기동
+          → Wan2.2 I2V GGUF (High/Low noise 두 모델) + 4-step 가속 로라
+      ← mp4 결과
+  ← 배경(state.backgrounds)에 kind:'video'로 자동 등록
+```
+
+### 새 파일 / 변경 파일
+- **`proxy.cjs`** — `/comfy/animate`(POST), `/comfy/status?id=`(GET), `/comfy/result?id=`(GET) 3개 라우트 추가.
+  ComfyUI 자동 기동(`ensureComfyRunning()`), 이미지 base64 저장, 워크플로우 채워넣기, 폴링, 결과
+  스트리밍까지 전부 이 파일 안에서 처리한다.
+  ⚠️ **이 PC 전용 하드코딩 경로**: `D:\ComfyUI\ComfyUI`. 다른 컴퓨터에서 쓰려면 파일 상단
+  `COMFY_ROOT` 등을 그 컴퓨터의 ComfyUI 설치 경로에 맞게 바꿔야 한다.
+- **`proxy/workflows/video_wan22_i2v.json`** — 검증된 Wan2.2 I2V API 워크플로우 템플릿
+  (`comfyui-local-studio` Claude 스킬에서 실제 생성 성공까지 확인한 파일과 동일).
+- **`app.js`**
+  - `getComfyProxyUrl()` — 기본값 `http://localhost:8766/comfy`, `localStorage['ssc-comfy-proxy-url']`로 override 가능.
+  - `animateFrame(idx)` — 장면 하나를 영상화. `_lg.frames[i]`에 `videoBlob/videoUrl/videoStatus/videoError` 필드가 붙는다.
+  - `renderScenePlan()` — 장면 카드에 "🎬 영상화" 버튼 + 진행상태 표시 + 완료 시 이미지 대신 영상 미리보기.
+  - `addFramesToBackgrounds()` — `videoBlob`이 있으면 정지 이미지 대신 영상 파일로 배경에 등록.
+
+### 사용법
+1. 로컬 ComfyUI가 세팅돼 있어야 함 (`comfyui-local-studio` Claude 스킬로 이 PC에 설치·검증 완료:
+   FLUX Krea GGUF, Wan2.2 I2V GGUF ×2, 가속 로라, 텍스트 인코더, VAE — 전부 `D:\ComfyUI\models`).
+2. 저장소 폴더에서 `node proxy.cjs` 실행 — Higgsfield용으로 이미 쓰던 그 프록시가 이제 `/comfy/*`도 같이 서빙한다.
+3. 앱에서 Stage 1으로 이미지 생성 → 원하는 장면 카드에서 "🎬 영상화" 클릭.
+4. RTX 2070(8GB VRAM) 기준 클립 하나에 **수 분~수십 분** 걸릴 수 있다 — 진행 중엔 버튼이
+   "⏳ 생성 중…"으로 비활성화됨. 여러 장면을 동시에 눌러도 ComfyUI가 순차 처리(큐)한다.
+5. 완료되면 "④ 배경에 추가" 버튼으로 기존처럼 등록 — 영상화된 장면은 영상 클립이, 나머지는
+   그대로 정지 이미지가 배경에 들어간다.
+
+### 검증 상태
+curl로 실제 end-to-end 성공 확인(요청 → ComfyUI 자동기동 → Wan2.2 실행 → mp4 스트리밍). 테스트
+중 SaveVideo 노드의 결과가 `/history` 응답에서 `"videos"`가 아니라 `"images"` 키로 오는 것을
+발견해 `findOutputVideoPath()`에서 수정함 (ComfyUI 0.28.x 기준 실측 — 다음 버전에서 다시
+바뀔 수 있으니, 영상화가 "done"인데 결과를 못 찾는다면 여기부터 의심할 것).
+
+### 알려진 한계 / 다음에 할 만한 것
+- [ ] 곡 전체를 한 번에 영상화하는 일괄 버튼은 없음 — 지금은 장면별 수동 선택만 (의도된 설계, 속도 때문).
+- [ ] Higgsfield 클라우드 영상화 옵션은 아직 없음 ("로컬 먼저"로 범위를 정함 — 필요해지면
+      `proxy.cjs`에 `/comfy`와 비슷한 `/hf-video` 라우트를 추가하면 됨).
+- [ ] `getComfyProxyUrl()`용 설정 UI가 없음(localStorage 직접 편집만 가능) — 여러 ComfyUI를
+      오갈 일이 생기면 Stage 1에 입력칸 추가.
+- [ ] **동시 세션 주의**: 이 기능을 만들던 중 다른 Claude Code 세션이 같은 저장소에서 동시에
+      커밋하다가 서로의 변경사항이 한 커밋(`ea61c70`)에 섞여 들어간 적이 있음. 실질적 피해는
+      없었지만, 같은 저장소를 여러 세션에서 동시에 열어두고 있다면 커밋 전에
+      `git status`/`git diff`로 무엇이 스테이징되는지 꼭 확인할 것.
 
 ---
 
