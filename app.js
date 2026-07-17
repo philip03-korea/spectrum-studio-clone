@@ -5389,7 +5389,7 @@ async function animateFrame(idx) {
 }
 
 async function addFramesToBackgrounds() {
-  if (!_lg.frames.length) return;
+  if (!_lg.frames.length) { alert('아직 생성된 이미지가 없습니다. 먼저 "① 가사 분석" → "④ 전체 프레임 생성"으로 이미지를 만들어주세요.'); return; }
   // 프레임 순서대로 배경에 추가 + 각 배경에 해당 가사 장면의 시작 시간을 태그
   for (const f of _lg.frames.sort((a,b)=>a.idx-b.idx)) {
     // 영상화된 장면은 정지 이미지 대신 생성된 영상 클립을 배경으로 등록 (kind:'video'는
@@ -5454,7 +5454,7 @@ function parseMmss(s) {
 }
 
 async function downloadFramesZip() {
-  if (!_lg.frames.length) return;
+  if (!_lg.frames.length) { alert('아직 생성된 이미지가 없습니다. 먼저 "① 가사 분석" → "④ 전체 프레임 생성"으로 이미지를 만들어주세요.'); return; }
   if (typeof JSZip === 'undefined') { alert('JSZip 라이브러리 미로드'); return; }
   const zip = new JSZip();
   const folder = zip.folder(`public/generated/lyric-images/${_lg.projectId}`);
