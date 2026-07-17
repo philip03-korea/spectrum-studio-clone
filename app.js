@@ -1503,20 +1503,24 @@ function applyEditDrag(drag, dPX, dPY) {
 function bindCanvasDragEdit() {
   canvas.addEventListener('mousedown', (e) => {
     const p = canvasPointFromEvent(e);
-    // 크로마키 배경색 스포이드 모드: 클릭 지점의 색을 배경색으로 지정
+    // 크로마키 배경색 스포이드 모드: 클릭한 지점의 색을 "지울 색" 목록에 추가한다.
+    // 모드는 계속 유지 — 배경을 여러 번 클릭해 색을 누적하며 지울 수 있다(완료는 버튼 다시 클릭).
     if (_chromaPickMode) {
       const s = state.stickers[state.selectedStickerIdx];
       const b = s && _editBounds['sticker:' + state.selectedStickerIdx];
       if (s && s.chromaKey && b) {
         const u = (p.x - b.x) / b.w, v = (p.y - b.y) / b.h;
         const col = (u >= 0 && u <= 1 && v >= 0 && v <= 1) ? sampleStickerColor(s, u, v) : null;
-        if (col) { s.chromaKey.r = col.r; s.chromaKey.g = col.g; s.chromaKey.b = col.b; debouncedSave(); syncChromaEdit(); }
+        if (col) {
+          if (!s.chromaKey.colors) s.chromaKey.colors = chromaColors(s.chromaKey).slice();
+          s.chromaKey.colors.push(col);
+          debouncedSave(); syncChromaEdit();
+          const hint = document.getElementById('chroma-pick-hint');
+          if (hint) hint.textContent = `✅ ${s.chromaKey.colors.length}개 색 지우는 중 — 배경을 더 클릭하거나 "찍기 완료"를 누르세요`;
+        }
       }
-      _chromaPickMode = false;
-      const pk = document.getElementById('chroma-pick');
-      if (pk) { pk.style.background = ''; pk.textContent = '🎯 화면에서 색 찍기'; }
       e.preventDefault();
-      return;
+      return; // 모드 유지 (반복 클릭)
     }
     const hit = hitTestEditEl(p.x, p.y);
     _selectedEditEl = hit ? hit.key : null;
@@ -1639,9 +1643,17 @@ function bindEditKeyboard() {
 // ===== 크로마키(영상 배경 지우기) =====
 const _chromaCanvas = document.createElement('canvas');
 const _chromaCtx = _chromaCanvas.getContext('2d', { willReadFrequently: true });
+// 크로마키가 지울 색 목록(여러 색 누적 지원). 구버전 {r,g,b} 단일색도 호환.
+function chromaColors(ck) {
+  if (ck.colors && ck.colors.length) return ck.colors;
+  if (ck.r != null) return [{ r: ck.r, g: ck.g, b: ck.b }];
+  return [];
+}
 function drawChromaKeyed(c, s, x, y, w, h) {
   const sw = s.width, sh = s.height;
   if (!sw || !sh) { c.drawImage(s.el, x, y, w, h); return; }
+  const colors = chromaColors(s.chromaKey);
+  if (!colors.length) { c.drawImage(s.el, x, y, w, h); return; }
   const maxDim = 512; // 성능을 위해 축소 처리
   const scale = Math.min(1, maxDim / Math.max(sw, sh));
   const cw = Math.max(1, Math.round(sw * scale)), ch = Math.max(1, Math.round(sh * scale));
@@ -1653,15 +1665,24 @@ function drawChromaKeyed(c, s, x, y, w, h) {
     const img = _chromaCtx.getImageData(0, 0, cw, ch);
     const d = img.data;
     const key = s.chromaKey;
-    const t1 = key.threshold ?? 70;          // 이 거리 안쪽은 완전 투명
+    const t1 = key.threshold ?? 70;               // 이 거리 안쪽은 완전 투명
     const soft = Math.max(1, key.softness ?? 30); // t1~t1+soft 구간은 점점 불투명(경계 부드럽게)
     const t1sq = t1 * t1, t2sq = (t1 + soft) * (t1 + soft);
-    // 성능: 대부분 픽셀은 제곱거리 비교로 처리하고, 경계(soft 구간) 픽셀만 sqrt 계산.
+    const n = colors.length;
+    // 각 픽셀을 지울 색들 중 "가장 가까운" 색 기준으로 판정. 대부분은 제곱거리로 빠르게,
+    // 경계(soft 구간) 픽셀만 sqrt 계산.
     for (let i = 0; i < d.length; i += 4) {
-      const dr = d[i] - key.r, dg = d[i + 1] - key.g, db = d[i + 2] - key.b;
-      const distSq = dr * dr + dg * dg + db * db;
-      if (distSq <= t1sq) d[i + 3] = 0;
-      else if (distSq < t2sq) d[i + 3] = Math.round(d[i + 3] * ((Math.sqrt(distSq) - t1) / soft));
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      let minSq = Infinity;
+      for (let k = 0; k < n; k++) {
+        const col = colors[k];
+        const dr = r - col.r, dg = g - col.g, db = b - col.b;
+        const sq = dr * dr + dg * dg + db * db;
+        if (sq < minSq) minSq = sq;
+        if (minSq <= t1sq) break;
+      }
+      if (minSq <= t1sq) d[i + 3] = 0;
+      else if (minSq < t2sq) d[i + 3] = Math.round(d[i + 3] * ((Math.sqrt(minSq) - t1) / soft));
     }
     _chromaCtx.putImageData(img, 0, 0);
     c.drawImage(_chromaCanvas, x, y, w, h);
@@ -1693,7 +1714,7 @@ function toggleStickerChroma(i) {
     const corners = [[0, 0], [sw - 1, 0], [0, sh - 1], [sw - 1, sh - 1]];
     let r = 0, g = 0, b = 0;
     for (const [cx, cy] of corners) { const p = _chromaCtx.getImageData(cx, cy, 1, 1).data; r += p[0]; g += p[1]; b += p[2]; }
-    s.chromaKey = { r: Math.round(r / 4), g: Math.round(g / 4), b: Math.round(b / 4), threshold: 70, softness: 30 };
+    s.chromaKey = { colors: [{ r: Math.round(r / 4), g: Math.round(g / 4), b: Math.round(b / 4) }], threshold: 70, softness: 30 };
     debouncedSave();
     // 세부 조정 패널을 로고설정 탭에 열어서 바로 미세조정 가능하게
     openLogoTabForSticker(i);
@@ -1720,8 +1741,24 @@ function syncChromaEdit() {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; const ve = document.getElementById(id + '-v'); if (ve) ve.textContent = v; };
   set('chroma-threshold', ck.threshold ?? 70);
   set('chroma-softness', ck.softness ?? 30);
-  const sw = document.getElementById('chroma-swatch');
-  if (sw) sw.style.background = `rgb(${ck.r},${ck.g},${ck.b})`;
+  // 지울 색 스와치들 렌더 (클릭 시 그 색 제거)
+  const wrap = document.getElementById('chroma-swatches');
+  if (wrap) {
+    const colors = chromaColors(ck);
+    wrap.innerHTML = '';
+    colors.forEach((col, idx) => {
+      const sp = document.createElement('span');
+      sp.title = '클릭하면 이 색 제거';
+      sp.style.cssText = `width:22px;height:22px;border-radius:4px;border:1px solid #555;display:inline-block;cursor:pointer;background:rgb(${col.r},${col.g},${col.b});`;
+      sp.addEventListener('click', () => {
+        if (!ck.colors) ck.colors = colors.slice();
+        ck.colors.splice(idx, 1);
+        debouncedSave(); syncChromaEdit();
+      });
+      wrap.appendChild(sp);
+    });
+    if (!colors.length) { const em = document.createElement('span'); em.className = 'hint-text'; em.textContent = '(지울 색 없음)'; wrap.appendChild(em); }
+  }
 }
 let _chromaPickMode = false;
 function bindChromaEdit() {
@@ -1743,11 +1780,20 @@ function bindChromaEdit() {
   pick?.addEventListener('click', () => {
     _chromaPickMode = !_chromaPickMode;
     pick.style.background = _chromaPickMode ? 'rgba(124,92,255,0.6)' : '';
-    pick.textContent = _chromaPickMode ? '🎯 화면에서 배경 클릭…' : '🎯 화면에서 색 찍기';
+    pick.textContent = _chromaPickMode ? '✅ 찍기 완료' : '🎯 화면에서 색 찍기';
+    const hint = document.getElementById('chroma-pick-hint');
+    if (hint) hint.textContent = _chromaPickMode ? '프리뷰에서 지우고 싶은 배경 부분을 클릭하세요 (여러 번 가능)' : '';
+  });
+  const reset = document.getElementById('chroma-reset');
+  reset?.addEventListener('click', () => {
+    const s = state.stickers[state.selectedStickerIdx];
+    if (s && s.chromaKey) { s.chromaKey.colors = []; debouncedSave(); syncChromaEdit(); }
   });
   off?.addEventListener('click', () => {
     const s = state.stickers[state.selectedStickerIdx];
     if (s) { s.chromaKey = null; debouncedSave(); }
+    _chromaPickMode = false;
+    if (pick) { pick.style.background = ''; pick.textContent = '🎯 화면에서 색 찍기'; }
     syncChromaEdit(); updateEditToolbar();
   });
 }

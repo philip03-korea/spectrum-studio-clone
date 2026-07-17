@@ -1089,13 +1089,15 @@
                     <input type="range" min="0" max="150" value="30" id="chroma-softness" />
                     <span class="slider-val" id="chroma-softness-v">30</span>
                   </label>
-                  <label class="slider-row" style="grid-template-columns: 60px 1fr;">
+                  <div class="slider-row" style="grid-template-columns: 60px 1fr;">
                     <span>배경색</span>
-                    <div style="display:flex; gap:6px; align-items:center;">
-                      <span id="chroma-swatch" style="width:24px; height:24px; border-radius:4px; border:1px solid #555; display:inline-block;"></span>
-                      <button class="btn-mini" id="chroma-pick">🎯 화면에서 색 찍기</button>
-                    </div>
-                  </label>
+                    <div id="chroma-swatches" style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;"></div>
+                  </div>
+                  <div class="viz-grid grid2" style="margin-top:4px;">
+                    <button class="btn-mini" id="chroma-pick">🎯 화면에서 색 찍기</button>
+                    <button class="btn-mini" id="chroma-reset">색 초기화</button>
+                  </div>
+                  <div class="hint-text" id="chroma-pick-hint" style="margin-top:4px;"></div>
                   <button class="btn-mini" id="chroma-off" style="margin-top:4px;">배경 지우기 끄기</button>
                 </div>
               </div>
@@ -1205,6 +1207,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_36_chroma_fine_controls"></script>
+  <script type="module" src="app.js?v=v4_37_chroma_multicolor_pick"></script>
 </body>
 </html>
