@@ -593,6 +593,16 @@
             <div class="canvas-wrap">
               <canvas id="preview-canvas" width="1280" height="720"></canvas>
               <button class="play-overlay" id="play-overlay">▶</button>
+              <div class="edit-toolbar hidden" id="edit-toolbar">
+                <span class="edit-toolbar-label" id="edit-toolbar-label">요소</span>
+                <button class="edit-tb-btn" data-edit-act="back" title="맨 뒤로">⤓</button>
+                <button class="edit-tb-btn" data-edit-act="backward" title="뒤로">↓</button>
+                <button class="edit-tb-btn" data-edit-act="forward" title="앞으로">↑</button>
+                <button class="edit-tb-btn" data-edit-act="front" title="맨 앞으로">⤒</button>
+                <button class="edit-tb-btn" data-edit-act="copy" title="복사 (Ctrl+C)" id="edit-tb-copy">⧉</button>
+                <button class="edit-tb-btn" data-edit-act="dechroma" title="영상 배경 지우기(크로마키)" id="edit-tb-dechroma">🪄</button>
+                <button class="edit-tb-btn edit-tb-del" data-edit-act="delete" title="삭제 (Delete)" id="edit-tb-del">✕</button>
+              </div>
             </div>
             <div class="timeline">
               <button class="play-btn play-btn-sm" id="to-start-btn" title="처음으로">⏮</button>
@@ -752,37 +762,6 @@
               <div class="adjust-divider">가사 ↔ 이미지 싱크</div>
               <div class="hint-text" style="margin-bottom:6px;">각 배경이 나타날 <b>시작 시간(mm:ss)</b>. 위 "가사 타이밍" ON일 때 적용. 가사와 안 맞으면 여기서 직접 조정하세요.</div>
               <div id="bg-sync-list" class="bg-sync-list"></div>
-
-              <div class="adjust-divider">🎬 이미지 → 영상 변환 (로컬 ComfyUI)</div>
-              <div class="bg-img2vid">
-                <div class="drop-area drop-mini" id="drop-img2vid">
-                  <input type="file" id="file-img2vid" accept="image/*,video/*" hidden />
-                  <label for="file-img2vid" class="drop-label">
-                    <div class="drop-icon">🖼️🎬</div>
-                    <div class="drop-text">이미지 또는 영상 선택</div>
-                    <div class="drop-hint">이미지 → 영상 생성 · 영상 → 바로 사용</div>
-                  </label>
-                </div>
-                <!-- 이미지 업로드 시: 영상 생성 옵션 -->
-                <div class="bg-img2vid-preview hidden" id="img2vid-preview">
-                  <img id="img2vid-thumb" alt="" />
-                  <input type="text" class="text-input" id="img2vid-prompt" placeholder="움직임 설명 (예: 노래하는 여자가수, 부드러운 카메라 이동)" />
-                  <label class="check-row">
-                    <input type="checkbox" id="img2vid-usebg" checked /> 이 이미지를 바탕으로 생성 (끄면 프롬프트만으로 생성)
-                  </label>
-                  <button class="btn btn-ghost" id="img2vid-generate">🎬 영상 생성</button>
-                  <div class="hint-text" id="img2vid-status"></div>
-                </div>
-                <!-- 결과(생성됨 또는 직접 업로드한 영상): 배경/오버레이로 추가 -->
-                <div class="bg-img2vid-result hidden" id="img2vid-result">
-                  <video id="img2vid-result-video" muted loop autoplay playsinline></video>
-                  <div class="hint-text">이 영상을 배경 자체로 쓸지, 배경 위(전경)에 올릴지 선택하세요.</div>
-                  <div class="viz-grid grid2">
-                    <button class="btn btn-ghost" id="img2vid-use-bg">배경으로 추가</button>
-                    <button class="btn btn-ghost" id="img2vid-use-overlay">배경 앞에 오버레이로 추가</button>
-                  </div>
-                </div>
-              </div>
 
               <div class="adjust-divider">프레임</div>
               <label class="slider-row" style="grid-template-columns: 60px 1fr;">
@@ -1032,6 +1011,38 @@
               <label class="check-row">
                 <input type="checkbox" id="logo-shadow" /> 입체 그림자 효과
               </label>
+
+              <div class="adjust-divider">🎬 이미지 → 영상 변환 (로컬 ComfyUI)</div>
+              <div class="bg-img2vid">
+                <div class="drop-area drop-mini" id="drop-img2vid">
+                  <input type="file" id="file-img2vid" accept="image/*,video/*" hidden />
+                  <label for="file-img2vid" class="drop-label">
+                    <div class="drop-icon">🖼️🎬</div>
+                    <div class="drop-text">이미지 또는 영상 선택</div>
+                    <div class="drop-hint">이미지 → 영상 생성 · 영상 → 바로 사용</div>
+                  </label>
+                </div>
+                <!-- 이미지 업로드 시: 영상 생성 옵션 -->
+                <div class="bg-img2vid-preview hidden" id="img2vid-preview">
+                  <img id="img2vid-thumb" alt="" />
+                  <input type="text" class="text-input" id="img2vid-prompt" placeholder="움직임 설명 (예: 노래하는 여자가수, 부드러운 카메라 이동)" />
+                  <label class="check-row">
+                    <input type="checkbox" id="img2vid-usebg" checked /> 이 이미지를 바탕으로 생성 (끄면 프롬프트만으로 생성)
+                  </label>
+                  <button class="btn btn-ghost" id="img2vid-generate">🎬 영상 생성</button>
+                  <div class="hint-text" id="img2vid-status"></div>
+                </div>
+                <!-- 결과(생성됨 또는 직접 업로드한 영상): 배경/오버레이로 추가 -->
+                <div class="bg-img2vid-result hidden" id="img2vid-result">
+                  <video id="img2vid-result-video" muted loop autoplay playsinline></video>
+                  <div class="hint-text">이 영상을 배경 자체로 쓸지, 배경 위(전경)에 올릴지 선택하세요.</div>
+                  <div class="viz-grid grid2">
+                    <button class="btn btn-ghost" id="img2vid-use-bg">배경으로 추가</button>
+                    <button class="btn btn-ghost" id="img2vid-use-overlay">배경 앞에 오버레이로 추가</button>
+                  </div>
+                </div>
+              </div>
+
               <div class="adjust-divider">🏷️ 스티커 (개별 조정)</div>
               <div class="sticker-list" id="sticker-list">
                 <div class="sticker-empty">미디어 준비 단계에서 스티커를 먼저 추가하세요.</div>
@@ -1171,6 +1182,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_34_video_upload_sticker_drag"></script>
+  <script type="module" src="app.js?v=v4_35_zorder_toolbar_chroma"></script>
 </body>
 </html>

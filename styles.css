@@ -727,6 +727,44 @@ body {
   cursor: grab;
 }
 #preview-canvas:active { cursor: grabbing; }
+.edit-toolbar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(20, 22, 34, 0.92);
+  border: 1px solid rgba(124, 92, 255, 0.5);
+  border-radius: 8px;
+  z-index: 20;
+  backdrop-filter: blur(4px);
+}
+.edit-toolbar-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b7a8ff;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+.edit-tb-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 5px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 5px;
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+}
+.edit-tb-btn:hover { background: rgba(124,92,255,0.4); }
+.edit-tb-btn.edit-tb-del { color: #ff8080; }
+.edit-tb-btn.edit-tb-del:hover { background: rgba(255,80,80,0.35); }
+.edit-tb-btn.hidden { display: none; }
 .play-overlay {
   position: absolute;
   width: 70px; height: 70px;

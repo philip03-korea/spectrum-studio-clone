@@ -1376,9 +1376,51 @@ const ctx = canvas.getContext('2d');
 // 캔버스 직접 드래그 편집(로고/타이틀/가사/스펙트럼): 매 프레임 draw*()가 자신의 화면상
 // 위치(x,y,w,h)를 여기 채워 넣고, 마우스 드래그가 이를 히트테스트/이동/크기조절에 쓴다.
 const _editBounds = {};
-let _selectedEditEl = null;   // 'logo'|'title'|'lyrics'|'spectrum'|null
+let _selectedEditEl = null;   // 'logo'|'title'|'lyrics'|'spectrum'|'sticker:N'|null
 let _editDrag = null;         // { key, mode:'move'|'resize', startPX, startPY, orig }
+let _stickerClipboard = null; // 복사/잘라내기한 스티커(스냅샷)
 const clamp = (lo, hi, v) => Math.min(hi, Math.max(lo, v));
+
+// ===== 레이어 z-순서 (스펙트럼/타이틀/가사/로고 + 스티커 통합) =====
+// z가 클수록 위에 그려진다. 명시값(state.*.z)이 없으면 기본값 사용(기존 그리기 순서 유지).
+const _OVERLAY_DEFAULT_Z = { spectrum: 10, title: 20, lyrics: 30, logo: 40 };
+function overlayZ(key) {
+  if (key.startsWith('sticker:')) {
+    const s = state.stickers[+key.split(':')[1]];
+    if (!s) return 0;
+    if (s.z != null) return s.z;
+    return (s.layer || 'front') === 'back' ? 5 : 100;
+  }
+  const st = key === 'spectrum' ? state.spectrum : key === 'title' ? state.title : key === 'lyrics' ? state.lyrics : state.logoPos;
+  return st.z != null ? st.z : (_OVERLAY_DEFAULT_Z[key] || 0);
+}
+function setOverlayZ(key, v) {
+  if (key.startsWith('sticker:')) { const s = state.stickers[+key.split(':')[1]]; if (s) s.z = v; return; }
+  if (key === 'spectrum') state.spectrum.z = v;
+  else if (key === 'title') state.title.z = v;
+  else if (key === 'lyrics') state.lyrics.z = v;
+  else if (key === 'logo') state.logoPos.z = v;
+}
+function allOverlayKeys() {
+  return ['spectrum', 'title', 'lyrics', 'logo', ...state.stickers.map((s, i) => 'sticker:' + i)];
+}
+// 정렬된 순서(아래→위)로 정수 z를 다시 매긴다.
+function normalizeOverlayZ() {
+  const keys = allOverlayKeys().sort((a, b) => overlayZ(a) - overlayZ(b));
+  keys.forEach((k, i) => setOverlayZ(k, i));
+  return keys;
+}
+function reorderOverlay(target, dir) {
+  const keys = normalizeOverlayZ();
+  const idx = keys.indexOf(target);
+  if (idx < 0) return;
+  if (dir === 'front') setOverlayZ(target, keys.length);
+  else if (dir === 'back') setOverlayZ(target, -1);
+  else if (dir === 'forward' && idx < keys.length - 1) { setOverlayZ(target, idx + 1); setOverlayZ(keys[idx + 1], idx); }
+  else if (dir === 'backward' && idx > 0) { setOverlayZ(target, idx - 1); setOverlayZ(keys[idx - 1], idx); }
+  normalizeOverlayZ();
+  debouncedSave();
+}
 
 function canvasPointFromEvent(e) {
   const rect = canvas.getBoundingClientRect();
@@ -1387,14 +1429,10 @@ function canvasPointFromEvent(e) {
     y: (e.clientY - rect.top) * (canvas.height / rect.height),
   };
 }
-// 화면상 z-order 기준(위→아래): front 스티커 > 로고 > 가사 > 타이틀 > 스펙트럼 > back 스티커.
-// 먼저 맞는 요소를 선택. 스티커는 나중에 그려진 것(배열 뒤쪽)이 위에 있으므로 역순 탐색.
+// z가 큰 것(위에 그려진 것)부터 히트테스트 — 겹칠 때 위쪽 요소가 먼저 잡힌다.
 function hitTestEditEl(px, py) {
   const hs = Math.max(10, canvas.width / 90);
-  const stickerKeys = (state.stickers || []).map((s, i) => 'sticker:' + i);
-  const frontStickers = stickerKeys.filter(k => (state.stickers[+k.split(':')[1]].layer || 'front') === 'front').reverse();
-  const backStickers = stickerKeys.filter(k => (state.stickers[+k.split(':')[1]].layer || 'front') === 'back').reverse();
-  const order = [...frontStickers, 'logo', 'lyrics', 'title', 'spectrum', ...backStickers];
+  const order = allOverlayKeys().sort((a, b) => overlayZ(b) - overlayZ(a));
   for (const key of order) {
     const b = _editBounds[key];
     if (!b) continue;
@@ -1467,13 +1505,14 @@ function bindCanvasDragEdit() {
     const p = canvasPointFromEvent(e);
     const hit = hitTestEditEl(p.x, p.y);
     _selectedEditEl = hit ? hit.key : null;
-    if (!hit) return;
+    if (!hit) { updateEditToolbar(); return; }  // 빈 곳 클릭 = 선택 해제 → 툴바 숨김
     // 스티커를 클릭하면 스티커 편집 패널도 해당 스티커를 선택 상태로.
     if (hit.key.startsWith('sticker:')) {
       state.selectedStickerIdx = +hit.key.split(':')[1];
       if (typeof renderStickerToolList === 'function') renderStickerToolList();
     }
     _editDrag = { key: hit.key, mode: hit.mode, startPX: p.x, startPY: p.y, orig: snapshotEditState(hit.key) };
+    updateEditToolbar();
     e.preventDefault();
   });
   window.addEventListener('mousemove', (e) => {
@@ -1484,6 +1523,148 @@ function bindCanvasDragEdit() {
   window.addEventListener('mouseup', () => {
     if (_editDrag) { _editDrag = null; debouncedSave(); }
   });
+}
+
+// ===== 편집 툴바 (레이어 순서 / 복사 / 삭제 / 크로마키) =====
+function updateEditToolbar() {
+  const tb = document.getElementById('edit-toolbar');
+  if (!tb) return;
+  if (!_selectedEditEl || renderInProgress) { tb.classList.add('hidden'); return; }
+  tb.classList.remove('hidden');
+  const isSticker = _selectedEditEl.startsWith('sticker:');
+  const label = { spectrum: '스펙트럼', title: '타이틀', lyrics: '가사', logo: '로고' }[_selectedEditEl]
+    || (isSticker ? (state.stickers[+_selectedEditEl.split(':')[1]]?.kind === 'video' ? '영상' : '스티커') : '요소');
+  document.getElementById('edit-toolbar-label').textContent = label;
+  document.getElementById('edit-tb-copy').classList.toggle('hidden', !isSticker);
+  document.getElementById('edit-tb-del').classList.toggle('hidden', !isSticker);
+  const isVideoSticker = isSticker && state.stickers[+_selectedEditEl.split(':')[1]]?.kind === 'video';
+  const dechromaBtn = document.getElementById('edit-tb-dechroma');
+  dechromaBtn.classList.toggle('hidden', !isVideoSticker);
+  if (isVideoSticker) dechromaBtn.style.background = state.stickers[+_selectedEditEl.split(':')[1]]?.chromaKey ? 'rgba(124,92,255,0.6)' : '';
+}
+function bindEditToolbar() {
+  const tb = document.getElementById('edit-toolbar');
+  if (!tb) return;
+  tb.querySelectorAll('[data-edit-act]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const act = b.dataset.editAct;
+      if (!_selectedEditEl) return;
+      if (['front', 'back', 'forward', 'backward'].includes(act)) reorderOverlay(_selectedEditEl, act);
+      else if (act === 'copy') { await copySelectedSticker(); }
+      else if (act === 'delete') deleteSelectedSticker();
+      else if (act === 'dechroma' && _selectedEditEl.startsWith('sticker:')) toggleStickerChroma(+_selectedEditEl.split(':')[1]);
+      updateEditToolbar();
+    });
+  });
+}
+
+// ===== 스티커 삭제 / 복사 / 붙여넣기 =====
+async function deleteSticker(i) {
+  const removed = state.stickers.splice(i, 1)[0];
+  if (removed && removed.url) URL.revokeObjectURL(removed.url);
+  const stored = await dbGet('stickers') || [];
+  if (stored.length > i) { stored.splice(i, 1); await dbSet('stickers', stored); }
+  _selectedEditEl = null;
+  renderStickerThumbs(); renderStickerToolList();
+  debouncedSave();
+}
+function deleteSelectedSticker() {
+  if (!_selectedEditEl || !_selectedEditEl.startsWith('sticker:')) return;
+  deleteSticker(+_selectedEditEl.split(':')[1]);
+}
+async function copySelectedSticker() {
+  if (!_selectedEditEl || !_selectedEditEl.startsWith('sticker:')) return;
+  const s = state.stickers[+_selectedEditEl.split(':')[1]];
+  if (!s) return;
+  try {
+    const blob = await (await fetch(s.url)).blob(); // 원본이 삭제(잘라내기)돼도 살아남도록 미리 확보
+    _stickerClipboard = {
+      blob, name: s.name, kind: s.kind, layer: s.layer,
+      x: s.x, y: s.y, size: s.size, opacity: s.opacity,
+      chromaKey: s.chromaKey ? { ...s.chromaKey } : null,
+    };
+  } catch (e) { _stickerClipboard = null; }
+}
+async function pasteSticker() {
+  if (!_stickerClipboard) return;
+  if (state.stickers.length >= 5) { alert('스티커는 최대 5개까지입니다.'); return; }
+  const src = _stickerClipboard;
+  const type = src.blob.type || (src.kind === 'video' ? 'video/mp4' : 'image/png');
+  const file = new File([src.blob], src.name || 'sticker', { type });
+  await addSticker(file, src.layer || 'front');
+  const ns = state.stickers[state.stickers.length - 1];
+  ns.x = clamp(0, 100, (src.x ?? 50) + 5);
+  ns.y = clamp(0, 100, (src.y ?? 50) + 5);
+  ns.size = src.size; ns.opacity = src.opacity;
+  if (src.chromaKey) ns.chromaKey = { ...src.chromaKey };
+  renderStickerThumbs(); renderStickerToolList();
+  const stored = await dbGet('stickers') || []; stored.push(file); await dbSet('stickers', stored);
+  _selectedEditEl = 'sticker:' + (state.stickers.length - 1);
+  state.selectedStickerIdx = state.stickers.length - 1;
+  debouncedSave();
+}
+function bindEditKeyboard() {
+  window.addEventListener('keydown', (e) => {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+    const isSticker = _selectedEditEl && _selectedEditEl.startsWith('sticker:');
+    if ((e.key === 'Delete' || e.key === 'Backspace') && isSticker) {
+      e.preventDefault(); deleteSelectedSticker(); updateEditToolbar(); return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'c' && isSticker) { copySelectedSticker(); }
+      else if (k === 'x' && isSticker) { copySelectedSticker().then(() => { deleteSelectedSticker(); updateEditToolbar(); }); }
+      else if (k === 'v' && _stickerClipboard) { e.preventDefault(); pasteSticker().then(updateEditToolbar); }
+    }
+  });
+}
+
+// ===== 크로마키(영상 배경 지우기) =====
+const _chromaCanvas = document.createElement('canvas');
+const _chromaCtx = _chromaCanvas.getContext('2d', { willReadFrequently: true });
+function drawChromaKeyed(c, s, x, y, w, h) {
+  const sw = s.width, sh = s.height;
+  if (!sw || !sh) { c.drawImage(s.el, x, y, w, h); return; }
+  const maxDim = 512; // 성능을 위해 축소 처리
+  const scale = Math.min(1, maxDim / Math.max(sw, sh));
+  const cw = Math.max(1, Math.round(sw * scale)), ch = Math.max(1, Math.round(sh * scale));
+  if (_chromaCanvas.width !== cw) _chromaCanvas.width = cw;
+  if (_chromaCanvas.height !== ch) _chromaCanvas.height = ch;
+  try {
+    _chromaCtx.clearRect(0, 0, cw, ch);
+    _chromaCtx.drawImage(s.el, 0, 0, cw, ch);
+    const img = _chromaCtx.getImageData(0, 0, cw, ch);
+    const d = img.data;
+    const key = s.chromaKey;
+    const t2 = (key.threshold ?? 110) ** 2;
+    for (let i = 0; i < d.length; i += 4) {
+      const dr = d[i] - key.r, dg = d[i + 1] - key.g, db = d[i + 2] - key.b;
+      if (dr * dr + dg * dg + db * db < t2) d[i + 3] = 0;
+    }
+    _chromaCtx.putImageData(img, 0, 0);
+    c.drawImage(_chromaCanvas, x, y, w, h);
+  } catch (e) {
+    c.drawImage(s.el, x, y, w, h); // 오류 시 원본
+  }
+}
+function toggleStickerChroma(i) {
+  const s = state.stickers[i];
+  if (!s) return;
+  if (s.chromaKey) { s.chromaKey = null; debouncedSave(); return; }
+  // 네 모서리 색 평균을 배경색으로 추정해서 키 컬러로 사용
+  const sw = Math.min(64, s.width || 64), sh = Math.min(64, s.height || 64);
+  _chromaCanvas.width = sw; _chromaCanvas.height = sh;
+  try {
+    _chromaCtx.drawImage(s.el, 0, 0, sw, sh);
+    const corners = [[0, 0], [sw - 1, 0], [0, sh - 1], [sw - 1, sh - 1]];
+    let r = 0, g = 0, b = 0;
+    for (const [cx, cy] of corners) { const p = _chromaCtx.getImageData(cx, cy, 1, 1).data; r += p[0]; g += p[1]; b += p[2]; }
+    s.chromaKey = { r: Math.round(r / 4), g: Math.round(g / 4), b: Math.round(b / 4), threshold: 115 };
+    debouncedSave();
+  } catch (e) {
+    alert('배경색 감지 실패: ' + e.message + '\n(영상이 완전히 로드된 뒤 다시 시도하세요)');
+  }
 }
 
 function getCanvasSize() {
@@ -1595,23 +1776,22 @@ function drawBackgrounds(c, W, H, time) {
 }
 
 // ====== 스티커 (layer: 'back'=배경 바로 위/텍스트류보다 아래, 'front'=최상단 — 기본) ======
-function drawStickers(c, W, H, time, layer = 'front') {
-  if (!state.stickers || !state.stickers.length) return;
-  state.stickers.forEach((s, i) => {
-    if (!s.el) return;
-    if ((s.layer || 'front') !== layer) return;
-    const size = (s.size ?? 100) * (W / 1280);
-    const ratio = s.height / s.width;
-    const w = size, h = size * ratio;
-    const x = (W - w) * ((s.x ?? 50) / 100);
-    const y = (H - h) * ((s.y ?? 50) / 100);
-    _editBounds['sticker:' + i] = { x, y, w, h };
-    c.globalAlpha = (s.opacity ?? 100) / 100;
-    // 영상 스티커: <video> 요소는 재생 중이어야 프레임이 그려진다.
-    if (s.kind === 'video' && s.el.paused) { s.el.play().catch(()=>{}); }
-    c.drawImage(s.el, x, y, w, h);
-    c.globalAlpha = 1;
-  });
+function drawOneSticker(c, W, H, time, i) {
+  const s = state.stickers[i];
+  if (!s || !s.el) return;
+  const size = (s.size ?? 100) * (W / 1280);
+  const ratio = s.height / s.width;
+  const w = size, h = size * ratio;
+  const x = (W - w) * ((s.x ?? 50) / 100);
+  const y = (H - h) * ((s.y ?? 50) / 100);
+  _editBounds['sticker:' + i] = { x, y, w, h };
+  c.save();
+  c.globalAlpha = (s.opacity ?? 100) / 100;
+  // 영상 스티커: <video> 요소는 재생 중이어야 프레임이 그려진다.
+  if (s.kind === 'video' && s.el.paused) { s.el.play().catch(()=>{}); }
+  if (s.chromaKey) drawChromaKeyed(c, s, x, y, w, h);
+  else c.drawImage(s.el, x, y, w, h);
+  c.restore();
 }
 
 // vfx state (visualizer 효과: 글로우펄스/비트펀치/그라디언트스윕/컬러사이클)
@@ -2484,13 +2664,19 @@ function drawScene(c, W, H, freqData, time) {
     c.translate(-W/2, -H/2);
   }
   drawBackgrounds(c, W, H, time);
-  drawStickers(c, W, H, time, 'back');
   applyVfxOverlay(c, W, H);
-  drawSpectrum(c, W, H, freqData);
-  drawTitle(c, W, H, freqData);
-  drawLyrics(c, W, H, time);
-  drawLogo(c, W, H);
-  drawStickers(c, W, H, time, 'front');
+  // 스펙트럼/타이틀/가사/로고 + 스티커를 z-순서대로(아래→위) 그린다.
+  const _drawMap = {
+    spectrum: () => drawSpectrum(c, W, H, freqData),
+    title: () => drawTitle(c, W, H, freqData),
+    lyrics: () => drawLyrics(c, W, H, time),
+    logo: () => drawLogo(c, W, H),
+  };
+  const _orderedKeys = allOverlayKeys().sort((a, b) => overlayZ(a) - overlayZ(b));
+  for (const key of _orderedKeys) {
+    if (key.startsWith('sticker:')) drawOneSticker(c, W, H, time, +key.split(':')[1]);
+    else _drawMap[key]();
+  }
   // 편집 선택 테두리는 위 요소들과 같은 변형(비트펄스/줌펄스) 안에서 그려야 위치가 안 어긋난다.
   drawEditSelectionOverlay(c, W, H);
   c.restore();
@@ -4191,6 +4377,12 @@ async function renderToMp4() {
         await seekVideoTo(b.el, time % b.el.duration);
       }
     }
+    // 영상 오버레이 스티커도 시간에 맞춰 seek(각자 길이 내에서 루프) — 내보내기 결정성 확보
+    for (const s of state.stickers) {
+      if (s.kind === 'video' && s.el && isFinite(s.el.duration) && s.el.duration > 0) {
+        await seekVideoTo(s.el, time % s.el.duration);
+      }
+    }
 
     drawScene(offCtx, W, H, fftPerFrame[f], time);
 
@@ -5838,6 +6030,8 @@ async function init() {
   bindLyricImageGen();
   bindImg2Vid();
   bindCanvasDragEdit();
+  bindEditToolbar();
+  bindEditKeyboard();
   renderTitleFontGrid();
   bindRainbowToggle();
   wireDrop('drop-audio', 'file-audio', handleAudio);
