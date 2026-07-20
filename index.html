@@ -468,6 +468,71 @@
             </div>
           </div>
         </div>
+
+        <!-- ===== 2-1. 썸네일 생성 ===== -->
+        <div class="card thumb-section">
+          <div class="card-head">
+            <h3>🖼️ 2-1. 썸네일 생성</h3>
+            <span class="badge badge-optional">선택</span>
+          </div>
+          <p class="panel-desc">참고 이미지와 ① 가사 이미지 생성에서 만든 배경 이미지를 불러와, 그 화풍 그대로 유튜브 썸네일을 생성합니다. (GPT Image 2 · Higgsfield 프록시 필요)</p>
+
+          <div class="ig-stage-grid thumb-grid">
+            <div class="ig-left">
+              <div class="sub-title">🎭 참고 이미지 업로드 (최대 6장)</div>
+              <div class="drop-area drop-mini" id="thumb-ref-drop">
+                <input type="file" id="thumb-ref-file" accept="image/*" multiple hidden />
+                <label for="thumb-ref-file" class="drop-label">
+                  <div class="drop-icon">🖼️</div>
+                  <div class="drop-text">참고 이미지 드롭 · 클릭</div>
+                  <div class="drop-hint">인물·화풍 참고용 — 스타일을 그대로 반영</div>
+                </label>
+              </div>
+              <div class="bg-thumbs hidden" id="thumb-ref-thumbs"></div>
+
+              <div class="sub-title">🎬 가사 이미지 생성 배경 불러오기</div>
+              <button type="button" class="btn-mini" id="thumb-load-lg-frames">↻ ① 가사 이미지 생성 결과 불러오기</button>
+              <div class="bg-thumbs hidden" id="thumb-lgframe-thumbs"></div>
+              <div class="hint-text">불러온 뒤 클릭해서 참고용으로 선택/해제 (여러 장 가능 · 파란 테두리 = 선택됨)</div>
+
+              <div class="sub-title">🎯 썸네일 유형</div>
+              <div class="seg" id="thumb-hook-seg">
+                <button type="button" class="seg-btn active" data-hook="emotion">① 감정 훅킹</button>
+                <button type="button" class="seg-btn" data-hook="message">② 메시지 훅킹</button>
+                <button type="button" class="seg-btn" data-hook="object">③ 오브젝트 훅킹</button>
+              </div>
+              <div class="hint-text" id="thumb-hook-desc">인물의 감정(눈물·침묵·희망 등)을 클로즈업으로 강조해 클릭을 유도합니다</div>
+
+              <div class="sub-title">✏️ 썸네일 문구</div>
+              <input type="text" class="text-input" id="thumb-phrase" placeholder="예: 혼자가 아닙니다 (3~7단어 권장)" maxlength="40" />
+              <input type="text" class="text-input" id="thumb-subphrase" placeholder="보조 문구 (선택 · 메시지 훅킹 전용)" maxlength="40" style="margin-top:6px;" />
+
+              <div class="sub-title">📐 비율</div>
+              <div class="seg" id="thumb-aspect-seg">
+                <button type="button" class="seg-btn active" data-aspect="16:9">16:9</button>
+                <button type="button" class="seg-btn" data-aspect="9:16">9:16</button>
+                <button type="button" class="seg-btn" data-aspect="1:1">1:1</button>
+              </div>
+
+              <button class="btn btn-primary" id="thumb-generate" style="width:100%; margin-top:12px; padding:12px;">🖼️ 썸네일 생성</button>
+              <div class="hint-text" id="thumb-status" style="margin-top:6px;">대기 중 — Higgsfield 프록시(Stage 1 상단에서 설정) 필요</div>
+            </div>
+
+            <div class="ig-right">
+              <h3 style="margin-top:0;">결과</h3>
+              <div id="thumb-result-empty" class="hint-text" style="padding:24px; text-align:center;">
+                참고 이미지를 선택하고 문구를 입력한 뒤 생성 버튼을 누르세요
+              </div>
+              <div id="thumb-result-wrap" class="hidden">
+                <img id="thumb-result-img" class="thumb-result-img" alt="생성된 썸네일" />
+                <div class="viz-grid grid2" style="margin-top:8px;">
+                  <a class="btn btn-ghost" id="thumb-download" download="thumbnail.png">📥 다운로드</a>
+                  <button class="btn btn-ghost" id="thumb-regenerate">↻ 다시 생성</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ===== STAGE 3: 비주얼 편집 (was Stage 2) ===== -->
@@ -1207,6 +1272,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_38_sticker_bigger_offcanvas_handles"></script>
+  <script type="module" src="app.js?v=v4_39_thumbnail_gen"></script>
 </body>
 </html>

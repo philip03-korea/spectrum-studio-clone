@@ -6156,6 +6156,193 @@ async function downloadFramesZip() {
 }
 
 // ====================================================================
+// 2-1. 썸네일 생성 (GPT Image 2) — 참고 이미지 + ① 가사 이미지 생성 배경을 함께
+// references로 보내 그 화풍 그대로 유튜브 썸네일 1장을 생성한다.
+// 지침서(스펙트럼_스튜디오_유튜브_썸네일_생성_지침서.md)의 3가지 훅킹 유형을 그대로 반영.
+// ====================================================================
+const THUMB_HOOK_TEMPLATES = {
+  emotion: {
+    label: '감정 훅킹',
+    desc: '인물의 감정(눈물·침묵·희망 등)을 클로즈업으로 강조해 클릭을 유도합니다',
+    build: (phrase) =>
+`Create a single YouTube thumbnail image, not a collage, not split screen.
+Emotional hook style, cinematic anime Korean Christian visual.
+A sorrowful biblical character with tearful eyes, dramatic warm golden light breaking through dark clouds, deep shadows, emotional close-up, strong facial expression, sacred and serious atmosphere.
+Place one main character only, large readable Korean title text area on the left side.
+Add bold Korean text: "${phrase}"
+Use thick bold Korean typography, high contrast white and gold letters, dark shadow outline, readable on mobile.`,
+  },
+  message: {
+    label: '메시지 훅킹',
+    desc: '문구 자체가 클릭 이유가 되도록, 배경은 단순하게 두고 텍스트를 강하게 보여줍니다',
+    build: (phrase, sub) =>
+`Create a single YouTube thumbnail image, not a collage, not divided panels.
+Message hook style, cinematic biblical anime illustration.
+Dark dramatic background with storm clouds, distant ancient city, golden light rays, minimal composition.
+The Korean text must be the main focus.
+Add large bold Korean text: "${phrase}"
+Typography should be thick, powerful, high contrast, white and antique gold, with dark shadow and subtle texture.${sub ? `\nSmall subtitle text: "${sub}"` : ''}
+Keep character or symbol secondary, leave enough empty space for title readability.`,
+  },
+  object: {
+    label: '오브젝트 장면 훅킹',
+    desc: '이야기 속 핵심 상징물을 클로즈업해 주제를 압축합니다',
+    build: (phrase) =>
+`Create a single standalone thumbnail image, no collage, no split layout.
+Symbolic scene hook style, cinematic biblical anime visual.
+Close-up of a key symbolic object from the story on a stone or wooden surface, golden light reflecting on it, a sorrowful biblical figure blurred in the background, stormy sky, ancient city atmosphere.
+Strong central symbol, dramatic shadows, emotional and sacred mood.
+Add bold Korean text: "${phrase}"
+Use large thick Korean typography, white and gold, dark outline, readable on mobile.`,
+  },
+};
+const THUMB_ASPECT_LINE = {
+  '16:9': '16:9 horizontal composition, 1280x720 YouTube thumbnail layout, wide cinematic framing, main character on one side, large text on the opposite side.',
+  '9:16': '9:16 vertical composition, 1080x1920 Shorts thumbnail layout, character centered vertically, large Korean text stacked in the upper and middle area, safe margins for mobile.',
+  '1:1': '1:1 square composition, 1080x1080 social thumbnail layout, centered character or symbol, bold Korean text in upper or lower third, clean balanced framing.',
+};
+const THUMB_FINAL_CONSTRAINTS =
+  'single standalone thumbnail image, not a collage, not split screen, bold readable Korean typography, ' +
+  'strong focal point, cinematic lighting, high contrast, premium Korean YouTube thumbnail style, no logo, no watermark.';
+
+const _thumb = {
+  refFiles: [],            // 업로드한 참고 이미지 (File[], 최대 6)
+  lgFrameSel: new Set(),   // 참고로 선택한 _lg.frames idx
+  hook: 'emotion',
+  aspect: '16:9',
+};
+
+function buildThumbPrompt() {
+  const phrase = (document.getElementById('thumb-phrase')?.value || '').trim() || '문구를 입력하세요';
+  const sub = (document.getElementById('thumb-subphrase')?.value || '').trim();
+  const tpl = THUMB_HOOK_TEMPLATES[_thumb.hook];
+  return [tpl.build(phrase, sub), THUMB_ASPECT_LINE[_thumb.aspect], THUMB_FINAL_CONSTRAINTS].join('\n');
+}
+
+function renderThumbRefThumbs() {
+  const wrap = document.getElementById('thumb-ref-thumbs');
+  if (!wrap) return;
+  if (!_thumb.refFiles.length) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '';
+  _thumb.refFiles.forEach((f, i) => {
+    const t = document.createElement('div');
+    t.className = 'bg-thumb';
+    t.title = f.name;
+    const im = document.createElement('img'); im.src = URL.createObjectURL(f); t.appendChild(im);
+    const x = document.createElement('button');
+    x.className = 'bg-thumb-x'; x.textContent = '×';
+    x.addEventListener('click', e => { e.stopPropagation(); _thumb.refFiles.splice(i, 1); renderThumbRefThumbs(); });
+    t.appendChild(x);
+    wrap.appendChild(t);
+  });
+}
+
+function renderThumbLgFrames() {
+  const wrap = document.getElementById('thumb-lgframe-thumbs');
+  if (!wrap) return;
+  if (!_lg.frames.length) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '';
+  _lg.frames.slice().sort((a, b) => a.idx - b.idx).forEach(f => {
+    const t = document.createElement('div');
+    t.className = 'bg-thumb' + (_thumb.lgFrameSel.has(f.idx) ? ' active' : '');
+    t.title = f.prompt || `#${f.idx}`;
+    const im = document.createElement('img'); im.src = f.url; t.appendChild(im);
+    t.addEventListener('click', () => {
+      if (_thumb.lgFrameSel.has(f.idx)) _thumb.lgFrameSel.delete(f.idx); else _thumb.lgFrameSel.add(f.idx);
+      renderThumbLgFrames();
+    });
+    wrap.appendChild(t);
+  });
+}
+
+// 업로드 참고 이미지 + 선택된 Stage1 프레임을 하나의 references(data URL) 배열로 합친다 (최대 10장).
+async function collectThumbRefDataUrls() {
+  const urls = [];
+  for (const f of _thumb.refFiles.slice(0, 6)) urls.push(await fileToDataURL(f));
+  const chosenFrames = _lg.frames.filter(f => _thumb.lgFrameSel.has(f.idx));
+  for (const f of chosenFrames.slice(0, 6)) urls.push(await fileToDataURL(f.blob));
+  return urls.slice(0, 10);
+}
+
+function bindThumbnailGen() {
+  const $T = id => document.getElementById(id);
+  if (!$T('thumb-generate')) return;
+
+  wireDrop('thumb-ref-drop', 'thumb-ref-file', files => {
+    for (const f of files) {
+      if (_thumb.refFiles.length >= 6) break;
+      if (f.type.startsWith('image/')) _thumb.refFiles.push(f);
+    }
+    renderThumbRefThumbs();
+  });
+
+  $T('thumb-load-lg-frames')?.addEventListener('click', () => {
+    if (!_lg.frames.length) {
+      alert('아직 ① 가사 이미지 생성 결과가 없습니다. Stage 1(가사 이미지 생성)에서 먼저 이미지를 생성하세요.');
+      return;
+    }
+    renderThumbLgFrames();
+  });
+
+  document.querySelectorAll('#thumb-hook-seg .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#thumb-hook-seg .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _thumb.hook = btn.dataset.hook;
+      $T('thumb-hook-desc').textContent = THUMB_HOOK_TEMPLATES[_thumb.hook].desc;
+    });
+  });
+
+  document.querySelectorAll('#thumb-aspect-seg .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#thumb-aspect-seg .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _thumb.aspect = btn.dataset.aspect;
+    });
+  });
+
+  const setStatus = (text, busy) => {
+    const el = $T('thumb-status'); if (el) el.textContent = text;
+    $T('thumb-generate').disabled = !!busy;
+  };
+
+  async function doGenerate() {
+    const phrase = ($T('thumb-phrase')?.value || '').trim();
+    if (!phrase) { alert('썸네일 문구를 입력하세요.'); return; }
+    const proxyUrl = getHfProxyUrl();
+    if (!proxyUrl) { alert('Higgsfield 프록시 URL이 필요합니다 (Stage 1 상단 🛰️ Higgsfield 프록시에서 입력/저장).'); return; }
+    setStatus('참고 이미지 준비 중…', true);
+    try {
+      const refs = await collectThumbRefDataUrls();
+      let prompt = buildThumbPrompt();
+      if (refs.length) {
+        prompt += '\nCRITICAL: Reproduce the EXACT art style of the attached reference image(s) — same rendering technique, ' +
+          'linework, color palette, shading, and mood. Keep the same main character, outfit, and identity as shown in the reference image(s).';
+      }
+      setStatus('썸네일 생성 중… (수 초~수십 초 소요)', true);
+      const blob = await generateImageViaHiggsfield(proxyUrl, prompt, _thumb.aspect, refs, 'gpt_image_2');
+      const url = URL.createObjectURL(blob);
+      $T('thumb-result-img').src = url;
+      $T('thumb-result-empty').classList.add('hidden');
+      $T('thumb-result-wrap').classList.remove('hidden');
+      const dl = $T('thumb-download');
+      dl.href = url;
+      dl.download = `thumbnail_${_thumb.hook}_${_thumb.aspect.replace(':', 'x')}.png`;
+      setStatus('생성 완료 ✓', false);
+    } catch (e) {
+      console.error(e);
+      setStatus('생성 실패: ' + e.message, false);
+      alert('썸네일 생성 실패: ' + e.message);
+    }
+  }
+
+  $T('thumb-generate').addEventListener('click', doGenerate);
+  $T('thumb-regenerate')?.addEventListener('click', doGenerate);
+}
+
+// ====================================================================
 // Init
 // ====================================================================
 async function init() {
@@ -6181,6 +6368,7 @@ async function init() {
   bindStage1AudioTranscribe();
   bindLyricImageGen();
   bindImg2Vid();
+  bindThumbnailGen();
   bindCanvasDragEdit();
   bindEditToolbar();
   bindEditKeyboard();

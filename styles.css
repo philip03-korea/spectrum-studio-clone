@@ -1523,3 +1523,16 @@ body {
 .lyric-sync-controls button:disabled { opacity: 0.5; cursor: default; }
 #lsync-finish { background: color-mix(in srgb, var(--accent) 15%, transparent); border-color: var(--accent); }
 #lsync-cancel { background: color-mix(in srgb, var(--danger) 12%, transparent); border-color: var(--danger); color: var(--danger); }
+
+/* ===== 2-1. 썸네일 생성 ===== */
+.thumb-section { margin-top: 16px; }
+.thumb-grid { height: auto; }
+.thumb-result-img {
+  width: 100%;
+  border-radius: 8px;
+  display: block;
+  background: #000;
+}
+@media (max-width: 1100px) {
+  .thumb-grid { grid-template-columns: 1fr; }
+}
