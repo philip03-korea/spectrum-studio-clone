@@ -517,14 +517,8 @@ body {
 .step-panel { display: none; flex: 1; overflow-y: auto; padding: 20px 24px; }
 .step-panel.active { display: flex; flex-direction: column; }
 
-/* ============ Stage 1 ============ */
-.stage1-grid {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 18px;
-  height: 100%;
-}
-.stage1-right { display: flex; flex-direction: column; gap: 14px; }
+/* ============ Stage 2 (미디어 준비) — 한 줄 스택 ============ */
+.stage2-stack { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
 
 .card {
   background: var(--bg-1);
@@ -1525,7 +1519,6 @@ body {
 #lsync-cancel { background: color-mix(in srgb, var(--danger) 12%, transparent); border-color: var(--danger); color: var(--danger); }
 
 /* ===== 2-1. 썸네일 생성 ===== */
-.thumb-section { margin-top: 16px; }
 .thumb-grid { height: auto; }
 .thumb-result-img {
   width: 100%;
