@@ -1328,7 +1328,7 @@ body {
 }
 .export-title { font-size: 22px; margin: 0 0 4px; }
 .export-sub { color: var(--text-2); margin: 0 0 20px; font-size: 13px; }
-.export-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+.export-stats { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 18px; }
 .stat-box { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; text-align: center; }
 .stat-label { font-size: 10px; color: var(--text-2); font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px; }
 .stat-val { font-size: 14px; color: var(--success); font-weight: 600; }
@@ -1381,7 +1381,7 @@ body {
 }
 .profile-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
   margin-bottom: 18px;
 }
@@ -1394,7 +1394,13 @@ body {
   cursor: pointer;
   font-family: inherit;
   text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
+.profile-btn .profile-icon { font-size: 20px; }
+.profile-btn .profile-name { font-weight: 600; }
+.profile-btn .profile-bitrate { margin-left: auto; color: var(--text-2); font-size: 12px; }
 .profile-btn:hover { background: var(--bg-3); }
 .profile-btn.active {
   background: var(--accent-dim);
