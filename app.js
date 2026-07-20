@@ -6208,15 +6208,45 @@ const THUMB_FINAL_CONSTRAINTS =
 const _thumb = {
   refFiles: [],            // 업로드한 참고 이미지 (File[], 최대 6)
   lgFrameSel: new Set(),   // 참고로 선택한 _lg.frames idx
-  hook: 'emotion',
   aspect: '16:9',
 };
 
-function buildThumbPrompt() {
-  const phrase = (document.getElementById('thumb-phrase')?.value || '').trim() || '문구를 입력하세요';
-  const sub = (document.getElementById('thumb-subphrase')?.value || '').trim();
-  const tpl = THUMB_HOOK_TEMPLATES[_thumb.hook];
+function buildThumbPrompt(hook, phrase, sub) {
+  const tpl = THUMB_HOOK_TEMPLATES[hook];
   return [tpl.build(phrase, sub), THUMB_ASPECT_LINE[_thumb.aspect], THUMB_FINAL_CONSTRAINTS].join('\n');
+}
+
+// 곡 제목/테마/가사를 근거로 훅킹 유형별 썸네일 문구를 GPT로 자동 생성.
+// hooks: 생성할 유형만 골라서 요청 (전체 3종 또는 재생성할 유형 1개).
+async function generateThumbPhrasesViaGPT(apiKey, hooks) {
+  const title = (document.getElementById('lg-title')?.value || '').trim();
+  const theme = (document.getElementById('lg-theme')?.value || '').trim();
+  const lyrics = (document.getElementById('lyrics-text-stage1')?.value || document.getElementById('lyrics-text-ig')?.value || '').trim().slice(0, 800);
+  const fieldSpecs = hooks.map(h => h === 'message' ? '"message": "...", "messageSub": "..."' : `"${h}": "..."`).join(', ');
+  const instr =
+    'You are writing YouTube thumbnail hook phrases for a Korean Christian/biblical music video.\n' +
+    'Write SHORT, PUNCHY KOREAN phrases (3~7 words, one line each) for the requested hook style(s) below, based on the song info.\n' +
+    '- "emotion": an emotional statement evoking tears/comfort/hope tied to the song\'s feeling.\n' +
+    '- "message": a direct, curiosity-driving message a viewer would click to learn more about; also write "messageSub", a short optional subtitle phrase.\n' +
+    '- "object": a short phrase tied to a key symbolic object or scene from the song\'s story.\n' +
+    (title ? `Song title: ${title}\n` : '') +
+    (theme ? `Theme/character: ${theme}\n` : '') +
+    (lyrics ? `Lyrics excerpt:\n${lyrics}\n` : '') +
+    `Return ONLY JSON with exactly these keys: {${fieldSpecs}}`;
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: instr }],
+      response_format: { type: 'json_object' },
+      temperature: 0.9,
+      max_tokens: 300,
+    }),
+  });
+  if (!r.ok) throw new Error(`문구 생성 실패 ${r.status}`);
+  const j = await r.json();
+  try { return JSON.parse(j.choices?.[0]?.message?.content || '{}'); } catch (_) { return {}; }
 }
 
 function renderThumbRefThumbs() {
@@ -6286,15 +6316,6 @@ function bindThumbnailGen() {
     renderThumbLgFrames();
   });
 
-  document.querySelectorAll('#thumb-hook-seg .seg-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#thumb-hook-seg .seg-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      _thumb.hook = btn.dataset.hook;
-      $T('thumb-hook-desc').textContent = THUMB_HOOK_TEMPLATES[_thumb.hook].desc;
-    });
-  });
-
   document.querySelectorAll('#thumb-aspect-seg .seg-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#thumb-aspect-seg .seg-btn').forEach(b => b.classList.remove('active'));
@@ -6308,29 +6329,111 @@ function bindThumbnailGen() {
     $T('thumb-generate').disabled = !!busy;
   };
 
+  const getOpenAIKey = () => (document.getElementById('lg-apikey')?.value || localStorage.getItem('ssc-openai-key') || '').trim();
+
+  function fillPhraseFields(obj) {
+    if (obj.emotion) { const el = document.querySelector('.thumb-phrase-input[data-hook="emotion"]'); if (el) el.value = obj.emotion; }
+    if (obj.message) { const el = document.querySelector('.thumb-phrase-input[data-hook="message"]'); if (el) el.value = obj.message; }
+    if (obj.messageSub) { const el = document.querySelector('.thumb-subphrase-input[data-hook="message"]'); if (el) el.value = obj.messageSub; }
+    if (obj.object) { const el = document.querySelector('.thumb-phrase-input[data-hook="object"]'); if (el) el.value = obj.object; }
+  }
+
+  $T('thumb-phrases-auto')?.addEventListener('click', async () => {
+    const apiKey = getOpenAIKey();
+    if (!apiKey) { alert('OpenAI API 키가 필요합니다 (Stage 1 상단 🔑 OpenAI API 키에서 입력/저장).'); return; }
+    const btn = $T('thumb-phrases-auto');
+    btn.disabled = true;
+    setStatus('3종 문구 자동 생성 중…', false);
+    try {
+      const obj = await generateThumbPhrasesViaGPT(apiKey, ['emotion', 'message', 'object']);
+      fillPhraseFields(obj);
+      setStatus('문구 생성 완료 ✓', false);
+    } catch (e) {
+      setStatus('문구 생성 실패: ' + e.message, false);
+      alert('문구 생성 실패: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.querySelectorAll('.thumb-phrase-regen').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const hook = btn.dataset.hook;
+      const apiKey = getOpenAIKey();
+      if (!apiKey) { alert('OpenAI API 키가 필요합니다 (Stage 1 상단 🔑 OpenAI API 키에서 입력/저장).'); return; }
+      btn.disabled = true;
+      setStatus(`"${THUMB_HOOK_TEMPLATES[hook].label}" 문구 재생성 중…`, false);
+      try {
+        const obj = await generateThumbPhrasesViaGPT(apiKey, [hook]);
+        fillPhraseFields(obj);
+        setStatus('문구 재생성 완료 ✓', false);
+      } catch (e) {
+        setStatus('문구 재생성 실패: ' + e.message, false);
+        alert('문구 재생성 실패: ' + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  function renderThumbResults(results) {
+    const grid = $T('thumb-result-grid');
+    const empty = $T('thumb-result-empty');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (!results.length) { grid.classList.add('hidden'); empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    grid.classList.remove('hidden');
+    results.forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'thumb-result-card';
+      const label = document.createElement('div');
+      label.className = 'thumb-result-label';
+      label.textContent = THUMB_HOOK_TEMPLATES[r.hook].label;
+      const img = document.createElement('img');
+      img.className = 'thumb-result-img';
+      img.src = r.url;
+      img.alt = THUMB_HOOK_TEMPLATES[r.hook].label;
+      const dl = document.createElement('a');
+      dl.className = 'btn btn-ghost';
+      dl.style.cssText = 'margin-top:6px; display:block; text-align:center;';
+      dl.href = r.url;
+      dl.download = `thumbnail_${r.hook}_${_thumb.aspect.replace(':', 'x')}.png`;
+      dl.textContent = '📥 다운로드';
+      card.appendChild(label); card.appendChild(img); card.appendChild(dl);
+      grid.appendChild(card);
+    });
+  }
+
   async function doGenerate() {
-    const phrase = ($T('thumb-phrase')?.value || '').trim();
-    if (!phrase) { alert('썸네일 문구를 입력하세요.'); return; }
+    const items = [];
+    for (const cb of document.querySelectorAll('.thumb-hook-cb:checked')) {
+      const hook = cb.dataset.hook;
+      const phrase = (document.querySelector(`.thumb-phrase-input[data-hook="${hook}"]`)?.value || '').trim();
+      if (!phrase) { alert(`"${THUMB_HOOK_TEMPLATES[hook].label}" 문구가 비어 있습니다. ✨ 문구 자동 생성을 누르거나 직접 입력하세요.`); return; }
+      const sub = hook === 'message' ? (document.querySelector('.thumb-subphrase-input[data-hook="message"]')?.value || '').trim() : '';
+      items.push({ hook, phrase, sub });
+    }
+    if (!items.length) { alert('썸네일 유형을 최소 1개 이상 체크하세요.'); return; }
     const proxyUrl = getHfProxyUrl();
     if (!proxyUrl) { alert('Higgsfield 프록시 URL이 필요합니다 (Stage 1 상단 🛰️ Higgsfield 프록시에서 입력/저장).'); return; }
     setStatus('참고 이미지 준비 중…', true);
     try {
       const refs = await collectThumbRefDataUrls();
-      let prompt = buildThumbPrompt();
-      if (refs.length) {
-        prompt += '\nCRITICAL: Reproduce the EXACT art style of the attached reference image(s) — same rendering technique, ' +
-          'linework, color palette, shading, and mood. Keep the same main character, outfit, and identity as shown in the reference image(s).';
+      const styleClause = refs.length
+        ? '\nCRITICAL: Reproduce the EXACT art style of the attached reference image(s) — same rendering technique, ' +
+          'linework, color palette, shading, and mood. Keep the same main character, outfit, and identity as shown in the reference image(s).'
+        : '';
+      const results = [];
+      for (let i = 0; i < items.length; i++) {
+        const { hook, phrase, sub } = items[i];
+        setStatus(`(${i + 1}/${items.length}) ${THUMB_HOOK_TEMPLATES[hook].label} 생성 중… (수 초~수십 초 소요)`, true);
+        const prompt = buildThumbPrompt(hook, phrase, sub) + styleClause;
+        const blob = await generateImageViaHiggsfield(proxyUrl, prompt, _thumb.aspect, refs, 'gpt_image_2');
+        results.push({ hook, blob, url: URL.createObjectURL(blob) });
       }
-      setStatus('썸네일 생성 중… (수 초~수십 초 소요)', true);
-      const blob = await generateImageViaHiggsfield(proxyUrl, prompt, _thumb.aspect, refs, 'gpt_image_2');
-      const url = URL.createObjectURL(blob);
-      $T('thumb-result-img').src = url;
-      $T('thumb-result-empty').classList.add('hidden');
-      $T('thumb-result-wrap').classList.remove('hidden');
-      const dl = $T('thumb-download');
-      dl.href = url;
-      dl.download = `thumbnail_${_thumb.hook}_${_thumb.aspect.replace(':', 'x')}.png`;
-      setStatus('생성 완료 ✓', false);
+      renderThumbResults(results);
+      setStatus(`생성 완료 ✓ (${results.length}개)`, false);
     } catch (e) {
       console.error(e);
       setStatus('생성 실패: ' + e.message, false);
@@ -6339,7 +6442,6 @@ function bindThumbnailGen() {
   }
 
   $T('thumb-generate').addEventListener('click', doGenerate);
-  $T('thumb-regenerate')?.addEventListener('click', doGenerate);
 }
 
 // ====================================================================

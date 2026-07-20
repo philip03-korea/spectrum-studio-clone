@@ -1536,6 +1536,26 @@ body {
 
 /* ===== 2-1. 썸네일 생성 ===== */
 .thumb-grid { height: auto; }
+.thumb-hook-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 4px; }
+.thumb-hook-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--bg-2);
+}
+.thumb-hook-row:has(.thumb-hook-cb:checked) { border-color: var(--accent); }
+.thumb-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.thumb-result-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--bg-2);
+}
+.thumb-result-card .thumb-result-label { font-size: 11px; font-weight: 700; color: var(--text-2); margin-bottom: 6px; }
 .thumb-result-img {
   width: 100%;
   border-radius: 8px;

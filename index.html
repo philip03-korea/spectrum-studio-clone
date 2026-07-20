@@ -492,17 +492,41 @@
               <div class="bg-thumbs hidden" id="thumb-lgframe-thumbs"></div>
               <div class="hint-text">불러온 뒤 클릭해서 참고용으로 선택/해제 (여러 장 가능 · 파란 테두리 = 선택됨)</div>
 
-              <div class="sub-title">🎯 썸네일 유형</div>
-              <div class="seg" id="thumb-hook-seg">
-                <button type="button" class="seg-btn active" data-hook="emotion">① 감정 훅킹</button>
-                <button type="button" class="seg-btn" data-hook="message">② 메시지 훅킹</button>
-                <button type="button" class="seg-btn" data-hook="object">③ 오브젝트 훅킹</button>
+              <div class="sub-title">🎯 썸네일 유형 (중복 선택 가능 · 체크한 만큼 생성)</div>
+              <button type="button" class="btn-mini" id="thumb-phrases-auto" style="margin-bottom:8px;">✨ 3종 문구 자동 생성</button>
+              <div class="thumb-hook-list" id="thumb-hook-list">
+                <div class="thumb-hook-row" data-hook="emotion">
+                  <label class="check-row">
+                    <input type="checkbox" class="thumb-hook-cb" data-hook="emotion" checked /> <b>① 감정 훅킹</b>
+                  </label>
+                  <div class="hint-text">인물의 감정(눈물·침묵·희망 등)을 클로즈업으로 강조해 클릭을 유도합니다</div>
+                  <div class="apikey-row" style="margin-top:4px;">
+                    <input type="text" class="text-input thumb-phrase-input" data-hook="emotion" placeholder="✨ 문구 자동 생성을 눌러주세요" maxlength="40" />
+                    <button type="button" class="btn-key-save thumb-phrase-regen" data-hook="emotion" title="이 문구만 다시 생성">🔄</button>
+                  </div>
+                </div>
+                <div class="thumb-hook-row" data-hook="message">
+                  <label class="check-row">
+                    <input type="checkbox" class="thumb-hook-cb" data-hook="message" /> <b>② 메시지 훅킹</b>
+                  </label>
+                  <div class="hint-text">문구 자체가 클릭 이유가 되도록, 배경은 단순하게 두고 텍스트를 강하게 보여줍니다</div>
+                  <div class="apikey-row" style="margin-top:4px;">
+                    <input type="text" class="text-input thumb-phrase-input" data-hook="message" placeholder="✨ 문구 자동 생성을 눌러주세요" maxlength="40" />
+                    <button type="button" class="btn-key-save thumb-phrase-regen" data-hook="message" title="이 문구만 다시 생성">🔄</button>
+                  </div>
+                  <input type="text" class="text-input thumb-subphrase-input" data-hook="message" placeholder="보조 문구 (자동 생성됨 · 선택)" maxlength="40" style="margin-top:6px;" />
+                </div>
+                <div class="thumb-hook-row" data-hook="object">
+                  <label class="check-row">
+                    <input type="checkbox" class="thumb-hook-cb" data-hook="object" /> <b>③ 오브젝트 훅킹</b>
+                  </label>
+                  <div class="hint-text">이야기 속 핵심 상징물을 클로즈업해 주제를 압축합니다</div>
+                  <div class="apikey-row" style="margin-top:4px;">
+                    <input type="text" class="text-input thumb-phrase-input" data-hook="object" placeholder="✨ 문구 자동 생성을 눌러주세요" maxlength="40" />
+                    <button type="button" class="btn-key-save thumb-phrase-regen" data-hook="object" title="이 문구만 다시 생성">🔄</button>
+                  </div>
+                </div>
               </div>
-              <div class="hint-text" id="thumb-hook-desc">인물의 감정(눈물·침묵·희망 등)을 클로즈업으로 강조해 클릭을 유도합니다</div>
-
-              <div class="sub-title">✏️ 썸네일 문구</div>
-              <input type="text" class="text-input" id="thumb-phrase" placeholder="예: 혼자가 아닙니다 (3~7단어 권장)" maxlength="40" />
-              <input type="text" class="text-input" id="thumb-subphrase" placeholder="보조 문구 (선택 · 메시지 훅킹 전용)" maxlength="40" style="margin-top:6px;" />
 
               <div class="sub-title">📐 비율</div>
               <div class="seg" id="thumb-aspect-seg">
@@ -518,15 +542,9 @@
             <div class="ig-right">
               <h3 style="margin-top:0;">결과</h3>
               <div id="thumb-result-empty" class="hint-text" style="padding:24px; text-align:center;">
-                참고 이미지를 선택하고 문구를 입력한 뒤 생성 버튼을 누르세요
+                유형을 체크하고 ✨ 문구를 생성한 뒤 생성 버튼을 누르세요
               </div>
-              <div id="thumb-result-wrap" class="hidden">
-                <img id="thumb-result-img" class="thumb-result-img" alt="생성된 썸네일" />
-                <div class="viz-grid grid2" style="margin-top:8px;">
-                  <a class="btn btn-ghost" id="thumb-download" download="thumbnail.png">📥 다운로드</a>
-                  <button class="btn btn-ghost" id="thumb-regenerate">↻ 다시 생성</button>
-                </div>
-              </div>
+              <div id="thumb-result-grid" class="thumb-result-grid hidden"></div>
             </div>
           </div>
           </div>
