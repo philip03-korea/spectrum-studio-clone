@@ -1056,6 +1056,16 @@ body {
 @media (max-width: 1100px) {
   .ig-stage-grid { grid-template-columns: 1fr; }
 }
+/* Stage 1 — 가로 2단 대신 세로 한 줄 스택 (모바일 친화적 레이아웃) */
+[data-panel="1"] .ig-stage-grid {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  min-height: auto;
+  flex-shrink: 0;
+  max-width: 760px;
+}
+[data-panel="1"] .stage-nav { max-width: 760px; }
 .right-tabs { grid-template-columns: repeat(5, 1fr); }
 .left-tab, .right-tab {
   background: transparent;
