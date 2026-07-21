@@ -36,10 +36,10 @@ const DEFAULT_STATE = () => ({
               bands: 64, maxH: 100, lineW: 4, barW: 8, gap: 0 },
   // text/lyrics/배경 선택은 곡마다 달라지는 콘텐츠라서 기본값에 넣지 않고,
   // 스타일 계열 값(폰트·데코·위치 미세조정 등)만 대표님이 확정한 세팅으로 반영.
-  title: { text: '벼량끝 On the Brink Studio', size: 47, y: 85, show: true, font: '"Gowun Batang", serif', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'caption', position: 'top-right', xFine: 4.81, yFine: 1.52, captionText: 'TRACK 01', fontKey: 'gowunbatang' },
-  logoPos: { x: 2.83, y: 4.62, size: 100, opacity: 100, shadow: true },
+  title: { text: '벼량끝 On the Brink Studio', size: 38.25, y: 85, show: true, font: '"Gowun Batang", serif', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'caption', position: 'top-right', xFine: 4.51, yFine: 0.81, captionText: 'TRACK 01', fontKey: 'gowunbatang' },
+  logoPos: { x: 2.73, y: 3.18, size: 100, opacity: 100, shadow: true },
   selectedStickerIdx: 0,
-  lyrics: { lines: [], rawText: '', show: true, y: 69.13, size: 43, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 184, highlight: true, lang: 'en', display: 'both' },
+  lyrics: { lines: [], rawText: '', show: true, y: 72.15, size: 43, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 184, highlight: true, lang: 'en', display: 'both' },
   slideshow: { enabled: true, interval: 5, crossfade: true, syncLyrics: true },
   frame: { style: 'none', intensity: 50 },
   filter: { preset: 'none' },
@@ -4580,6 +4580,8 @@ function restoreUI() {
   setSlider('adj-y',          state.spectrum.y,    v => v + '%');
   setSlider('title-size',     state.title.size,    v => v + 'px');
   setSlider('title-y',        state.title.y,       v => v + '%');
+  setSlider('title-x-fine',   state.title.xFine || 0, v => v + '%');
+  setSlider('title-y-fine',   state.title.yFine || 0, v => v + '%');
   setSlider('logo-x',         state.logoPos.x,        v => v + '%');
   setSlider('logo-y',         state.logoPos.y,        v => v + '%');
   setSlider('logo-size',      state.logoPos.size,     v => v + 'px');
