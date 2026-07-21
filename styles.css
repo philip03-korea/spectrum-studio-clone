@@ -664,6 +664,21 @@ body {
   flex: 1;
   min-height: 0;
 }
+/* Stage 3 — 도구/캔버스/조정 가로 3단 대신 세로 스택 (모바일 친화적).
+   캔버스는 넓게, 도구/조정 패널은 칩·슬라이더가 늘어지지 않게 폭 제한. */
+[data-panel="3"] .studio-grid {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  min-height: auto;
+  flex-shrink: 0;
+  gap: 18px;
+}
+[data-panel="3"] .preview-area { order: 1; width: 100%; max-width: 1000px; margin: 0 auto; flex: none; }
+[data-panel="3"] .tool-panel { order: 2; width: 100%; max-width: 720px; margin: 0 auto; }
+[data-panel="3"] .adjust-panel { order: 3; width: 100%; max-width: 720px; margin: 0 auto; }
+[data-panel="3"] .genre-tabs { max-width: 1000px; margin: 0 auto 14px; flex-shrink: 0; }
+[data-panel="3"] .stage-nav { max-width: 1000px; margin: 14px auto 0; }
 
 .tool-panel, .adjust-panel {
   background: var(--bg-1);
