@@ -34,7 +34,7 @@ const DEFAULT_STATE = () => ({
   spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80,
               renderStyle: 'line', center: true, width: 100, speed: 70, sens: 85,
               bands: 64, maxH: 100, lineW: 4, barW: 8, gap: 0 },
-  title: { text: '벼량끝 On the Brink Studio', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'none', position: 'top-right', xFine: 0, yFine: 0 },
+  title: { text: '벼량끝 On the Brink Studio', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'none', position: 'top-right', xFine: 0, yFine: 0, captionText: 'TRACK 01' },
   logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
   selectedStickerIdx: 0,
   lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'ko' },
@@ -353,6 +353,10 @@ const TITLE_FONTS = [
   { key: 'gowundodum',  name: '고운돋움',     css: '"Gowun Dodum", sans-serif' },
   { key: 'gowunbatang', name: '고운바탕',     css: '"Gowun Batang", serif' },
   { key: 'singleday',   name: '하이멜로디',   css: '"Single Day", cursive' },
+  { key: 'bebas',       name: 'BEBAS',       css: '"Bebas Neue", "Arial Narrow", sans-serif' },
+  { key: 'gugi',        name: '구기체',       css: '"Gugi", "Black Han Sans", sans-serif' },
+  { key: 'songmyung',   name: '송명체',       css: '"Song Myung", serif' },
+  { key: 'poorstory',   name: '푸어스토리',   css: '"Poor Story", cursive' },
 ];
 
 const $ = id => document.getElementById(id);
@@ -853,6 +857,7 @@ function bindAllSliders() {
   // Defensive bindings — element might not exist in current layout
   const onE = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   onE('title-text',  'input',  e => { state.title.text = e.target.value; debouncedSave(); });
+  onE('title-caption-text', 'input', e => { state.title.captionText = e.target.value; debouncedSave(); });
   onE('title-show',  'change', e => { state.title.show = e.target.checked; debouncedSave(); });
   onE('title-font',  'change', e => { state.title.font = e.target.value; debouncedSave(); });  // legacy
   onE('title-color', 'input',  e => { state.title.color = e.target.value; debouncedSave(); });
@@ -2528,12 +2533,14 @@ function drawTitleDeco(c, W, H, x, y, size, text, deco, color, fam, align) {
   const R = align === 'left' ? x + m.width : (align === 'right' ? x : x + m.width/2);
   const C = (L + R) / 2;
   switch (deco) {
-    case 'caption':
+    case 'caption': {
       c.textAlign = 'center'; c.textBaseline = 'middle';
       c.font = `500 ${size * 0.3}px ${fam}`;
       c.fillStyle = 'rgba(255,255,255,0.78)';
-      c.fillText('— TRACK 01 —', C, y - size * 0.85);
+      const capText = (state.title.captionText || 'TRACK 01').trim();
+      c.fillText(`— ${capText} —`, C, y - size * 0.85);
       break;
+    }
     case 'barLeft':
       c.fillStyle = color;
       c.fillRect(L - size * 0.35, y - size * 0.45, size * 0.08, size * 0.9);
@@ -3066,11 +3073,12 @@ function drawParticles(c, W, H, time, data) {
     }
   }
   if (ptc['light-rays'] && !isHeavyAndShouldSkip('light-rays')) {
-    // Radial beams from top
+    // Radial beams from top, fanning DOWN into the canvas (+PI/2 = straight down in canvas coords).
+    // Was -PI/2 (straight up) — every ray rendered entirely above y=0, i.e. invisible.
     c.save();
     c.globalCompositeOperation = 'lighter';
     for (let i = 0; i < 5; i++) {
-      const ang = -Math.PI/2 + (i - 2) * 0.2 + Math.sin(time * 0.3 + i) * 0.05;
+      const ang = Math.PI/2 + (i - 2) * 0.2 + Math.sin(time * 0.3 + i) * 0.05;
       const x2 = W/2 + Math.cos(ang) * H * 1.5;
       const y2 = 0 + Math.sin(ang) * H * 1.5;
       const g = c.createLinearGradient(W/2, 0, x2, y2);
@@ -4291,6 +4299,7 @@ function restoreUI() {
   const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = v; };
   setVal('title-text', state.title.text || '');
+  setVal('title-caption-text', state.title.captionText || 'TRACK 01');
   setChk('title-show', state.title.show);
   setVal('title-font', state.title.font || '');
   setVal('title-color', state.title.color || '#ffffff');
