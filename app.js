@@ -1433,21 +1433,30 @@ function canvasPointFromEvent(e) {
 function editCorners(b) {
   return [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]];
 }
-function hitTestEditEl(px, py) {
+// currentKey: 클릭 시점에 이미 선택돼 있던 요소. 겹친 자리를 다시 클릭하면
+// 같은 맨 위 요소만 계속 선택되는 문제를 막기 위해, 현재 선택된 요소가 이번
+// 클릭 후보에도 포함되면 z순서상 그 다음(한 단계 아래) 요소로 순환 선택한다.
+function hitTestEditEl(px, py, currentKey) {
   const hs = Math.max(12, canvas.width / 80);
   const order = allOverlayKeys().sort((a, b) => overlayZ(b) - overlayZ(a));
+  const candidates = [];
   for (const key of order) {
     const b = _editBounds[key];
     if (!b) continue;
-    // 네 모서리 어디든 핸들 근처면 크기조절
+    let mode = null;
+    // 네 모서리 어디든 핸들 근처면 크기조절이 우선
     for (const [hx, hy] of editCorners(b)) {
-      if (Math.abs(px - hx) <= hs && Math.abs(py - hy) <= hs) return { key, mode: 'resize' };
+      if (Math.abs(px - hx) <= hs && Math.abs(py - hy) <= hs) { mode = 'resize'; break; }
     }
-    if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
-      return { key, mode: 'move' };
-    }
+    if (!mode && px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) mode = 'move';
+    if (mode) candidates.push({ key, mode });
   }
-  return null;
+  if (!candidates.length) return null;
+  if (currentKey) {
+    const idx = candidates.findIndex(c => c.key === currentKey);
+    if (idx > -1 && candidates.length > 1) return candidates[(idx + 1) % candidates.length];
+  }
+  return candidates[0];
 }
 function snapshotEditState(key) {
   if (key === 'logo') return { x: state.logoPos.x, y: state.logoPos.y, size: state.logoPos.size, w: _editBounds.logo.w, h: _editBounds.logo.h };
@@ -1535,7 +1544,7 @@ function bindCanvasDragEdit() {
       e.preventDefault();
       return; // 모드 유지 (반복 클릭)
     }
-    const hit = hitTestEditEl(p.x, p.y);
+    const hit = hitTestEditEl(p.x, p.y, _selectedEditEl);
     _selectedEditEl = hit ? hit.key : null;
     if (!hit) { updateEditToolbar(); return; }  // 빈 곳 클릭 = 선택 해제 → 툴바 숨김
     // 스티커를 클릭하면 스티커 편집 패널도 해당 스티커를 선택 상태로.
