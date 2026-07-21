@@ -3204,6 +3204,23 @@ function bindDarkMode() {
 // ====================================================================
 // 사이드바 하단 버튼: 사용자 가이드 / 개발자 채널 / 공식 사이트
 // ====================================================================
+// 모바일 좁은 화면: 햄버거 버튼으로 좌측 사이드바를 슬라이드 메뉴처럼 열고 닫는다.
+// 데스크톱(사이드바가 항상 고정 표시되는 폭)에서는 이 요소들이 CSS로 숨겨져 있어 동작해도 무해.
+function bindMobileNav() {
+  const hamburger = $('mobile-hamburger');
+  const sidebar = document.querySelector('.sidebar');
+  const backdrop = $('mobile-nav-backdrop');
+  if (!hamburger || !sidebar || !backdrop) return;
+  const open = () => { sidebar.classList.add('mobile-open'); backdrop.classList.add('open'); };
+  const close = () => { sidebar.classList.remove('mobile-open'); backdrop.classList.remove('open'); };
+  hamburger.addEventListener('click', open);
+  backdrop.addEventListener('click', close);
+  // 사이드바 안의 단계/버튼을 클릭하면 메뉴를 자동으로 닫는다.
+  sidebar.addEventListener('click', e => {
+    if (e.target.closest('.step, .side-btn, .dark-toggle')) close();
+  });
+}
+
 function bindSidebarBottomButtons() {
   // 사용자 가이드 모달
   const guideBtn = $('btn-user-guide');
@@ -6474,6 +6491,7 @@ async function init() {
   bindTitlePosChips();
   bindBgSort();
   bindSidebarBottomButtons();
+  bindMobileNav();
   bindSpectrumControls();
   bindStage1Lyrics();
   bindStage1AudioTranscribe();
