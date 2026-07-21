@@ -26,19 +26,21 @@ const DEFAULT_STATE = () => ({
   bgAnimation: 'orbs',
   logo: null,
   stickers: [],             // [{name, url, el, width, height, x, y, size, opacity}]
-  encoding: { resolution: '1920x1080', aspect: '16:9', fps: 60, playCount: 1, audioBitrate: 192 },
+  encoding: { resolution: '1280x720', aspect: '16:9', fps: 30, playCount: 1, audioBitrate: 192 },
   genre: 'project',
-  viz: 'bars',
+  viz: 'mini-slim',
   tool: 'bg',
   bg: { brightness: 100, saturation: 100, blur: 0, dim: 20 },
-  spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 80,
+  spectrum: { colorMode: 'multi', color: '#7c5cff', size: 60, y: 99.68,
               renderStyle: 'line', center: true, width: 100, speed: 70, sens: 85,
               bands: 64, maxH: 100, lineW: 4, barW: 8, gap: 0 },
-  title: { text: '벼량끝 On the Brink Studio', size: 48, y: 85, show: true, font: '', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'none', position: 'top-right', xFine: 0, yFine: 0, captionText: 'TRACK 01' },
-  logoPos: { x: 5, y: 5, size: 100, opacity: 100 },
+  // text/lyrics/배경 선택은 곡마다 달라지는 콘텐츠라서 기본값에 넣지 않고,
+  // 스타일 계열 값(폰트·데코·위치 미세조정 등)만 대표님이 확정한 세팅으로 반영.
+  title: { text: '벼량끝 On the Brink Studio', size: 47, y: 85, show: true, font: '"Gowun Batang", serif', color: '#ffffff', pulse: false, badge: false, badgePos: 'below', style: 'neon', deco: 'caption', position: 'top-right', xFine: 4.81, yFine: 1.52, captionText: 'TRACK 01', fontKey: 'gowunbatang' },
+  logoPos: { x: 2.83, y: 4.62, size: 100, opacity: 100, shadow: true },
   selectedStickerIdx: 0,
-  lyrics: { lines: [], rawText: '', show: true, y: 72, size: 42, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 150, highlight: true, lang: 'en', display: 'ko' },
-  slideshow: { enabled: true, interval: 5, crossfade: true, syncLyrics: false },
+  lyrics: { lines: [], rawText: '', show: true, y: 69.13, size: 43, color: '#ffffff', font: '', bgOn: false, bg: '#000000', bgOpacity: 55, shadow: 'medium', mode: 'three', gap: 184, highlight: true, lang: 'en', display: 'both' },
+  slideshow: { enabled: true, interval: 5, crossfade: true, syncLyrics: true },
   frame: { style: 'none', intensity: 50 },
   filter: { preset: 'none' },
   audioEl: null, audioCtx: null, analyser: null, source: null, freqData: null,
@@ -4545,6 +4547,18 @@ function restoreUI() {
   qsa('[data-cm]').forEach(b => b.classList.toggle('active', b.dataset.cm === state.spectrum.colorMode));
   qsa('[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === state.filter.preset));
   qsa('.genre-tab').forEach(t => t.classList.toggle('active', t.dataset.genre === state.genre));
+  // 아래 칩/버튼들은 클릭 시에만 active 클래스를 갱신하고 새로고침/기본값 로드 시
+  // state와 동기화하는 코드가 없어서, 실제 값은 정상 적용되는데도 버튼 표시만
+  // HTML에 하드코딩된 기본 선택으로 보이던 버그 — 전부 한 번에 동기화.
+  qsa('.viz-btn').forEach(b => b.classList.toggle('active', b.dataset.viz === state.viz));
+  qsa('.vfx-btn').forEach(b => b.classList.toggle('active', !!state.vfx?.[b.dataset.vfx]));
+  qsa('.pp-chip').forEach(b => b.classList.toggle('active', !!state.postProcessing?.[b.dataset.pp]));
+  qsa('.ptc-chip').forEach(b => b.classList.toggle('active', !!state.particles?.[b.dataset.ptc]));
+  qsa('.bgfx-chip').forEach(b => b.classList.toggle('active', !!state.bgfx?.[b.dataset.bgfx]));
+  qsa('.trans-chip').forEach(b => b.classList.toggle('active', b.dataset.trans === state.slideshow.transition));
+  qsa('.title-style-chip[data-tstyle]').forEach(b => b.classList.toggle('active', b.dataset.tstyle === state.title.style));
+  qsa('.title-deco-chip').forEach(b => b.classList.toggle('active', b.dataset.tdeco === state.title.deco));
+  qsa('.title-pos-chip').forEach(b => b.classList.toggle('active', b.dataset.tpos === state.title.position));
   qsa('.tool-btn').forEach(b => {
     const t = b.dataset.tool;
     b.classList.toggle('active', t === state.tool || t === 'viz-' + state.viz);
