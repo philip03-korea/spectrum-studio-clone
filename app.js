@@ -496,15 +496,19 @@ async function handleAudioFile(file, opts = {}) {
     $('audio-channels').textContent = buf.numberOfChannels === 1 ? 'Mono' : buf.numberOfChannels === 2 ? 'Stereo' : buf.numberOfChannels + 'ch';
     $('time-total').textContent = fmtTime(buf.duration);
     $('track-name').textContent = file.name;
-    // Auto-fill title from filename only if user hasn't customized it
-    // (default placeholder '벼량끝 On the Brink Studio' counts as 'not customized' — replace it)
-    if (!state.title.text || state.title.text === '벼량끝 On the Brink Studio') {
+    // 곡 제목 자동 채움 — 새로 고른 오디오 파일(=새 프로젝트)일 때만 적용한다.
+    // 예전엔 "제목이 기본 문구('벼량끝 On the Brink Studio')와 똑같을 때만" 채웠는데,
+    // 이전 곡 제목이 한 번이라도 남아있으면(예: Part 1 작업 후 Part 2 오디오 업로드)
+    // 그 조건이 다시는 참이 안 돼서 새 오디오를 올려도 옛날 제목이 계속 남아있는 버그였다.
+    // opts.skipPersist는 restoreFiles()가 새로고침 시 기존 저장 오디오를 다시 불러올 때만
+    // true로 넘어오므로, 이때만 기존 제목을 그대로 유지하고 그 외(진짜 새 업로드)에는 항상 갱신한다.
+    if (!opts.skipPersist) {
       state.title.text = file.name.replace(/\.[^.]+$/, '');
     }
     const tEl = $('title-text');
     if (tEl) {
       tEl.placeholder = state.title.text;
-      if (!tEl.value) tEl.value = state.title.text;
+      if (!opts.skipPersist || !tEl.value) tEl.value = state.title.text;
     }
     tmpCtx.close();
     // 평문 가사를 오디오보다 먼저 넣어둔 경우, 실제 길이에 맞춰 타이밍 재분배
