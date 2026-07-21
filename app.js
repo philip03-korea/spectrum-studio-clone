@@ -1314,6 +1314,7 @@ function ensureAudioGraph() {
   state.source.connect(state.analyser);
   state.analyser.connect(state.audioCtx.destination);
   state.freqData = new Uint8Array(state.analyser.frequencyBinCount);
+  state.timeData = new Uint8Array(state.analyser.fftSize);  // 실제 오디오 파형(웨이브폼) 시각화용
 }
 function togglePlay() {
   if (!state.audioEl) return;
@@ -2085,12 +2086,7 @@ function getColorForAlpha(i, total, alpha) {
   }
   return c;
 }
-function drawSpectrum(c, W, H, data) {
-  // Don't early-return on missing data — still draw baseline so user sees layout
-  const sizePct = state.spectrum.size / 100;
-  const cy = H * (state.spectrum.y / 100);
-  // 편집용 대략적 히트박스 — 시각화 종류별 정확한 형태 대신 넉넉한 대역으로 잡는다.
-  _editBounds.spectrum = { x: W * 0.05, y: cy - H * 0.15 * sizePct, w: W * 0.9, h: H * 0.3 * sizePct };
+function drawVizByType(c, data, W, H, sizePct, cy) {
   switch (state.viz) {
     case 'none':       return;
     case 'bars':       return drawBars(c, data, W, H, sizePct, cy);
@@ -2110,7 +2106,31 @@ function drawSpectrum(c, W, H, data) {
     case 'field':      return drawFieldWave(c, data, W, H, sizePct, cy);
     case 'ribbon':     return drawRibbonWave(c, data, W, H, sizePct, cy);
     case 'particle':   return drawParticleSpectrum(c, data, W, H, sizePct, cy);
+    case 'waveform':   return drawWaveform(c, data, W, H, sizePct, cy);
+    case 'heartbeat':  return drawHeartbeat(c, data, W, H, sizePct, cy);
+    case 'mandala':    return drawMandala(c, data, W, H, sizePct, cy);
+    case 'radar-scan': return drawRadarScan(c, data, W, H, sizePct, cy);
   }
+}
+// 에코트레일(vfx) 재생용 — 최근 몇 프레임의 주파수 데이터를 옅게 겹쳐 그려 잔상을 만든다.
+const _echoHistory = [];
+function drawSpectrum(c, W, H, data) {
+  // Don't early-return on missing data — still draw baseline so user sees layout
+  const sizePct = state.spectrum.size / 100;
+  const cy = H * (state.spectrum.y / 100);
+  // 편집용 대략적 히트박스 — 시각화 종류별 정확한 형태 대신 넉넉한 대역으로 잡는다.
+  _editBounds.spectrum = { x: W * 0.05, y: cy - H * 0.15 * sizePct, w: W * 0.9, h: H * 0.3 * sizePct };
+  if (state.vfx?.['echo-trail'] && data && state.viz !== 'none') {
+    _echoHistory.push(data.slice());
+    if (_echoHistory.length > 6) _echoHistory.shift();
+    c.save();
+    for (let i = 0; i < _echoHistory.length - 1; i++) {
+      c.globalAlpha = ((i + 1) / _echoHistory.length) * 0.22;
+      drawVizByType(c, _echoHistory[i], W, H, sizePct, cy);
+    }
+    c.restore();
+  }
+  drawVizByType(c, data, W, H, sizePct, cy);
 }
 
 function drawSymBars(c, data, W, H, sizePct, cy) {
@@ -2278,6 +2298,112 @@ function drawParticleSpectrum(c, data, W, H, sizePct, cy) {
       c.arc(x, cy + dy, r, 0, Math.PI * 2);
       c.fill();
     }
+  }
+  c.globalAlpha = 1;
+}
+
+function drawWaveform(c, data, W, H, sizePct, cy) {
+  // 실제 오디오 파형(시간축 샘플) — 주파수 막대가 아니라 오실로스코프처럼 원음 그대로의 굴곡을 그린다.
+  // 오디오가 없으면(재생 전) 평평한 기준선이 나오는 게 맞는 동작(실제 오실로스코프도 무입력 시 직선).
+  const td = state.timeData;
+  const N = td ? td.length : 512;
+  const step = Math.max(1, Math.floor(N / 400));
+  const amp = H * 0.22 * sizePct;
+  const pts = [];
+  for (let i = 0; i < N; i += step) {
+    const v = td ? (td[i] / 255 - 0.5) : 0;
+    pts.push({ x: (i / (N - 1)) * W, y: cy + v * amp * 2 });
+  }
+  const stops = 6;
+  const g = c.createLinearGradient(0, 0, W, 0);
+  for (let i = 0; i <= stops; i++) g.addColorStop(i / stops, getColorFor(i, stops + 1));
+  c.strokeStyle = g;
+  c.lineWidth = Math.max(2, H / 220);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  c.beginPath();
+  pts.forEach((p, i) => (i === 0 ? c.moveTo(p.x, p.y) : c.lineTo(p.x, p.y)));
+  c.stroke();
+}
+function drawHeartbeat(c, data, W, H, sizePct, cy) {
+  // 의료 모니터(EKG) 스타일 — 평평한 기준선 위로 비트마다 QRS 스파이크 + 완만한 T파가 반복된다.
+  const amp = H * 0.22 * sizePct;
+  const N = 300;
+  const t = state.audioEl?.currentTime || 0;
+  let energy = 0.6;
+  if (data) { let s = 0; for (let i = 0; i < 8; i++) s += data[i] || 0; energy = 0.4 + (s / 8 / 255) * 0.9; }
+  const beatDur = 0.8;
+  c.strokeStyle = getColorFor(0, 1);
+  c.lineWidth = Math.max(2, H / 260);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  c.beginPath();
+  for (let i = 0; i < N; i++) {
+    const x = (i / (N - 1)) * W;
+    const localT = ((i / N) * beatDur * 3 + t) % beatDur;
+    const phase = localT / beatDur;
+    let y = 0;
+    if (phase > 0.35 && phase < 0.5) {
+      const p = (phase - 0.35) / 0.15;
+      y = (p < 0.5 ? p * 2 : (1 - p) * 2) * amp * energy;
+    } else if (phase > 0.55 && phase < 0.7) {
+      const p = (phase - 0.55) / 0.15;
+      y = Math.sin(p * Math.PI) * amp * 0.25;
+    }
+    const py = cy - y;
+    if (i === 0) c.moveTo(x, py); else c.lineTo(x, py);
+  }
+  c.stroke();
+}
+function drawMandala(c, data, W, H, sizePct, cy) {
+  // 만다라(방사형 대칭) — 같은 주파수 슬라이스를 여러 꽃잎에 반복해 완벽한 대칭을 만든다.
+  const cx = W / 2;
+  const petals = 8, barsPerPetal = 16;
+  const r0 = Math.min(W, H) * 0.08 * sizePct;
+  const maxR = Math.min(W, H) * 0.32 * sizePct;
+  const step = Math.floor((data?.length || 1024) / barsPerPetal / 2) || 1;
+  for (let p = 0; p < petals; p++) {
+    const petalAng = (p / petals) * Math.PI * 2;
+    for (let i = 0; i < barsPerPetal; i++) {
+      const v = Math.max(0.05, data ? data[i * step] / 255 : 0);
+      const r1 = r0 + v * maxR;
+      const localAng = (i / barsPerPetal) * (Math.PI * 2 / petals) * 0.9;
+      const ang = petalAng + localAng - Math.PI / 2;
+      const x0 = cx + Math.cos(ang) * r0, y0 = cy + Math.sin(ang) * r0;
+      const x1 = cx + Math.cos(ang) * r1, y1 = cy + Math.sin(ang) * r1;
+      c.strokeStyle = getColorFor(i, barsPerPetal);
+      c.lineWidth = Math.max(2, W / 500); c.lineCap = 'round';
+      c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+    }
+  }
+}
+function drawRadarScan(c, data, W, H, sizePct, cy) {
+  // 레이더스캔 — 회전하는 스캔 라인 + 페이드 트레일 + 대역별 블립.
+  const cx = W / 2;
+  const r = Math.min(W, H) * 0.28 * sizePct;
+  const t = state.audioEl?.currentTime || 0;
+  const sweepAng = (t * 1.2) % (Math.PI * 2);
+  c.strokeStyle = getColorForAlpha(0, 1, 0.35);
+  c.lineWidth = Math.max(1.5, W / 600);
+  c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.stroke();
+  if (typeof c.createConicGradient === 'function') {
+    const trail = Math.PI * 0.35;
+    const grad = c.createConicGradient(sweepAng - trail, cx, cy);
+    grad.addColorStop(0, getColorForAlpha(0, 1, 0));
+    grad.addColorStop(1, getColorForAlpha(0, 1, 0.32));
+    c.fillStyle = grad;
+    c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, r, sweepAng - trail, sweepAng); c.closePath(); c.fill();
+  }
+  c.strokeStyle = getColorFor(0, 1);
+  c.lineWidth = Math.max(2, W / 400);
+  c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.cos(sweepAng) * r, cy + Math.sin(sweepAng) * r); c.stroke();
+  const N = 64, step = Math.floor((data?.length || 1024) / N / 2) || 1;
+  for (let i = 0; i < N; i++) {
+    const v = data ? data[i * step] / 255 : 0;
+    if (v < 0.35) continue;
+    const ang = (i / N) * Math.PI * 2;
+    const br = r * (0.5 + v * 0.5);
+    c.globalAlpha = v;
+    c.fillStyle = getColorFor(i, N);
+    c.beginPath(); c.arc(cx + Math.cos(ang) * br, cy + Math.sin(ang) * br, Math.max(2, W / 300), 0, Math.PI * 2); c.fill();
   }
   c.globalAlpha = 1;
 }
@@ -2509,6 +2635,33 @@ function drawTitle(c, W, H, data) {
       }
       break;
     }
+    case 'gradient-fill': {
+      // shiftHue는 흰색/회색처럼 채도가 0인 색에선 아무 변화가 없어(흰색→흰색) 그라데이션이
+      // 안 보이는 문제가 있었음 — 고정된 대비 색(시안)으로 항상 눈에 띄는 2색을 보장한다.
+      c.font = `800 ${size}px ${fam}`;
+      const m = c.measureText(text);
+      const gx0 = pos.align === 'left' ? x : (pos.align === 'right' ? x - m.width : x - m.width / 2);
+      const g = c.createLinearGradient(gx0, 0, gx0 + m.width, 0);
+      g.addColorStop(0, color);
+      g.addColorStop(1, '#4dd0ff');
+      c.shadowColor = 'rgba(0,0,0,0.6)'; c.shadowBlur = 10;
+      c.fillStyle = g; c.fillText(text, x, y);
+      break;
+    }
+    case 'brush': {
+      // 붓글씨/캘리그래피 느낌 — 매 프레임 랜덤이 아니라 고정된 어긋남으로 잉크 번짐 두께를 표현(깜빡임 방지).
+      c.font = `700 ${size}px ${fam}`;
+      c.shadowColor = 'rgba(0,0,0,0.5)'; c.shadowBlur = 6;
+      const jitters = [[-1, -1], [1, 1], [0.6, -0.8], [-0.8, 0.6]];
+      for (const [jx, jy] of jitters) {
+        c.globalAlpha = 0.28;
+        c.fillStyle = color;
+        c.fillText(text, x + jx * size * 0.012, y + jy * size * 0.012);
+      }
+      c.globalAlpha = 1;
+      c.fillStyle = color; c.fillText(text, x, y);
+      break;
+    }
     case 'bold':
     default:
       c.font = `800 ${size}px ${fam}`;
@@ -2587,6 +2740,26 @@ function drawTitleDeco(c, W, H, x, y, size, text, deco, color, fam, align) {
         if (i === 0) c.moveTo(wx, wy); else c.lineTo(wx, wy);
       }
       c.stroke();
+      break;
+    }
+    case 'cross': {
+      const cs = size * 0.45;
+      const csy = y - size * 0.95;
+      c.strokeStyle = color; c.lineWidth = Math.max(2, size * 0.06); c.lineCap = 'round';
+      c.beginPath();
+      c.moveTo(C, csy - cs / 2); c.lineTo(C, csy + cs / 2);
+      c.moveTo(C - cs / 3, csy - cs / 8); c.lineTo(C + cs / 3, csy - cs / 8);
+      c.stroke();
+      break;
+    }
+    case 'underglow': {
+      const glowColor = color.length === 7 ? color + '59' : color;  // hex + ~35% 알파
+      const rad = (R - L) / 2 + size * 0.6;
+      const g = c.createRadialGradient(C, y + size * 0.3, 2, C, y + size * 0.3, rad);
+      g.addColorStop(0, glowColor);
+      g.addColorStop(1, color.length === 7 ? color + '00' : 'transparent');
+      c.fillStyle = g;
+      c.beginPath(); c.ellipse(C, y + size * 0.3, rad, size * 0.9, 0, 0, Math.PI * 2); c.fill();
       break;
     }
   }
@@ -2936,6 +3109,39 @@ function drawPostProcessing(c, W, H, time, data) {
       }
     }
   }
+  if (pp['vignette-pulse']) {
+    let bass = 0;
+    if (data) { let s = 0; for (let i = 0; i < 8; i++) s += data[i] || 0; bass = s / 8 / 255; }
+    const pulse = 0.32 + Math.sin(time * 2.4) * 0.08 + bass * 0.25;
+    const g = c.createRadialGradient(W/2, H/2, H*0.25, W/2, H/2, H*0.75);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, `rgba(0,0,0,${Math.min(0.85, Math.max(0, pulse))})`);
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+  }
+  if (pp['scanline']) {
+    c.save();
+    c.globalAlpha = 0.12;
+    c.fillStyle = '#000';
+    const lineH = Math.max(2, H / 240);
+    const offset = (time * 40) % (lineH * 2);
+    for (let y = -lineH * 2 + offset; y < H; y += lineH * 2) {
+      c.fillRect(0, y, W, lineH);
+    }
+    c.restore();
+  }
+  if (pp['duotone'] && !isHeavyAndShouldSkip('duotone')) {
+    // 픽셀 단위 재매핑 대신 'color' 블렌드 모드로 저비용 듀오톤(따뜻한 하이라이트→어두운 보라 섀도우) 근사.
+    c.save();
+    c.globalCompositeOperation = 'color';
+    c.globalAlpha = 0.55;
+    const g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#ffe6b8');
+    g.addColorStop(1, '#1a1030');
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+    c.restore();
+  }
 }
 
 const _ptcPool = {};
@@ -2962,7 +3168,7 @@ function perfMul() {
 // 무거운 효과 (⚡ 표시) — performance 모드에선 skip
 function isHeavyAndShouldSkip(key) {
   if ((state.performanceMode || 'auto') !== 'performance') return false;
-  const HEAVY = new Set(['chromatic', 'bass-wave', 'fire', 'water', 'light-rays', 'sound-rings']);
+  const HEAVY = new Set(['chromatic', 'bass-wave', 'fire', 'water', 'light-rays', 'sound-rings', 'duotone']);
   return HEAVY.has(key);
 }
 let _lastPtcTime = 0;
@@ -3131,6 +3337,73 @@ function drawParticles(c, W, H, time, data) {
       c.beginPath(); c.arc(p.x, p.y, p.r, 0, Math.PI*2); c.fill();
     }
   }
+  if (ptc['holy-flame']) {
+    // 성령의 불꽃 — 격렬한 '불꽃'과 달리, 화면 하단에서 잔잔히 일렁이는 촛불형 빛무리.
+    const arr = ensurePtc('holy-flame', 6, (i) => ({ x: (i + 0.5) / 6 * W, sway: Math.random() * Math.PI * 2 }));
+    for (const p of arr) {
+      const flick = Math.sin(time * 6 + p.sway) * 4 + Math.sin(time * 13 + p.sway) * 2;
+      const h = 46 + Math.sin(time * 3 + p.sway) * 8;
+      const fx = p.x + flick, fy = H * 0.92 - h * 0.5;
+      const g = c.createRadialGradient(fx, fy, 2, fx, fy, h * 0.7);
+      g.addColorStop(0, 'rgba(255,240,200,0.9)');
+      g.addColorStop(0.5, 'rgba(255,170,60,0.5)');
+      g.addColorStop(1, 'rgba(255,120,20,0)');
+      c.fillStyle = g;
+      c.beginPath();
+      c.ellipse(fx, fy, h * 0.28, h * 0.55, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+  if (ptc['dove-feather']) {
+    // 비둘기 깃털 — 은은하게 회전하며 천천히 떨어지는 흰 깃털 (성령/평화 상징).
+    const arr = ensurePtc('dove-feather', N(18), () => ({
+      x: Math.random()*W, y: Math.random()*H, rot: Math.random()*Math.PI*2,
+      speed: 40+Math.random()*40, sway: Math.random()*Math.PI*2, size: 14+Math.random()*10,
+    }));
+    for (const p of arr) {
+      p.y += p.speed * dt;
+      p.x += Math.sin(time * 0.6 + p.sway) * 12 * dt;
+      p.rot += dt * 0.4;
+      if (p.y > H + 20) { p.y = -20; p.x = Math.random()*W; }
+      c.save();
+      c.translate(p.x, p.y); c.rotate(p.rot);
+      c.fillStyle = 'rgba(255,255,255,0.75)';
+      c.beginPath(); c.ellipse(0, 0, p.size * 0.35, p.size, 0, 0, Math.PI * 2); c.fill();
+      c.restore();
+    }
+  }
+  if (ptc['prism']) {
+    // 무지개 프리즘 — 빛이 굴절되며 스치는 짧은 무지개색 광선 조각들.
+    const arr = ensurePtc('prism', N(10), (i) => ({
+      x: Math.random()*W, y: Math.random()*H, ang: Math.random()*Math.PI*2,
+      len: 60+Math.random()*80, hueBase: (i/10)*360, speed: 0.3+Math.random()*0.4,
+    }));
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    for (const p of arr) {
+      const hue = (p.hueBase + time * 40 * p.speed) % 360;
+      const x2 = p.x + Math.cos(p.ang) * p.len, y2 = p.y + Math.sin(p.ang) * p.len;
+      const g = c.createLinearGradient(p.x, p.y, x2, y2);
+      g.addColorStop(0, `hsla(${hue},90%,65%,0.35)`);
+      g.addColorStop(1, `hsla(${hue},90%,65%,0)`);
+      c.strokeStyle = g; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(x2, y2); c.stroke();
+    }
+    c.restore();
+  }
+  if (ptc['rain']) {
+    // 빗방울(레인) — 물방울(잔잔한 파문)과 달리 빠르게 쏟아지는 직선형 빗줄기.
+    const arr = ensurePtc('rain', N(80), () => ({
+      x: Math.random()*W, y: Math.random()*H, len: 15+Math.random()*15, speed: 500+Math.random()*300,
+    }));
+    c.strokeStyle = 'rgba(180,210,255,0.4)';
+    c.lineWidth = 1.5;
+    for (const p of arr) {
+      p.y += p.speed * dt;
+      if (p.y > H) { p.y = -p.len; p.x = Math.random()*W; }
+      c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x - 3, p.y - p.len); c.stroke();
+    }
+  }
 }
 function drawStar(c, x, y, r, rot) {
   c.save(); c.translate(x, y); c.rotate(rot);
@@ -3149,6 +3422,7 @@ let renderInProgress = false;
 function renderOneFrame() {
   if (!renderInProgress) {
     if (state.analyser && state.freqData) state.analyser.getByteFrequencyData(state.freqData);
+    if (state.analyser && state.timeData) state.analyser.getByteTimeDomainData(state.timeData);
     const t = state.audioEl?.currentTime || 0;
     updateVfxState(t, state.freqData);
     drawScene(ctx, canvas.width, canvas.height, state.freqData, t);
