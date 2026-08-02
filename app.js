@@ -1253,6 +1253,10 @@ function openLyricSyncTool() {
         <button type="button" id="lsync-cancel">✕ 취소</button>
       </div>
       <div class="hint-text" style="margin-top:8px;">바 위의 점을 드래그해서 원하는 자리로 옮기거나, 줄을 선택한 뒤 재생 중 [지금!]/스페이스바로 그 순간에 찍으세요. 선택된 줄은 방향키(←/→)로 0.05초씩, Shift+방향키로 0.5초씩 미세조정됩니다. 바의 빈 곳을 클릭하면 그 위치로 재생 지점이 이동합니다(청취용).</div>
+      <div class="lsync-output-wrap">
+        <div class="lsync-output-label">적용 시 저장되는 LRC 결과물 — 선택된 줄은 강조 표시</div>
+        <pre class="lsync-output" id="lsync-output"></pre>
+      </div>
     </div>`;
   document.body.appendChild(overlay);
 
@@ -1289,10 +1293,23 @@ function openLyricSyncTool() {
     if (x < scrollBox.scrollLeft + 40) scrollBox.scrollLeft = Math.max(0, x - 40);
     else if (x > scrollBox.scrollLeft + w - 40) scrollBox.scrollLeft = x - w + 40;
   };
+  // 선택한 줄 하나만 보여주는 것보다, 전체 가사가 시간순으로 어떻게 배열됐는지 한눈에
+  // 보여야 "이 보라색 점이 이 가사구나"를 눈으로 확인하며 옮길 수 있다. 드래그·탭·미세조정
+  // 때마다 실시간으로 [적용]을 눌렀을 때 저장될 LRC 결과물을 그대로 미리 보여준다.
+  const escapeHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const outputEl = $l('#lsync-output');
+  const renderOutput = () => {
+    const order = lines.map((_, i) => i).sort((a, b) => workTimes[a] - workTimes[b]);
+    outputEl.innerHTML = order.map(i => {
+      const row = `[${fmtPrecise(workTimes[i])}]${escapeHtml(lines[i].text)}`;
+      return i === selected ? `<span class="hl">${row}</span>` : row;
+    }).join('\n');
+  };
   const renderSelected = () => {
     markers.forEach((m, i) => m.classList.toggle('selected', i === selected));
     $l('#lsync-selected-text').textContent = `${selected + 1}/${lines.length}  ${lines[selected].text}`;
     $l('#lsync-selected-time').textContent = fmtPrecise(workTimes[selected]);
+    renderOutput();
   };
   const selectLine = (i, scroll = true) => {
     selected = clamp(i, 0, lines.length - 1);
@@ -1313,6 +1330,7 @@ function openLyricSyncTool() {
     workTimes[dragIdx] = t;
     positionMarker(dragIdx);
     if (dragIdx === selected) $l('#lsync-selected-time').textContent = fmtPrecise(t);
+    renderOutput();
     const wrapBox = scrollBox.getBoundingClientRect();
     const EDGE = 30;
     if (e.clientX < wrapBox.left + EDGE) scrollBox.scrollLeft -= 14;
