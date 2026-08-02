@@ -1202,9 +1202,12 @@ async function translateAllLyrics() {
   debouncedSave();
 }
 
-// ===== 가사-노래 싱크 맞춤 (탭으로 재동기화) =====
-// 노래를 재생하며 각 가사 줄이 시작되는 순간 탭 → 그 시점의 재생 시각을 새 타임스탬프로 기록.
-// 중간에 멈추면 그때까지 탭한 줄만 반영되고 나머지는 원래 타임스탬프를 유지한다.
+// ===== 가사-노래 싱크맞춤 =====
+// 가사 싱크맞춤 — 타임라인 바 구조.
+// 예전엔 "재생하며 순서대로 탭"만 가능해서, 한 줄이라도 놓치면 그 뒤부터 전부 다시 해야
+// 했다. 지금은 노래 전체 길이를 가로 바로 펼쳐두고 모든 가사 줄을 그 위에 점(마커)으로
+// 배치 — 마커를 직접 드래그해 아무 줄이나 자유롭게 미세조정할 수 있고, 동시에 재생하면서
+// 선택된 줄만 [지금!]/스페이스바로 순서대로 찍어나가는 기존 방식도 그대로 지원한다.
 function openLyricSyncTool() {
   const lines = state.lyrics.lines;
   if (!lines || !lines.length) { alert('가사가 없습니다. 먼저 가사를 입력하세요.'); return; }
@@ -1213,69 +1216,158 @@ function openLyricSyncTool() {
   const wasPlaying = !state.audioEl.paused;
   state.audioEl.pause();
   state.isPlaying = false;
+
+  const duration = Math.max(5, state.audioEl.duration || state.audio?.duration || lines[lines.length - 1].time + 5);
+  const PXPS = 70; // 1초당 픽셀 — 드래그 정밀도 확보용 (길면 스크롤)
+  const barWidth = Math.max(600, Math.ceil(duration * PXPS));
+  const fmtPrecise = t => lrcTimestamp(Math.max(0, t)).slice(1, -1); // "mm:ss.xx" (대괄호 제거)
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  // 작업용 시간 배열 — [취소]하면 state.lyrics.lines를 건드리지 않은 채 그냥 버려진다.
+  const workTimes = lines.map(l => l.time);
+  let selected = 0;
+
   const overlay = document.createElement('div');
   overlay.className = 'lyric-sync-overlay';
   overlay.innerHTML = `
-    <div class="lyric-sync-box">
-      <div class="lyric-sync-progress" id="lsync-progress"></div>
-      <div class="lyric-sync-current" id="lsync-current"></div>
-      <div class="lyric-sync-next" id="lsync-next"></div>
-      <button type="button" class="lyric-sync-tap" id="lsync-tap">⬇ 지금! (Space 또는 클릭)</button>
+    <div class="lyric-sync-box lsync-timeline-mode">
+      <div class="lsync-header">
+        <div class="lsync-selected-text" id="lsync-selected-text"></div>
+        <div class="lsync-selected-time" id="lsync-selected-time"></div>
+      </div>
+      <div class="lsync-timeline-scroll" id="lsync-scroll">
+        <div class="lsync-timeline" id="lsync-timeline" style="width:${barWidth}px;">
+          <div class="lsync-playhead" id="lsync-playhead"></div>
+        </div>
+      </div>
       <div class="lyric-sync-controls">
         <button type="button" id="lsync-playpause">▶ 재생</button>
-        <button type="button" id="lsync-undo">↩ 이전 줄로</button>
-        <button type="button" id="lsync-finish" disabled>✅ 여기까지 적용</button>
+        <button type="button" id="lsync-prev">◀ 이전 줄</button>
+        <button type="button" id="lsync-next">다음 줄 ▶</button>
+        <button type="button" id="lsync-nudge-back">◀ 0.1s</button>
+        <button type="button" id="lsync-nudge-fwd">0.1s ▶</button>
+        <button type="button" id="lsync-tap">⬇ 선택 줄 지금! (Space)</button>
+      </div>
+      <div class="lyric-sync-controls">
+        <button type="button" id="lsync-finish">✅ 적용</button>
         <button type="button" id="lsync-cancel">✕ 취소</button>
       </div>
-      <div class="hint-text" style="margin-top:8px;">재생 버튼을 누르고, 각 가사 줄이 노래에서 실제로 시작되는 순간 [지금!]을 탭하세요(스페이스바도 됩니다). 끝까지 안 해도 [여기까지 적용]으로 탭한 부분만 저장할 수 있습니다.</div>
+      <div class="hint-text" style="margin-top:8px;">바 위의 점을 드래그해서 원하는 자리로 옮기거나, 줄을 선택한 뒤 재생 중 [지금!]/스페이스바로 그 순간에 찍으세요. 선택된 줄은 방향키(←/→)로 0.05초씩, Shift+방향키로 0.5초씩 미세조정됩니다. 바의 빈 곳을 클릭하면 그 위치로 재생 지점이 이동합니다(청취용).</div>
     </div>`;
   document.body.appendChild(overlay);
 
   const $l = sel => overlay.querySelector(sel);
-  let idx = 0;
-  const newTimes = new Array(lines.length).fill(null);
+  const timeline = $l('#lsync-timeline');
+  const scrollBox = $l('#lsync-scroll');
+  const playhead = $l('#lsync-playhead');
 
-  const render = () => {
-    $l('#lsync-progress').textContent = `${idx}/${lines.length}줄`;
-    $l('#lsync-current').textContent = idx < lines.length ? lines[idx].text : '🎉 마지막 줄까지 완료';
-    $l('#lsync-next').textContent = idx + 1 < lines.length ? '다음 줄: ' + lines[idx + 1].text : '';
-    $l('#lsync-finish').disabled = idx === 0;
-    $l('#lsync-tap').disabled = idx >= lines.length;
-  };
-  render();
+  // 눈금: 5초마다 tick, 10초마다 mm:ss 라벨
+  for (let t = 0; t <= duration; t += 5) {
+    const tick = document.createElement('div');
+    const isMajor = Math.round(t) % 10 === 0;
+    tick.className = 'lsync-tick' + (isMajor ? ' major' : '');
+    tick.style.left = (t * PXPS) + 'px';
+    if (isMajor) tick.textContent = fmtTime(t);
+    timeline.appendChild(tick);
+  }
 
-  const tap = () => {
-    if (idx >= lines.length) return;
-    newTimes[idx] = state.audioEl.currentTime;
-    idx++;
-    render();
-    if (idx >= lines.length) finish();
+  // 가사 줄마다 마커 하나씩 생성
+  const markers = lines.map((line, i) => {
+    const m = document.createElement('div');
+    m.className = 'lsync-marker';
+    m.dataset.idx = String(i);
+    m.title = `${i + 1}. ${line.text}`;
+    timeline.appendChild(m);
+    return m;
+  });
+  const positionMarker = i => { markers[i].style.left = (clamp(workTimes[i], 0, duration) * PXPS) + 'px'; };
+  markers.forEach((_, i) => positionMarker(i));
+
+  const scrollMarkerIntoView = i => {
+    const x = workTimes[i] * PXPS;
+    const w = scrollBox.clientWidth;
+    if (x < scrollBox.scrollLeft + 40) scrollBox.scrollLeft = Math.max(0, x - 40);
+    else if (x > scrollBox.scrollLeft + w - 40) scrollBox.scrollLeft = x - w + 40;
   };
-  const undo = () => {
-    if (idx === 0) return;
-    idx--;
-    newTimes[idx] = null;
-    render();
+  const renderSelected = () => {
+    markers.forEach((m, i) => m.classList.toggle('selected', i === selected));
+    $l('#lsync-selected-text').textContent = `${selected + 1}/${lines.length}  ${lines[selected].text}`;
+    $l('#lsync-selected-time').textContent = fmtPrecise(workTimes[selected]);
   };
-  const onKey = e => {
-    if (e.code === 'Space') { e.preventDefault(); tap(); }
-    else if (e.key === 'Escape') { cancel(); }
+  const selectLine = (i, scroll = true) => {
+    selected = clamp(i, 0, lines.length - 1);
+    renderSelected();
+    if (scroll) scrollMarkerIntoView(selected);
   };
+  selectLine(0, false);
+
+  const updatePlayhead = () => { playhead.style.left = (state.audioEl.currentTime * PXPS) + 'px'; };
+  updatePlayhead();
+
+  // ----- 드래그로 마커 위치 조정 (Pointer Events — 마우스/터치 공용) -----
+  let dragIdx = -1;
+  const onPointerMove = e => {
+    if (dragIdx < 0) return;
+    const box = timeline.getBoundingClientRect();
+    const t = clamp((e.clientX - box.left) / PXPS, 0, duration);
+    workTimes[dragIdx] = t;
+    positionMarker(dragIdx);
+    if (dragIdx === selected) $l('#lsync-selected-time').textContent = fmtPrecise(t);
+    const wrapBox = scrollBox.getBoundingClientRect();
+    const EDGE = 30;
+    if (e.clientX < wrapBox.left + EDGE) scrollBox.scrollLeft -= 14;
+    else if (e.clientX > wrapBox.right - EDGE) scrollBox.scrollLeft += 14;
+  };
+  const onPointerUp = () => { dragIdx = -1; };
+  markers.forEach((m, i) => {
+    m.addEventListener('pointerdown', e => { e.preventDefault(); dragIdx = i; selectLine(i, false); });
+  });
+  document.addEventListener('pointermove', onPointerMove);
+  document.addEventListener('pointerup', onPointerUp);
+
+  // 마커가 아닌 빈 곳 클릭 → 그 지점으로 재생 위치 이동(구간 청취용, 시간을 바꾸진 않음)
+  timeline.addEventListener('click', e => {
+    if (e.target.classList.contains('lsync-marker')) return;
+    const box = timeline.getBoundingClientRect();
+    state.audioEl.currentTime = clamp((e.clientX - box.left) / PXPS, 0, duration);
+  });
+
+  const tapNow = () => {
+    workTimes[selected] = state.audioEl.currentTime;
+    positionMarker(selected);
+    renderSelected();
+    scrollMarkerIntoView(selected);
+    if (selected < lines.length - 1) selectLine(selected + 1);
+  };
+  const nudge = delta => {
+    workTimes[selected] = clamp(workTimes[selected] + delta, 0, duration);
+    positionMarker(selected);
+    renderSelected();
+    scrollMarkerIntoView(selected);
+  };
+
   const updatePlayBtn = () => {
     $l('#lsync-playpause').textContent = state.audioEl.paused ? '▶ 재생' : '❚❚ 일시정지';
   };
+  const onKey = e => {
+    if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if (e.code === 'Space') { e.preventDefault(); tapNow(); }
+    else if (e.key === 'Escape') cancel();
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); nudge(e.shiftKey ? -0.5 : -0.05); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); nudge(e.shiftKey ? 0.5 : 0.05); }
+  };
   const cleanup = () => {
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
     state.audioEl.removeEventListener('play', updatePlayBtn);
     state.audioEl.removeEventListener('pause', updatePlayBtn);
+    state.audioEl.removeEventListener('timeupdate', updatePlayhead);
     overlay.remove();
   };
   const cancel = () => { cleanup(); if (wasPlaying) state.audioEl.play(); };
   const finish = () => {
-    const appliedCount = idx;
-    for (let i = 0; i < idx; i++) {
-      if (newTimes[i] != null) lines[i].time = newTimes[i];
-    }
+    lines.forEach((l, i) => { l.time = workTimes[i]; });
     lines.sort((a, b) => a.time - b.time);
     const rebuilt = lines.map(l => `${lrcTimestamp(l.time)}${l.text}`).join('\n');
     state.lyrics.rawText = rebuilt;
@@ -1285,11 +1377,14 @@ function openLyricSyncTool() {
     refreshLyricsStats();
     debouncedSave();
     cleanup();
-    if (appliedCount) alert(`✅ ${appliedCount}줄 싱크가 재조정됐습니다.`);
+    alert(`✅ ${lines.length}줄 싱크가 적용됐습니다.`);
   };
 
-  $l('#lsync-tap').addEventListener('click', tap);
-  $l('#lsync-undo').addEventListener('click', undo);
+  $l('#lsync-tap').addEventListener('click', tapNow);
+  $l('#lsync-prev').addEventListener('click', () => selectLine(selected - 1));
+  $l('#lsync-next').addEventListener('click', () => selectLine(selected + 1));
+  $l('#lsync-nudge-back').addEventListener('click', () => nudge(-0.1));
+  $l('#lsync-nudge-fwd').addEventListener('click', () => nudge(0.1));
   $l('#lsync-finish').addEventListener('click', finish);
   $l('#lsync-cancel').addEventListener('click', cancel);
   $l('#lsync-playpause').addEventListener('click', () => {
@@ -1297,6 +1392,7 @@ function openLyricSyncTool() {
   });
   state.audioEl.addEventListener('play', updatePlayBtn);
   state.audioEl.addEventListener('pause', updatePlayBtn);
+  state.audioEl.addEventListener('timeupdate', updatePlayhead);
   document.addEventListener('keydown', onKey);
 }
 
