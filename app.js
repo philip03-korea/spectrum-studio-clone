@@ -1223,8 +1223,10 @@ function openLyricSyncTool() {
   const fmtPrecise = t => lrcTimestamp(Math.max(0, t)).slice(1, -1); // "mm:ss.xx" (대괄호 제거)
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-  // 작업용 시간 배열 — [취소]하면 state.lyrics.lines를 건드리지 않은 채 그냥 버려진다.
+  // 작업용 시간/텍스트 배열 — [취소]하면 state.lyrics.lines를 건드리지 않은 채 그냥 버려진다.
+  // 텍스트 수정은 시간(workTimes)과 완전히 분리된 값이라 오타를 고쳐도 타임라인 위치는 그대로다.
   const workTimes = lines.map(l => l.time);
+  const workTexts = lines.map(l => l.text);
   let selected = 0;
 
   const overlay = document.createElement('div');
@@ -1232,8 +1234,9 @@ function openLyricSyncTool() {
   overlay.innerHTML = `
     <div class="lyric-sync-box lsync-timeline-mode">
       <div class="lsync-header">
-        <div class="lsync-selected-text" id="lsync-selected-text"></div>
-        <div class="lsync-selected-time" id="lsync-selected-time"></div>
+        <span class="lsync-selected-idx" id="lsync-selected-idx"></span>
+        <input type="text" class="lsync-selected-text" id="lsync-selected-text" spellcheck="false" />
+        <span class="lsync-selected-time" id="lsync-selected-time"></span>
       </div>
       <div class="lsync-timeline-scroll" id="lsync-scroll">
         <div class="lsync-timeline" id="lsync-timeline" style="width:${barWidth}px;">
@@ -1252,7 +1255,7 @@ function openLyricSyncTool() {
         <button type="button" id="lsync-finish">✅ 적용</button>
         <button type="button" id="lsync-cancel">✕ 취소</button>
       </div>
-      <div class="hint-text" style="margin-top:8px;">바 위의 점을 드래그해서 원하는 자리로 옮기거나, 줄을 선택한 뒤 재생 중 [지금!]/스페이스바로 그 순간에 찍으세요. 선택된 줄은 방향키(←/→)로 0.05초씩, Shift+방향키로 0.5초씩 미세조정됩니다. 바의 빈 곳을 클릭하면 그 위치로 재생 지점이 이동합니다(청취용).</div>
+      <div class="hint-text" style="margin-top:8px;">바 위의 점을 드래그해서 원하는 자리로 옮기거나, 줄을 선택한 뒤 재생 중 [지금!]/스페이스바로 그 순간에 찍으세요. 선택된 줄은 방향키(←/→)로 0.05초씩, Shift+방향키로 0.5초씩 미세조정됩니다. 위쪽 가사 텍스트 칸을 클릭하면 오타 등 가사 내용도 바로 고칠 수 있고, 텍스트만 수정하면 타임라인 위치는 그대로 유지됩니다. 바의 빈 곳을 클릭하면 그 위치로 재생 지점이 이동합니다(청취용).</div>
       <div class="lsync-output-wrap">
         <div class="lsync-output-label">적용 시 저장되는 LRC 결과물 — 선택된 줄은 강조 표시</div>
         <pre class="lsync-output" id="lsync-output"></pre>
@@ -1301,13 +1304,15 @@ function openLyricSyncTool() {
   const renderOutput = () => {
     const order = lines.map((_, i) => i).sort((a, b) => workTimes[a] - workTimes[b]);
     outputEl.innerHTML = order.map(i => {
-      const row = `[${fmtPrecise(workTimes[i])}]${escapeHtml(lines[i].text)}`;
+      const row = `[${fmtPrecise(workTimes[i])}]${escapeHtml(workTexts[i])}`;
       return i === selected ? `<span class="hl">${row}</span>` : row;
     }).join('\n');
   };
+  const selectedTextInput = $l('#lsync-selected-text');
   const renderSelected = () => {
     markers.forEach((m, i) => m.classList.toggle('selected', i === selected));
-    $l('#lsync-selected-text').textContent = `${selected + 1}/${lines.length}  ${lines[selected].text}`;
+    $l('#lsync-selected-idx').textContent = `${selected + 1}/${lines.length}`;
+    selectedTextInput.value = workTexts[selected];
     $l('#lsync-selected-time').textContent = fmtPrecise(workTimes[selected]);
     renderOutput();
   };
@@ -1350,6 +1355,14 @@ function openLyricSyncTool() {
     state.audioEl.currentTime = clamp((e.clientX - box.left) / PXPS, 0, duration);
   });
 
+  // 선택된 줄의 가사 텍스트 수정 — workTimes(타임라인 위치)는 전혀 건드리지 않는다.
+  // 오타·가사 오인식을 여기서 바로 고칠 수 있게, 텍스트만 별도로 workTexts에 초안 보관.
+  selectedTextInput.addEventListener('input', e => {
+    workTexts[selected] = e.target.value;
+    markers[selected].title = `${selected + 1}. ${workTexts[selected]}`;
+    renderOutput();
+  });
+
   const tapNow = () => {
     workTimes[selected] = state.audioEl.currentTime;
     positionMarker(selected);
@@ -1385,7 +1398,7 @@ function openLyricSyncTool() {
   };
   const cancel = () => { cleanup(); if (wasPlaying) state.audioEl.play(); };
   const finish = () => {
-    lines.forEach((l, i) => { l.time = workTimes[i]; });
+    lines.forEach((l, i) => { l.time = workTimes[i]; l.text = workTexts[i]; });
     lines.sort((a, b) => a.time - b.time);
     const rebuilt = lines.map(l => `${lrcTimestamp(l.time)}${l.text}`).join('\n');
     state.lyrics.rawText = rebuilt;

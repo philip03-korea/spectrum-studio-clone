@@ -1609,13 +1609,19 @@ body {
 /* ----- 가사 싱크맞춤: 타임라인 바 ----- */
 .lyric-sync-box.lsync-timeline-mode { width: min(960px, 96vw); text-align: left; }
 .lsync-header {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  display: flex; align-items: center; gap: 10px;
   margin-bottom: 10px;
 }
-.lsync-selected-text {
-  font-size: 15px; font-weight: 800; color: var(--text-1);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.lsync-selected-idx {
+  font-size: 11px; font-weight: 700; color: var(--text-2); flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
+.lsync-selected-text {
+  flex: 1; min-width: 0; font: inherit; font-size: 15px; font-weight: 800; color: var(--text-1);
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.lsync-selected-text:focus { outline: none; border-color: var(--accent); }
 .lsync-selected-time {
   font-size: 13px; font-weight: 700; color: var(--accent);
   font-variant-numeric: tabular-nums; flex-shrink: 0;
