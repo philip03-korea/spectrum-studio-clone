@@ -79,11 +79,29 @@ TikTok/Instagram/Facebook 캡션 옆 `✨ 감성 다듬기` 버튼 → 관제탑
 - 헤르메스 게이트웨이에 **Telegram 연동 활성화됨**(`platforms.telegram.state: connected`) —
   에이전트가 대표에게 DM으로 보고 가능.
 
+### 5) ha19 텔레그램 자동보고 — 시도했으나 미완료 (사용자 액션 1개 필요)
+대표님이 외부에 계신 동안 문제 발생 시 ha19가 텔레그램으로 먼저 보고하도록 설정을 시도했으나
+**막힘 지점을 명확히 확인**:
+- `hermes -p ha19 chat -q "..."` (일회성 CLI 세션)은 상시 게이트웨이(`hermes gateway`,
+  이미 PID로 떠있음, `platforms.telegram.state: connected`)와 **별개 프로세스**라 텔레그램 전송 도구에
+  접근 불가. 대시보드의 "connected" 표시는 게이트웨이 자체 연결 상태일 뿐, 스크립트/일회성 세션에서
+  즉시 쏘는 기능이 아님.
+- `hermes -p ha19 send -t telegram "..."`(스크립트 직송, no-LLM)은 봇 토큰까지는 정상 읽어서
+  텔레그램 API에 닿았지만 **`Chat not found`** 에러 — ha19 봇(`@widace_ha19_bot`으로 추정, 관제탑
+  네이밍 패턴 `@widace_{agent_id}_bot` 기준)에 대표님이 **한 번도 말을 건 적이 없어 chat_id가
+  등록 안 된 상태**.
+- **해결에 필요한 사용자 액션 1개**: 텔레그램에서 `@widace_ha19_bot`을 찾아 아무 메시지(예: "안녕")를
+  한 번 보내면 chat_id가 생성되고, 그 다음부턴 `hermes -p ha19 send -t telegram "..."`로 즉시 발송 가능.
+  이후엔 ha19가 실제로 이슈 발생 시 텔레그램 DM 보고 + 대표님 텔레그램 지시 수신도 가능해짐.
+- 참고: `~/.hermes/channel_directory.json`에 채널이 등록되면(사용자가 봇에게 먼저 말 건 후)
+  `hermes send -l telegram`으로 확인 가능.
+
 ### 다음에 이어서 할 만한 것
 - [ ] `backup-local-slot-v49` 브랜치: 슬롯 UI 필요 없으면 삭제
 - [ ] Facebook 캡션 톤 사용자 피드백 받아 다듬기
 - [ ] 하28 업로드 자동화가 실제 붙으면 `uploadkit.js`의 `buildUploadKit()` JSON 출력 스키마를
       하28 파서와 맞춰 조정 필요할 수 있음
+- [ ] **대표님이 `@widace_ha19_bot`에 텔레그램 메시지 1회 보내면** → ha19 자동 보고/수신 활성화 가능
 
 ---
 
