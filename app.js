@@ -3675,7 +3675,7 @@ function bindSidebarBottomButtons() {
 // ====================================================================
 // 노래하는 다윗(ha19) 인라인 채팅 — 가사·컨셉·카피 문의용. 코딩/사이트 오류는 ha21로 안내.
 // ====================================================================
-const DAVID_CHAT_API = 'https://hermes.thezoller.com/api/publicchat';
+const DAVID_CHAT_API = 'https://hermes.theziller.com/api/publicchat';
 const DAVID_PASS_KEY = 'ssc-david-pass';
 const DAVID_THREAD_KEY = 'ssc-david-thread';
 const DAVID_GREETING = '무엇을 도와드릴까요? 가사·컨셉·카피 수정은 바로 도와드리고, 사이트 기능 오류는 "개발자에게 실시간 문의"로 안내해드립니다.';
@@ -3804,8 +3804,9 @@ function renderDavidChatScreen(overlay) {
     try {
       const res = await fetch(DAVID_CHAT_API, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Ceo-Pass': passVal },
-        body: JSON.stringify({ message: text, thread: getDavidThreadId() }),
+        // 비밀번호는 헤더 대신 body로 전달 — 커스텀 헤더는 CORS Allow-Headers(Content-Type만)에 막힘
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, thread: getDavidThreadId(), pass: passVal }),
       });
       if (res.status === 401) { pendingEl.remove(); resetPassAndReprompt(); return; }
       if (res.status === 429) {

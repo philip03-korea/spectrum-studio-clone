@@ -28,6 +28,48 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 1400);
 }
 
+// ── 노래하는 다윗(ha19) 감성 다듬기 — 관제탑 공개채팅 API 재사용 ──
+// 비밀번호는 헤더 대신 body로(CORS Allow-Headers=Content-Type만). 스펙트럼 채팅 버튼과 세션 비번 공유.
+const DAVID_API = 'https://hermes.theziller.com/api/publicchat';
+const DAVID_PASS_KEY = 'ssc-david-pass';
+
+function davidPass() {
+  let p = sessionStorage.getItem(DAVID_PASS_KEY) || '';
+  if (!p) {
+    p = (window.prompt('🕊️ 노래하는 다윗(ha19) 대화 비밀번호를 입력하세요') || '').trim();
+    if (p) sessionStorage.setItem(DAVID_PASS_KEY, p);
+  }
+  return p;
+}
+function ukThread() {
+  let t = sessionStorage.getItem('uk-david-thread');
+  if (!t) { t = 'uploadkit-' + Math.random().toString(36).slice(2, 10); sessionStorage.setItem('uk-david-thread', t); }
+  return t;
+}
+// ha19에게 메시지 → job → 폴링 → 답변. (최대 ~5분, 실패 시 throw)
+async function askDavid(message) {
+  const pass = davidPass();
+  if (!pass) throw new Error('비밀번호가 필요합니다');
+  const res = await fetch(DAVID_API, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, thread: ukThread(), pass }),
+  });
+  if (res.status === 401) { sessionStorage.removeItem(DAVID_PASS_KEY); throw new Error('비밀번호가 틀렸습니다'); }
+  if (res.status === 429) throw new Error('요청이 너무 잦습니다. 잠시 후 다시');
+  const data = await res.json().catch(() => null);
+  if (!data || data.ok === false || !data.job) throw new Error(data?.error || '전송 실패');
+  for (let i = 0; i < 38; i++) {
+    await new Promise(r => setTimeout(r, 8000));
+    let r2, d2;
+    try { r2 = await fetch(`${DAVID_API}/result?job=${encodeURIComponent(data.job)}&pass=${encodeURIComponent(pass)}`); d2 = await r2.json(); }
+    catch { throw new Error('연결 오류'); }
+    if (r2.status === 401) { sessionStorage.removeItem(DAVID_PASS_KEY); throw new Error('비밀번호 오류'); }
+    if (!d2 || d2.ok === false) throw new Error(d2?.error || '응답 오류');
+    if (d2.done) return (d2.reply || '').trim();
+  }
+  throw new Error('응답이 너무 오래 걸립니다');
+}
+
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); toast('복사됨 ✓'); return; }
   catch {
@@ -117,16 +159,19 @@ function fieldHtml(f, d) {
 
 // ── 결과 블록 렌더 ────────────────────────────────────
 // counter: 'byte' | 'utf16' | 'visual'
-function block(title, text, { safe, max, counter = 'visual', rows = 3 } = {}) {
+function block(title, text, { safe, max, counter = 'visual', rows = 3, polish = '' } = {}) {
   const id = 'uk-b-' + Math.random().toString(36).slice(2, 8);
   const len = counter === 'byte' ? byteLen(text) : counter === 'utf16' ? utf16Len(text) : visualLen(text);
   const unit = counter === 'byte' ? 'B' : '자';
   let cls = 'uk-count';
   if (max && len > max) cls += ' over'; else if (safe && len > safe) cls += ' warn';
   const meta = `${len}${unit}${safe ? ` / 안전 ${safe}` : ''}${max ? ` / 상한 ${max}` : ''}`;
+  const polishBtn = polish
+    ? `<button class="btn-mini uk-polish" data-target="${id}" data-plat="${esc(polish)}" title="노래하는 다윗(ha19)이 감성적으로 다듬어줍니다">✨ 감성 다듬기</button>` : '';
   return `<div class="uk-block">
     <div class="uk-block-head"><span class="uk-block-title">${esc(title)}</span>
       <span class="${cls}" data-count="${counter}" data-safe="${safe || ''}" data-max="${max || ''}">${meta}</span>
+      ${polishBtn}
       <button class="btn-mini uk-copy" data-target="${id}">복사</button></div>
     <textarea class="text-area uk-out" id="${id}" rows="${rows}">${esc(text)}</textarea>
   </div>`;
@@ -147,15 +192,15 @@ function renderResults(kit) {
     </div>`;
   const tt = `
     <div class="uk-plat hidden" data-plat="tiktok">
-      ${block('캡션', t.caption, { safe: 200, max: 2200, counter: 'utf16', rows: 6 })}
+      ${block('캡션', t.caption, { safe: 200, max: 2200, counter: 'utf16', rows: 6, polish: 'TikTok' })}
       ${block('해시태그 (3~5)', t.hashtags.join(' '), { rows: 1 })}
       ${block('화면 오버레이 문구 (≤12자)', t.onScreenText, { max: 12, rows: 1 })}
       ${block('커버 카피 (3~5자)', t.coverCopy, { rows: 1 })}
     </div>`;
   const igh = `
     <div class="uk-plat hidden" data-plat="instagram">
-      ${block('캡션 (해시태그 포함)', ig.caption, { safe: 1000, max: 2200, counter: 'utf16', rows: 8 })}
-      ${block('캡션 (해시태그 제외 · 첫 댓글 분리용)', ig.captionNoTags, { counter: 'utf16', rows: 6 })}
+      ${block('캡션 (해시태그 포함)', ig.caption, { safe: 1000, max: 2200, counter: 'utf16', rows: 8, polish: 'Instagram' })}
+      ${block('캡션 (해시태그 제외 · 첫 댓글 분리용)', ig.captionNoTags, { counter: 'utf16', rows: 6, polish: 'Instagram' })}
       ${block('첫 댓글용 해시태그 (8~12)', ig.firstComment, { rows: 2 })}
       ${ig.carouselSlides.length ? block(`캐러셀 카드 (${ig.carouselSlides.length}장)`, ig.carouselSlides.map((s, i) => `${i + 1}. ${s}`).join('\n'), { rows: 7 }) : ''}
       ${block('커버 카피', ig.coverCopy, { rows: 1 })}
@@ -193,6 +238,30 @@ function renderResults(kit) {
   // 복사
   el('uk-result').querySelectorAll('.uk-copy').forEach(btn => btn.addEventListener('click', () => {
     const ta = el(btn.dataset.target); if (ta) copyText(ta.value);
+  }));
+  // 감성 다듬기 (노래하는 다윗 ha19)
+  el('uk-result').querySelectorAll('.uk-polish').forEach(btn => btn.addEventListener('click', async () => {
+    const ta = el(btn.dataset.target); if (!ta || !ta.value.trim()) return;
+    const plat = btn.dataset.plat || '';
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = '다듬는 중…';
+    toast('🕊️ 노래하는 다윗에게 요청 중… (최대 1분)');
+    const prompt =
+      `아래는 ${plat} 업로드용 찬양 영상 캡션입니다. '노래하는 다윗'의 목소리로 ` +
+      `더 감성적이고 진솔하게, 벼랑 끝에서 드리는 고백처럼 다듬어 주세요.\n` +
+      `규칙: 낚시성·번영신학 표현 금지, 이모지 남발 금지, 맨 끝 해시태그 줄은 그대로 유지, ` +
+      `다른 설명 없이 다듬은 캡션 본문만 출력.\n---\n${ta.value}`;
+    try {
+      const reply = await askDavid(prompt);
+      if (reply) {
+        ta.value = reply; ta.dispatchEvent(new Event('input'));
+        toast('감성 다듬기 완료 ✓');
+      } else toast('빈 응답 — 다시 시도해 주세요');
+    } catch (e) {
+      toast('다듬기 실패: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = label;
+    }
   }));
   // 편집 시 카운터 실시간 갱신
   el('uk-result').querySelectorAll('.uk-out').forEach(ta => ta.addEventListener('input', () => {
@@ -271,6 +340,7 @@ function init() {
           <button class="btn-mini" id="uk-export-json" disabled>JSON</button>
           <button class="btn-mini" id="uk-export-txt" disabled>TXT 3종</button>
         </div>
+        <div class="hint-text" style="margin-top:8px;">💡 TikTok·Instagram 캡션은 <b>✨ 감성 다듬기</b>로 <b>노래하는 다윗(ha19)</b>이 더 감성적으로 고쳐줍니다. (첫 사용 시 대화 비밀번호 1회 입력 · 코딩/사이트 문의는 하21 담당)</div>
       </div>
       <div class="uk-result" id="uk-result">
         <div class="hint-text" style="padding:24px;text-align:center;">왼쪽에 곡 정보를 입력하고 <b>전체 생성</b>을 누르세요.<br>유튜브·틱톡·인스타 업로드용 텍스트가 플랫폼별로 나옵니다.</div>

@@ -7,6 +7,7 @@ import {
   TAGS_TIER1, TAGS_TIER3, HASHTAG_POOL,
   YT_DESCRIPTION_TEMPLATE, YT_PINNED_TEMPLATE, TT_CAPTION_TEMPLATE, IG_CAPTION_TEMPLATE,
   THUMB_PROMPTS, THUMB_COPY_FALLBACKS, HOOK_OPENERS, TIME_ANCHORS, DIVIDER,
+  EMOTION_LINES, EMOTION_LINE_DEFAULT,
 } from './uploadkit-data.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -81,6 +82,14 @@ function pickRotating(pool, seed, count) {
 
 const firstEmotion = (meta) => (meta.emotions && meta.emotions[0]) || (meta.themes && meta.themes[0]) || '';
 const mainTheme = (meta) => (meta.themes && meta.themes[0]) || '';
+
+// 정서/주제 키워드에 매칭되는 감성 한 줄 (없으면 기본)
+function emotionLine(meta) {
+  for (const k of [...(meta.emotions || []), ...(meta.themes || [])]) {
+    if (EMOTION_LINES[k]) return EMOTION_LINES[k];
+  }
+  return EMOTION_LINE_DEFAULT;
+}
 
 // mm:ss 포맷
 function fmtTime(sec) {
@@ -279,13 +288,17 @@ export function generateTikTokHashtags(meta, seed = 0) {
 }
 
 export function generateTikTok(meta, seed = 0, ch = CHANNEL) {
-  const hook = (meta.hookLine || HOOK_OPENERS.tiktok[seed % HOOK_OPENERS.tiktok.length]).slice(0, 40);
-  const emotionLine = meta.pivotLine ? meta.pivotLine.slice(0, 60)
-    : `가장 깊은 곳에서 드린 기도가 가장 먼저 들렸습니다.`;
-  const linkLine = meta.videoUrl ? '풀버전은 프로필 링크 🕊' : '';
+  // 첫 줄: 결핍/탄식 오프너로 마음을 붙잡고, 후렴이 있으면 이어붙여 여운을 남김
+  const opener = HOOK_OPENERS.tiktok[seed % HOOK_OPENERS.tiktok.length];
+  const hook = meta.hookLine
+    ? `${opener}\n${meta.hookLine.slice(0, 34)}`
+    : opener;
+  // 둘째 줄: 전환("그러나") 라인 우선, 없으면 정서 감성 라인
+  const emoLine = meta.pivotLine ? meta.pivotLine.slice(0, 60) : emotionLine(meta);
+  const linkLine = meta.videoUrl ? '🎧 풀버전은 프로필 링크에서 들어보세요 🕊' : '';
   const hashtags = generateTikTokHashtags(meta, seed).join(' ');
   const caption = renderTemplate(TT_CAPTION_TEMPLATE, {
-    hook, emotionLine, scriptureRef: meta.scriptureRef, linkLine, hashtags,
+    hook, emotionLine: emoLine, scriptureRef: meta.scriptureRef, linkLine, hashtags,
   });
   return {
     caption,
@@ -311,11 +324,11 @@ export function generateInstagramHashtags(meta, seed = 0) {
 
 export function generateInstagram(meta, seed = 0, ch = CHANNEL) {
   const hook = (meta.hookLine || HOOK_OPENERS.instagram[seed % HOOK_OPENERS.instagram.length]).slice(0, 125);
-  const medLines = [];
-  if (meta.scriptureText) medLines.push(meta.scriptureText.split('\n')[0].slice(0, 60));
+  // 여백 있는 고백조 묵상: 정서 감성 라인 → 전환("그러나") 라인 → 본문 한 줄, 줄 사이 빈 줄
+  const medLines = [emotionLine(meta)];
   if (meta.pivotLine) medLines.push(meta.pivotLine);
-  else medLines.push('무너진 자리에서 처음으로 노래가 나왔습니다.');
-  const meditation = medLines.filter(Boolean).join('\n\n');
+  if (meta.scriptureText) medLines.push('"' + meta.scriptureText.split('\n')[0].slice(0, 55).trim() + '"');
+  const meditation = dedupe(medLines.filter(Boolean)).join('\n\n');
   const linkLine = meta.videoUrl ? '풀버전 · 프로필 링크' : '';
   const hashtags = generateInstagramHashtags(meta, seed);
   const caption = renderTemplate(IG_CAPTION_TEMPLATE, {
