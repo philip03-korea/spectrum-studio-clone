@@ -5,7 +5,7 @@
 import {
   CHANNEL, PLATFORM_LIMITS, BANNED_PATTERNS, ALLOWED_TITLE_EMOJI,
   TAGS_TIER1, TAGS_TIER3, HASHTAG_POOL,
-  YT_DESCRIPTION_TEMPLATE, YT_PINNED_TEMPLATE, TT_CAPTION_TEMPLATE, IG_CAPTION_TEMPLATE,
+  YT_DESCRIPTION_TEMPLATE, YT_PINNED_TEMPLATE, TT_CAPTION_TEMPLATE, IG_CAPTION_TEMPLATE, FB_CAPTION_TEMPLATE,
   THUMB_PROMPTS, THUMB_COPY_FALLBACKS, HOOK_OPENERS, TIME_ANCHORS, DIVIDER,
   EMOTION_LINES, EMOTION_LINE_DEFAULT,
 } from './uploadkit-data.js';
@@ -360,6 +360,36 @@ function buildCarousel(meta) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Facebook — 링크 허용 → 본문에 영상/구독 링크 직접 삽입, 해시태그 2~3
+// ─────────────────────────────────────────────────────────────
+export function generateFacebookHashtags(meta) {
+  const themeMain = cleanTag(mainTheme(meta));
+  const arr = ['찬양', 'CCM'];
+  if (themeMain) arr.push(themeMain);
+  return dedupe(arr).slice(0, 3).map(t => '#' + t);
+}
+
+export function generateFacebook(meta, seed = 0, ch = CHANNEL) {
+  const hook = (meta.hookLine || HOOK_OPENERS.facebook[seed % HOOK_OPENERS.facebook.length]).slice(0, 477);
+  // 페북은 조금 더 길어도 됨: 정서라인 + 전환 + 본문 인용
+  const medLines = [emotionLine(meta)];
+  if (meta.pivotLine) medLines.push(meta.pivotLine);
+  if (meta.scriptureText) medLines.push('"' + meta.scriptureText.split('\n')[0].slice(0, 60).trim() + '"');
+  const meditation = dedupe(medLines.filter(Boolean)).join('\n\n');
+  const hashtags = generateFacebookHashtags(meta);
+  const caption = renderTemplate(FB_CAPTION_TEMPLATE, {
+    hook, meditation, scriptureRef: meta.scriptureRef, title: meta.title,
+    videoUrl: meta.videoUrl, youtubeUrl: ch.youtubeUrl, hashtags: hashtags.join(' '),
+  });
+  return {
+    caption,
+    hook: caption.slice(0, PLATFORM_LIMITS.facebook.captionVisible),
+    hashtags,
+    coverCopy: [...(meta.title || '')].slice(0, 7).join(''),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
 // PART E-10/11 · 공유용 인용구 / 대체 텍스트
 // ─────────────────────────────────────────────────────────────
 export function generateShared(meta) {
@@ -415,6 +445,8 @@ export function validate(kit, meta) {
   if (utf16Len(kit.tiktok.caption) > L.tiktok.captionMax) push('error', 'tiktok.caption', 'TikTok 캡션 2200 초과');
   if (utf16Len(kit.instagram.caption) > L.instagram.captionMax) push('error', 'instagram.caption', 'IG 캡션 2200 초과');
   if ((kit.instagram.hashtags || []).length > L.instagram.hashtagMax) push('error', 'instagram.hashtags', 'IG 해시태그 30 초과');
+  if (kit.facebook && utf16Len(kit.facebook.caption) > L.facebook.captionMax) push('error', 'facebook.caption', 'FB 캡션 상한 초과');
+  if (kit.facebook && (kit.facebook.hashtags || []).length > L.facebook.hashtagMax) push('warn', 'facebook.hashtags', 'FB 해시태그 권장(5개) 초과');
 
   // pivot 권장
   if (!meta.pivotLine) push('warn', 'source.pivotLine', "'그러나' 전환 한 줄이 없습니다 (권장)");
@@ -422,7 +454,7 @@ export function validate(kit, meta) {
   // 금지어 (전체 텍스트 스캔)
   const scanText = [
     ...(kit.youtube.titles || []).map(t => t.text),
-    kit.youtube.description, kit.tiktok.caption, kit.instagram.caption,
+    kit.youtube.description, kit.tiktok.caption, kit.instagram.caption, kit.facebook?.caption || '',
   ].join('\n');
   BANNED_PATTERNS.forEach(p => {
     if (scanText.includes(p)) push('warn', 'banned', `금지어 감지: "${p}"`);
@@ -442,6 +474,7 @@ export function buildUploadKit(meta, opts = {}) {
     youtube: generateYouTube(meta, seed, ch),
     tiktok: generateTikTok(meta, seed, ch),
     instagram: generateInstagram(meta, seed, ch),
+    facebook: generateFacebook(meta, seed, ch),
     shared: generateShared(meta),
     validation: [],
   };

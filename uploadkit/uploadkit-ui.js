@@ -177,10 +177,18 @@ function block(title, text, { safe, max, counter = 'visual', rows = 3, polish = 
   </div>`;
 }
 
+// 채널 전체 복사 바 (그대로 붙여넣기 / ha28 자동화용)
+function copyBar(plat, note) {
+  return `<div class="uk-plat-bar">
+    <button class="btn-mini uk-copyall" data-plat="${plat}">📋 이 채널 전체 복사</button>
+    <span class="hint-text">${esc(note)}</span></div>`;
+}
+
 function renderResults(kit) {
-  const y = kit.youtube, t = kit.tiktok, ig = kit.instagram, sh = kit.shared;
+  const y = kit.youtube, t = kit.tiktok, ig = kit.instagram, fb = kit.facebook, sh = kit.shared;
   const yt = `
     <div class="uk-plat" data-plat="youtube">
+      ${copyBar('youtube', '제목·설명·태그·해시태그·고정댓글을 라벨과 함께 한 번에 복사')}
       ${y.titles.map((ti, i) => block(`제목 ${'ABC'[i]} · ${ti.type}`, ti.text, { safe: 70, max: 100, rows: 1 })).join('')}
       ${block('설명란', y.description, { max: 5000, counter: 'byte', rows: 12 })}
       ${block(`태그 (${y.tags.length}개)`, y.tags.join(', '), { max: 500, counter: 'utf16', rows: 3 })}
@@ -192,6 +200,7 @@ function renderResults(kit) {
     </div>`;
   const tt = `
     <div class="uk-plat hidden" data-plat="tiktok">
+      ${copyBar('tiktok', '캡션(해시태그 포함)을 그대로 복사 — 틱톡 붙여넣기용')}
       ${block('캡션', t.caption, { safe: 200, max: 2200, counter: 'utf16', rows: 6, polish: 'TikTok' })}
       ${block('해시태그 (3~5)', t.hashtags.join(' '), { rows: 1 })}
       ${block('화면 오버레이 문구 (≤12자)', t.onScreenText, { max: 12, rows: 1 })}
@@ -199,11 +208,19 @@ function renderResults(kit) {
     </div>`;
   const igh = `
     <div class="uk-plat hidden" data-plat="instagram">
+      ${copyBar('instagram', '캡션(해시태그 포함)을 그대로 복사 — 인스타 붙여넣기용')}
       ${block('캡션 (해시태그 포함)', ig.caption, { safe: 1000, max: 2200, counter: 'utf16', rows: 8, polish: 'Instagram' })}
       ${block('캡션 (해시태그 제외 · 첫 댓글 분리용)', ig.captionNoTags, { counter: 'utf16', rows: 6, polish: 'Instagram' })}
       ${block('첫 댓글용 해시태그 (8~12)', ig.firstComment, { rows: 2 })}
       ${ig.carouselSlides.length ? block(`캐러셀 카드 (${ig.carouselSlides.length}장)`, ig.carouselSlides.map((s, i) => `${i + 1}. ${s}`).join('\n'), { rows: 7 }) : ''}
       ${block('커버 카피', ig.coverCopy, { rows: 1 })}
+    </div>`;
+  const fbh = `
+    <div class="uk-plat hidden" data-plat="facebook">
+      ${copyBar('facebook', '캡션(영상 링크·해시태그 포함)을 그대로 복사 — 페북 붙여넣기용')}
+      ${block('캡션 (링크 포함)', fb.caption, { safe: 477, max: 63206, counter: 'utf16', rows: 9, polish: 'Facebook' })}
+      ${block('해시태그 (2~3)', fb.hashtags.join(' '), { rows: 1 })}
+      ${block('커버 카피', fb.coverCopy, { rows: 1 })}
     </div>`;
   const shd = `
     <div class="uk-plat hidden" data-plat="shared">
@@ -225,19 +242,24 @@ function renderResults(kit) {
       <button class="uk-tab active" data-plat="youtube">▶ YouTube</button>
       <button class="uk-tab" data-plat="tiktok">TikTok</button>
       <button class="uk-tab" data-plat="instagram">Instagram</button>
+      <button class="uk-tab" data-plat="facebook">Facebook</button>
       <button class="uk-tab" data-plat="shared">공유</button>
     </div>
     ${valHtml}
-    ${yt}${tt}${igh}${shd}`;
+    ${yt}${tt}${igh}${fbh}${shd}`;
 
   // 탭 전환
   el('uk-result').querySelectorAll('.uk-tab').forEach(btn => btn.addEventListener('click', () => {
     el('uk-result').querySelectorAll('.uk-tab').forEach(b => b.classList.toggle('active', b === btn));
     el('uk-result').querySelectorAll('.uk-plat').forEach(p => p.classList.toggle('hidden', p.dataset.plat !== btn.dataset.plat));
   }));
-  // 복사
+  // 복사 (블록별)
   el('uk-result').querySelectorAll('.uk-copy').forEach(btn => btn.addEventListener('click', () => {
     const ta = el(btn.dataset.target); if (ta) copyText(ta.value);
+  }));
+  // 채널 전체 복사 (그대로 붙여넣기용)
+  el('uk-result').querySelectorAll('.uk-copyall').forEach(btn => btn.addEventListener('click', () => {
+    if (_lastKit) copyText(channelCopyText(_lastKit, btn.dataset.plat));
   }));
   // 감성 다듬기 (노래하는 다윗 ha19)
   el('uk-result').querySelectorAll('.uk-polish').forEach(btn => btn.addEventListener('click', async () => {
@@ -294,8 +316,24 @@ function generate(d, bumpSeed = false) {
   el('uk-export-txt').disabled = hasErr;
 }
 
+// 채널별 "그대로 붙여넣기" 순수 텍스트 (라벨 최소화 — 사람 복붙 + ha28 자동화 파싱 겸용)
+function channelCopyText(kit, plat) {
+  const y = kit.youtube, t = kit.tiktok, ig = kit.instagram, fb = kit.facebook;
+  if (plat === 'youtube') {
+    return [
+      `[제목 A] ${y.titles[0]?.text}`, `[제목 B] ${y.titles[1]?.text}`, `[제목 C] ${y.titles[2]?.text}`,
+      '', '[설명]', y.description, '', '[태그]', y.tags.join(', '),
+      '', '[해시태그]', y.hashtags.join(' '), '', '[고정 댓글]', y.pinnedComment,
+    ].join('\n');
+  }
+  if (plat === 'tiktok') return t.caption;
+  if (plat === 'instagram') return ig.caption;
+  if (plat === 'facebook') return fb.caption;
+  return '';
+}
+
 function exportTxt(kit) {
-  const y = kit.youtube, t = kit.tiktok, ig = kit.instagram;
+  const y = kit.youtube, t = kit.tiktok, ig = kit.instagram, fb = kit.facebook;
   const slug = slugify(kit.meta.source.title);
   const ytTxt = [
     '# YouTube', '', '## 제목 (택1)', ...y.titles.map((x, i) => `${'ABC'[i]}. ${x.text}`),
@@ -308,10 +346,12 @@ function exportTxt(kit) {
   const igTxt = ['# Instagram', '', '## 캡션', ig.caption, '', '## 캡션(태그제외)', ig.captionNoTags,
     '', '## 첫 댓글 해시태그', ig.firstComment,
     ...(ig.carouselSlides.length ? ['', '## 캐러셀', ...ig.carouselSlides.map((s, i) => `${i + 1}. ${s}`)] : [])].join('\n');
+  const fbTxt = ['# Facebook', '', '## 캡션 (링크 포함)', fb.caption, '', `커버: ${fb.coverCopy}`].join('\n');
   download(`${slug}-youtube.txt`, ytTxt);
   download(`${slug}-tiktok.txt`, ttTxt);
   download(`${slug}-instagram.txt`, igTxt);
-  toast('TXT 3종 내보냄 ✓');
+  download(`${slug}-facebook.txt`, fbTxt);
+  toast('TXT 4종 내보냄 ✓');
 }
 
 // ── 초기화 ────────────────────────────────────────────
@@ -338,7 +378,7 @@ function init() {
           <button class="btn btn-primary" id="uk-generate">🚀 전체 생성</button>
           <button class="btn-mini" id="uk-reroll">🔄 다시 뽑기</button>
           <button class="btn-mini" id="uk-export-json" disabled>JSON</button>
-          <button class="btn-mini" id="uk-export-txt" disabled>TXT 3종</button>
+          <button class="btn-mini" id="uk-export-txt" disabled>TXT 4종</button>
         </div>
         <div class="hint-text" style="margin-top:8px;">💡 TikTok·Instagram 캡션은 <b>✨ 감성 다듬기</b>로 <b>노래하는 다윗(ha19)</b>이 더 감성적으로 고쳐줍니다. (첫 사용 시 대화 비밀번호 1회 입력 · 코딩/사이트 문의는 하21 담당)</div>
       </div>

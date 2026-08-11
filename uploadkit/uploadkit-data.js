@@ -52,6 +52,14 @@ export const PLATFORM_LIMITS = {
     hashtagRecommended: [8, 12],
     bioMax: 150,
   },
+  facebook: {
+    captionMax: 63206,       // 하드 리밋(사실상 무제한) — 실제론 짧게
+    captionVisible: 477,     // 데스크톱 "더 보기" 이전
+    captionMobileVisible: 125,
+    hashtagRecommended: [2, 3],
+    hashtagMax: 5,           // 페북은 해시태그 효과 낮음 → 적게
+    linkAllowed: true,       // ★ 페북은 본문 링크 허용 (틱톡/인스타와 다름)
+  },
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -180,6 +188,18 @@ export const IG_CAPTION_TEMPLATE = `{{hook}}
 .
 {{hashtags}}`;
 
+// Facebook 캡션 — 페북은 링크 허용 → 본문에 영상/구독 링크를 직접 넣는다
+export const FB_CAPTION_TEMPLATE = `{{hook}}
+
+{{meditation}}
+
+📖 {{scriptureRef}}
+🎵 {{title}} — 노래하는 다윗 / 벼량끝{{#videoUrl}}
+▶️ 전체 영상 보기: {{videoUrl}}{{/videoUrl}}
+🔔 채널 구독: {{youtubeUrl}}
+
+{{hashtags}}`;
+
 // ─────────────────────────────────────────────────────────────
 // PART E-7 · 썸네일 프롬프트 템플릿 (영문)
 //   순서: shot + subject + location + lighting + palette + mood + grain + ratio
@@ -226,6 +246,13 @@ export const HOOK_OPENERS = {
     '더는 도망칠 곳이 없을 때, 노래가 시작됩니다.',
     '무너진 밤을 지나본 사람만 아는 노래가 있습니다.',
     '숨을 곳이 사라진 자리에서, 비로소 기도가 되었습니다.',
+  ],
+  // Facebook 후킹(앞 477자 안) — 공동체에 말 거는 따뜻한 어조, 조금 더 길어도 됨
+  facebook: [
+    '오늘 이 노래를, 벼랑 끝에 서 있는 누군가에게 전하고 싶습니다.',
+    '혹시 지금, 기도조차 버거운 밤을 지나고 계신가요.',
+    '무너진 자리에서 부른 노래 하나를 나눕니다.',
+    '가장 낮은 자리에서 드린 고백이, 오늘 당신께도 닿기를 바랍니다.',
   ],
 };
 

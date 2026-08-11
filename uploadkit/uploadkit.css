@@ -28,6 +28,11 @@
 .uk-plat.hidden { display: none; }
 .uk-subhead { font-size: 12px; font-weight: 700; color: var(--accent-hover); margin: 12px 0 6px; }
 
+/* 채널 전체 복사 바 */
+.uk-plat-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 8px 10px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: var(--radius-sm); flex-wrap: wrap; }
+.uk-copyall { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
+.uk-copyall:hover { background: var(--accent-hover); }
+
 .uk-block { margin-bottom: 10px; }
 .uk-block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
 .uk-block-title { font-size: 11px; font-weight: 700; color: var(--text-1); flex: 1; }
