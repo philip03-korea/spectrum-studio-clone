@@ -1,7 +1,89 @@
 # 🤝 HANDOFF — 벼량끝 On the Brink Studio PRO V2.1
 
 > 다른 컴퓨터에서 이어서 작업하기 위한 인수인계 문서.
-> 마지막 업데이트: 2026-07-17
+> 마지막 업데이트: 2026-08-11
+
+---
+
+## ⭐ 2026-08-11 — 업로드 킷(SNS 업로드 텍스트 생성) 신설 + 두 PC 브랜치 정리 + 이미지 백엔드 복구
+
+### 1) 이미지 생성 전면 오류(530/502) 복구 + 두 PC 코드 정리
+- **증상**: gpt_image_2/soul_2 이미지 생성이 전부 530/502 오류.
+- **원인**: Contabo Cloudflare 터널 URL이 바뀜. **다만 이 PC 로컬 git이 원격(다른 PC, 7/6까지 작업)과
+  갈라져(diverge) 있던 것도 함께 발견** — 원격이 영구 도메인(`suno.theziller.com`), Soul 시트방지,
+  GPT Image2 참조이미지 반영 등 훨씬 앞서 있었음.
+- **조치**: `git reset --hard origin/main`으로 **원격을 정본 채택**, 이 PC 로컬 5커밋은
+  `backup-local-slot-v49` 브랜치로 보존(슬롯 UI 실험 — 미채택, 필요없으면 삭제 가능).
+  Worker `CONTABO_URL` 시크릿을 영구 도메인으로 재확인/고정.
+- **교훈**: 여러 PC에서 작업 시 시작 전 반드시 `git fetch` + `git log origin/main..HEAD` /
+  `HEAD..origin/main`으로 diverge 여부 확인. 무작정 push 금지.
+
+### 2) 🚀 업로드 킷 (STEP2 "2-2. 업로드 킷") — 신규 기능
+곡 정보 하나 입력 → **YouTube · TikTok · Instagram · Facebook** 4채널 + 공유용 텍스트를
+규칙 기반(AI 미사용, 오프라인 동작)으로 한 번에 생성.
+
+**파일**: `/uploadkit/` (신규 폴더, 4파일)
+- `uploadkit-data.js` — 채널 DNA(CHANNEL), 플랫폼 규격(PLATFORM_LIMITS), 태그풀, 금지어, 템플릿 문자열
+- `uploadkit.js` — 순수 생성 엔진 (`generateYouTube/TikTok/Instagram/Facebook/Shared`, `validate`, `buildUploadKit`)
+- `uploadkit-ui.js` — STEP2 탭 UI, 폼, 결과 렌더, 복사/내보내기, localStorage 영속화
+- `uploadkit.css`
+
+**채널별 생성물**:
+| 채널 | 내용 |
+|---|---|
+| YouTube | 제목 3종(감정/SEO/호기심) · 설명란(UTF-8 5000B 자동축약) · 태그 25~30개(3계층) · 해시태그 3~5 · 고정댓글 · 챕터 · 썸네일 프롬프트 3종 |
+| TikTok | 후킹 캡션(결핍·탄식 오프너) · 해시태그 3~5 · 화면 오버레이 문구 · 커버 카피 |
+| Instagram | 캡션(태그포함/제외) · 첫댓글 해시태그 8~12 · 캐러셀 카드 5~7장 · 커버 카피 |
+| **Facebook** (신규) | 캡션에 **영상 링크·구독 링크 직접 삽입**(페북만 링크 허용 — 틱톡/인스타와 다름) · 해시태그 2~3(적게) |
+
+**편의 기능**:
+- STEP1/3의 제목·가사·비율·길이 **자동 채우기**(`↻ 앱에서 자동 채우기`)
+- 채널별 **📋 이 채널 전체 복사** 버튼 — 그대로 붙여넣기 가능 (하28 업로드 자동화가 나중에
+  파싱해 쓰기도 쉬운 형태로 설계)
+- **TXT 4종 내보내기** (`{slug}-youtube/tiktok/instagram/facebook.txt`) + JSON 전체 내보내기
+- 실시간 글자수 카운터(안전선/상한 색상 경고), 검증 배지(error 있으면 내보내기 비활성화)
+- localStorage `uploadkit:draft` 자동 저장(디바운스 500ms), 새로고침 복원
+
+**✨ 감성 다듬기 (ha19 "노래하는 다윗" 연동)**:
+TikTok/Instagram/Facebook 캡션 옆 `✨ 감성 다듬기` 버튼 → 관제탑 공개채팅 API로 **ha19**(작사·음악
+콘텐츠 에이전트)에게 캡션 재작성을 요청해 교체. (ha21="하21"은 웹개발 담당이라 카피엔 안 씀.)
+- API: `POST https://hermes.theziller.com/api/publicchat` `{message,thread,pass}` →
+  `{job}` → `GET .../result?job&pass` 폴링(8초 간격, 최대 ~5분)
+- ⚠️ **비밀번호는 헤더가 아니라 body/쿼리 `pass`로 전달**. 서버 CORS `Access-Control-Allow-Headers`가
+  `Content-Type`만 허용해서 커스텀 헤더(`X-Ceo-Pass`)는 브라우저가 프리플라이트에서 차단함.
+- 첫 사용 시 대화 비밀번호 1회 입력 요구(sessionStorage `ssc-david-pass`에 저장, 기존
+  "노래하는 다윗과 대화" 버튼과 세션 공유).
+
+**🐛 덤으로 고친 버그**: 기존 "노래하는 다윗과 대화" 버튼(`app.js` `DAVID_CHAT_API`)이
+도메인 오타(`hermes.thezoller.com` — DNS 해석 안 됨, 정답은 `theziller`)로 완전히 죽어있던 것을
+같이 발견/수정. 위 감성다듬기와 동일한 body-pass 방식으로 CORS 문제도 함께 해결.
+
+**커밋 이력**: `c03426d`(엔진+UI 최초) → `8ef4770`(캡션 감성 강화+ha19 연동+도메인 버그수정) →
+`b2b243f`(Facebook 채널+전체복사+TXT4종).
+
+### 3) GitHub Pages 배포 관련 주의사항 (자주 헷갈리는 부분)
+- **legacy(Jekyll) 빌드**, source=main/root. 푸시 후 보통 1~2분 내 빌드.
+- 가끔 `Page build failed`(errored) 뜨는데 대개 **일시적** — 같은 커밋으로 재시도하면 자동 성공.
+  (`gh api repos/philip03-korea/spectrum-studio-clone/pages/builds`로 상태 확인)
+- **⚠️ `index.html`에 `Cache-Control: max-age=600`(10분)이 걸려 있음.** 배포 직후
+  **일반 새로고침(F5)으로는 브라우저가 캐시된 옛 index.html을 그대로 보여줄 수 있다.**
+  꼭 **강력 새로고침(Ctrl+Shift+R)** 하거나 10분 이상 지난 뒤 새로고침할 것.
+  "방금 push했는데 반영이 안 보인다"는 보고의 대부분은 코드 문제가 아니라 이 캐시 때문임 —
+  먼저 `curl -s .../index.html | grep -oE "app.js\?v=[a-z0-9_]+"`로 라이브 버전을 확인하고
+  나서 코드를 의심할 것.
+
+### 4) 에이전트 매핑 참고 (control_tower_v3.py 기준)
+- **ha19** = "노래하는 다윗" — 작사·음악 콘텐츠 지원. 스펙트럼 앱의 캡션 감성 다듬기·
+  "노래하는 다윗과 대화" 버튼이 여기 연결됨.
+- **ha21** = "하21" — 웹개발·랜딩페이지 제작. 사이트 기능 오류/코딩 문의는 이쪽으로.
+- 헤르메스 게이트웨이에 **Telegram 연동 활성화됨**(`platforms.telegram.state: connected`) —
+  에이전트가 대표에게 DM으로 보고 가능.
+
+### 다음에 이어서 할 만한 것
+- [ ] `backup-local-slot-v49` 브랜치: 슬롯 UI 필요 없으면 삭제
+- [ ] Facebook 캡션 톤 사용자 피드백 받아 다듬기
+- [ ] 하28 업로드 자동화가 실제 붙으면 `uploadkit.js`의 `buildUploadKit()` JSON 출력 스키마를
+      하28 파서와 맞춰 조정 필요할 수 있음
 
 ---
 
