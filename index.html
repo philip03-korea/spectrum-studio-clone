@@ -13,6 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Black+Han+Sans&family=Gowun+Batang:wght@400;700&family=Nanum+Pen+Script&family=Single+Day&family=Orbitron&family=Rajdhani&family=Jua&family=Gamja+Flower&family=Nanum+Gothic:wght@400;700&family=Nanum+Myeongjo:wght@400;700&family=Do+Hyeon&family=Gowun+Dodum&family=Bebas+Neue&family=Gugi&family=Song+Myung&family=Poor+Story&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css?v=v1_6_bgsync" />
+<link rel="stylesheet" href="uploadkit/uploadkit.css?v=v1_0_uploadkit" />
 </head>
 <body>
   <div class="app-shell">
@@ -554,6 +555,16 @@
             </div>
           </div>
           </div>
+        </div>
+
+        <!-- ===== 2-2. 업로드 킷 (SNS 업로드용 텍스트 생성) ===== -->
+        <div class="card">
+          <div class="card-head">
+            <h3>🚀 2-2. 업로드 킷</h3>
+            <span class="badge badge-optional">선택</span>
+          </div>
+          <p class="panel-desc">곡 정보를 입력하면 <b>YouTube · TikTok · Instagram</b> 업로드에 필요한 제목·설명·태그·해시태그·썸네일 프롬프트·고정댓글을 플랫폼별로 한 번에 생성합니다. (AI 없이 규칙 기반 · 오프라인 동작)</p>
+          <div id="uploadkit-mount"></div>
         </div>
       </section>
 
@@ -1321,5 +1332,6 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module" src="app.js?v=v4_45_sync_text_edit"></script>
+  <script type="module" src="uploadkit/uploadkit-ui.js?v=v1_0_uploadkit"></script>
 </body>
 </html>
