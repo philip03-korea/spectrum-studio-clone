@@ -913,17 +913,24 @@ function bindAllSliders() {
 // ====================================================================
 // LRC/SRT/TXT 안에 섞인 곡 구조 태그([Intro], [Verse 1]…)나 연출/악기 지시문
 // ((장엄한 팀파니와…), (연출: …))을 줄 안 어디에 있든(다른 태그·지시문과 한 줄에 같이
-// 있어도, 전각 괄호／［］를 써도) 제거하고, 실제로 부르는 가사만 남긴다.
+// 있어도, 전각 괄호／［］나 중괄호{}를 써도) 제거하고, 실제로 부르는 가사만 남긴다.
 function stripDirectionNotes(text) {
   return String(text || '')
     .replace(/[\[［][^\]］]*[\]］]/g, ' ')   // [Intro], [Verse 1] … (전각 대괄호 포함)
     .replace(/[\(（][^\)）]*[\)）]/g, ' ')   // (연출: …), (멀리서 부는 바람 소리…) … (전각 괄호 포함)
+    .replace(/\{[^}]*\}/g, ' ')             // {코러스} 등 중괄호 표기
     .replace(/\s+/g, ' ')
     .trim();
 }
-// 위 지시문을 다 걷어냈을 때 아무것도 안 남으면(=태그/지시문뿐인 줄) 비가사 줄로 판단.
+// 괄호로 안 감싸고 단독 줄(또는 *…*／-…- 로만 감싼 줄)로 적힌 곡 구조 라벨/타임싱크용
+// 배경 분위기 표시("코러스", "*Chorus*", "- Verse 2 -", "간주:" 등)도 실제 업로드 LRC/SRT에
+// 흔해서, 괄호 지시문 제거 후 남은 텍스트가 이 라벨 하나뿐이면 비가사 줄로 취급한다.
+const LYRIC_STRUCTURE_LABEL_RE = /^[\-–—*~\s]*(?:코러스|후렴구?|브릿지|간주|전주|인트로|아웃트로|절|벌스|훅|랩|나레이션|verse(?:\s*\d+)?|chorus|pre-?chorus|bridge|intro|outro|hook|refrain|interlude|narration)\s*[:：]?\s*\d*[\-–—*~\s]*$/i;
+// 위 지시문을 다 걷어냈을 때 아무것도 안 남거나(=태그/지시문뿐인 줄), 남은 게 곡 구조
+// 라벨 자체뿐이면 비가사 줄로 판단.
 function isNonLyricLine(s) {
-  return !stripDirectionNotes(s);
+  const stripped = stripDirectionNotes(s);
+  return !stripped || LYRIC_STRUCTURE_LABEL_RE.test(stripped);
 }
 function parseLRC(text) {
   const lines = [];
@@ -932,7 +939,7 @@ function parseLRC(text) {
     const matches = [...line.matchAll(re)];
     if (!matches.length) continue;
     const lyric = stripDirectionNotes(line.replace(re, ''));
-    if (!lyric) continue;
+    if (!lyric || isNonLyricLine(lyric)) continue;
     for (const m of matches) {
       const min = +m[1], sec = +m[2];
       let frac = 0;
@@ -961,7 +968,7 @@ function parseSRT(text) {
   return lines.sort((a, b) => a.time - b.time);
 }
 function distributeTextEvenly(text, duration) {
-  const items = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const items = text.split(/\r?\n/).map(l => stripDirectionNotes(l.trim())).filter(l => l && !isNonLyricLine(l));
   if (!items.length) return [];
   return items.map((t, i) => ({ time: (i / items.length) * duration, text: t }));
 }
@@ -1047,7 +1054,7 @@ function parseAndCleanLrc(rawText) {
       const [, mm, ss, frac] = m;
       const tsStr = `${mm}:${ss}` + (frac != null ? `.${frac}` : '');
       const rest = stripDirectionNotes(line.replace(tsAnyRe, ''));
-      if (!rest) continue;  // ts-only / 섹션태그·연출지시문 줄 제외 (한 줄에 섞여 있어도 제거됨)
+      if (!rest || isNonLyricLine(rest)) continue;  // ts-only / 섹션태그·연출지시문 줄 제외 (한 줄에 섞여 있어도 제거됨)
       out.push(`[${tsStr}]${rest}`);
     }
     return mergeTooCloseLrcLines(out).join('\n');
@@ -1073,7 +1080,7 @@ function parseAndCleanLrc(rawText) {
       // No timestamp on this line. Could be a stray continuation; append as a word.
       // (Spec doesn't address this explicitly; safest is to attach to current group.)
       const cleaned = stripDirectionNotes(line);
-      if (cleaned) curWords.push(cleaned);
+      if (cleaned && !isNonLyricLine(cleaned)) curWords.push(cleaned);
       else flush();
       continue;
     }
@@ -1084,7 +1091,7 @@ function parseAndCleanLrc(rawText) {
     const rawRest = line.replace(tsAnyRe, '').trim();
     if (!rawRest) continue;                                      // Rule 4: ts-only
     const rest = stripDirectionNotes(rawRest);
-    if (!rest) { flush(); continue; }        // Rule 1+2: section tag·연출지시문(한 줄에 섞여도) = boundary
+    if (!rest || isNonLyricLine(rest)) { flush(); continue; }        // Rule 1+2: section tag·연출지시문(한 줄에 섞여도) = boundary
     if (!curStartFormatted) curStartFormatted = tsStr;
     curWords.push(rest);
   }
@@ -1195,9 +1202,12 @@ async function translateAllLyrics() {
   debouncedSave();
 }
 
-// ===== 가사-노래 싱크 맞춤 (탭으로 재동기화) =====
-// 노래를 재생하며 각 가사 줄이 시작되는 순간 탭 → 그 시점의 재생 시각을 새 타임스탬프로 기록.
-// 중간에 멈추면 그때까지 탭한 줄만 반영되고 나머지는 원래 타임스탬프를 유지한다.
+// ===== 가사-노래 싱크맞춤 =====
+// 가사 싱크맞춤 — 타임라인 바 구조.
+// 예전엔 "재생하며 순서대로 탭"만 가능해서, 한 줄이라도 놓치면 그 뒤부터 전부 다시 해야
+// 했다. 지금은 노래 전체 길이를 가로 바로 펼쳐두고 모든 가사 줄을 그 위에 점(마커)으로
+// 배치 — 마커를 직접 드래그해 아무 줄이나 자유롭게 미세조정할 수 있고, 동시에 재생하면서
+// 선택된 줄만 [지금!]/스페이스바로 순서대로 찍어나가는 기존 방식도 그대로 지원한다.
 function openLyricSyncTool() {
   const lines = state.lyrics.lines;
   if (!lines || !lines.length) { alert('가사가 없습니다. 먼저 가사를 입력하세요.'); return; }
@@ -1206,69 +1216,189 @@ function openLyricSyncTool() {
   const wasPlaying = !state.audioEl.paused;
   state.audioEl.pause();
   state.isPlaying = false;
+
+  const duration = Math.max(5, state.audioEl.duration || state.audio?.duration || lines[lines.length - 1].time + 5);
+  const PXPS = 70; // 1초당 픽셀 — 드래그 정밀도 확보용 (길면 스크롤)
+  const barWidth = Math.max(600, Math.ceil(duration * PXPS));
+  const fmtPrecise = t => lrcTimestamp(Math.max(0, t)).slice(1, -1); // "mm:ss.xx" (대괄호 제거)
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  // 작업용 시간/텍스트 배열 — [취소]하면 state.lyrics.lines를 건드리지 않은 채 그냥 버려진다.
+  // 텍스트 수정은 시간(workTimes)과 완전히 분리된 값이라 오타를 고쳐도 타임라인 위치는 그대로다.
+  const workTimes = lines.map(l => l.time);
+  const workTexts = lines.map(l => l.text);
+  let selected = 0;
+
   const overlay = document.createElement('div');
   overlay.className = 'lyric-sync-overlay';
   overlay.innerHTML = `
-    <div class="lyric-sync-box">
-      <div class="lyric-sync-progress" id="lsync-progress"></div>
-      <div class="lyric-sync-current" id="lsync-current"></div>
-      <div class="lyric-sync-next" id="lsync-next"></div>
-      <button type="button" class="lyric-sync-tap" id="lsync-tap">⬇ 지금! (Space 또는 클릭)</button>
+    <div class="lyric-sync-box lsync-timeline-mode">
+      <div class="lsync-header">
+        <span class="lsync-selected-idx" id="lsync-selected-idx"></span>
+        <input type="text" class="lsync-selected-text" id="lsync-selected-text" spellcheck="false" />
+        <span class="lsync-selected-time" id="lsync-selected-time"></span>
+      </div>
+      <div class="lsync-timeline-scroll" id="lsync-scroll">
+        <div class="lsync-timeline" id="lsync-timeline" style="width:${barWidth}px;">
+          <div class="lsync-playhead" id="lsync-playhead"></div>
+        </div>
+      </div>
       <div class="lyric-sync-controls">
         <button type="button" id="lsync-playpause">▶ 재생</button>
-        <button type="button" id="lsync-undo">↩ 이전 줄로</button>
-        <button type="button" id="lsync-finish" disabled>✅ 여기까지 적용</button>
+        <button type="button" id="lsync-prev">◀ 이전 줄</button>
+        <button type="button" id="lsync-next">다음 줄 ▶</button>
+        <button type="button" id="lsync-nudge-back">◀ 0.1s</button>
+        <button type="button" id="lsync-nudge-fwd">0.1s ▶</button>
+        <button type="button" id="lsync-tap">⬇ 선택 줄 지금! (Space)</button>
+      </div>
+      <div class="lyric-sync-controls">
+        <button type="button" id="lsync-finish">✅ 적용</button>
         <button type="button" id="lsync-cancel">✕ 취소</button>
       </div>
-      <div class="hint-text" style="margin-top:8px;">재생 버튼을 누르고, 각 가사 줄이 노래에서 실제로 시작되는 순간 [지금!]을 탭하세요(스페이스바도 됩니다). 끝까지 안 해도 [여기까지 적용]으로 탭한 부분만 저장할 수 있습니다.</div>
+      <div class="hint-text" style="margin-top:8px;">바 위의 점을 드래그해서 원하는 자리로 옮기거나, 줄을 선택한 뒤 재생 중 [지금!]/스페이스바로 그 순간에 찍으세요. 선택된 줄은 방향키(←/→)로 0.05초씩, Shift+방향키로 0.5초씩 미세조정됩니다. 위쪽 가사 텍스트 칸을 클릭하면 오타 등 가사 내용도 바로 고칠 수 있고, 텍스트만 수정하면 타임라인 위치는 그대로 유지됩니다. 바의 빈 곳을 클릭하면 그 위치로 재생 지점이 이동합니다(청취용).</div>
+      <div class="lsync-output-wrap">
+        <div class="lsync-output-label">적용 시 저장되는 LRC 결과물 — 선택된 줄은 강조 표시</div>
+        <pre class="lsync-output" id="lsync-output"></pre>
+      </div>
     </div>`;
   document.body.appendChild(overlay);
 
   const $l = sel => overlay.querySelector(sel);
-  let idx = 0;
-  const newTimes = new Array(lines.length).fill(null);
+  const timeline = $l('#lsync-timeline');
+  const scrollBox = $l('#lsync-scroll');
+  const playhead = $l('#lsync-playhead');
 
-  const render = () => {
-    $l('#lsync-progress').textContent = `${idx}/${lines.length}줄`;
-    $l('#lsync-current').textContent = idx < lines.length ? lines[idx].text : '🎉 마지막 줄까지 완료';
-    $l('#lsync-next').textContent = idx + 1 < lines.length ? '다음 줄: ' + lines[idx + 1].text : '';
-    $l('#lsync-finish').disabled = idx === 0;
-    $l('#lsync-tap').disabled = idx >= lines.length;
-  };
-  render();
+  // 눈금: 5초마다 tick, 10초마다 mm:ss 라벨
+  for (let t = 0; t <= duration; t += 5) {
+    const tick = document.createElement('div');
+    const isMajor = Math.round(t) % 10 === 0;
+    tick.className = 'lsync-tick' + (isMajor ? ' major' : '');
+    tick.style.left = (t * PXPS) + 'px';
+    if (isMajor) tick.textContent = fmtTime(t);
+    timeline.appendChild(tick);
+  }
 
-  const tap = () => {
-    if (idx >= lines.length) return;
-    newTimes[idx] = state.audioEl.currentTime;
-    idx++;
-    render();
-    if (idx >= lines.length) finish();
+  // 가사 줄마다 마커 하나씩 생성
+  const markers = lines.map((line, i) => {
+    const m = document.createElement('div');
+    m.className = 'lsync-marker';
+    m.dataset.idx = String(i);
+    m.title = `${i + 1}. ${line.text}`;
+    timeline.appendChild(m);
+    return m;
+  });
+  const positionMarker = i => { markers[i].style.left = (clamp(workTimes[i], 0, duration) * PXPS) + 'px'; };
+  markers.forEach((_, i) => positionMarker(i));
+
+  const scrollMarkerIntoView = i => {
+    const x = workTimes[i] * PXPS;
+    const w = scrollBox.clientWidth;
+    if (x < scrollBox.scrollLeft + 40) scrollBox.scrollLeft = Math.max(0, x - 40);
+    else if (x > scrollBox.scrollLeft + w - 40) scrollBox.scrollLeft = x - w + 40;
   };
-  const undo = () => {
-    if (idx === 0) return;
-    idx--;
-    newTimes[idx] = null;
-    render();
+  // 선택한 줄 하나만 보여주는 것보다, 전체 가사가 시간순으로 어떻게 배열됐는지 한눈에
+  // 보여야 "이 보라색 점이 이 가사구나"를 눈으로 확인하며 옮길 수 있다. 드래그·탭·미세조정
+  // 때마다 실시간으로 [적용]을 눌렀을 때 저장될 LRC 결과물을 그대로 미리 보여준다.
+  const escapeHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const outputEl = $l('#lsync-output');
+  const renderOutput = () => {
+    const order = lines.map((_, i) => i).sort((a, b) => workTimes[a] - workTimes[b]);
+    outputEl.innerHTML = order.map(i => {
+      const row = `[${fmtPrecise(workTimes[i])}]${escapeHtml(workTexts[i])}`;
+      return i === selected ? `<span class="hl">${row}</span>` : row;
+    }).join('\n');
   };
-  const onKey = e => {
-    if (e.code === 'Space') { e.preventDefault(); tap(); }
-    else if (e.key === 'Escape') { cancel(); }
+  const selectedTextInput = $l('#lsync-selected-text');
+  const renderSelected = () => {
+    markers.forEach((m, i) => m.classList.toggle('selected', i === selected));
+    $l('#lsync-selected-idx').textContent = `${selected + 1}/${lines.length}`;
+    selectedTextInput.value = workTexts[selected];
+    $l('#lsync-selected-time').textContent = fmtPrecise(workTimes[selected]);
+    renderOutput();
   };
+  const selectLine = (i, scroll = true) => {
+    selected = clamp(i, 0, lines.length - 1);
+    renderSelected();
+    if (scroll) scrollMarkerIntoView(selected);
+  };
+  selectLine(0, false);
+
+  const updatePlayhead = () => { playhead.style.left = (state.audioEl.currentTime * PXPS) + 'px'; };
+  updatePlayhead();
+
+  // ----- 드래그로 마커 위치 조정 (Pointer Events — 마우스/터치 공용) -----
+  let dragIdx = -1;
+  const onPointerMove = e => {
+    if (dragIdx < 0) return;
+    const box = timeline.getBoundingClientRect();
+    const t = clamp((e.clientX - box.left) / PXPS, 0, duration);
+    workTimes[dragIdx] = t;
+    positionMarker(dragIdx);
+    if (dragIdx === selected) $l('#lsync-selected-time').textContent = fmtPrecise(t);
+    renderOutput();
+    const wrapBox = scrollBox.getBoundingClientRect();
+    const EDGE = 30;
+    if (e.clientX < wrapBox.left + EDGE) scrollBox.scrollLeft -= 14;
+    else if (e.clientX > wrapBox.right - EDGE) scrollBox.scrollLeft += 14;
+  };
+  const onPointerUp = () => { dragIdx = -1; };
+  markers.forEach((m, i) => {
+    m.addEventListener('pointerdown', e => { e.preventDefault(); dragIdx = i; selectLine(i, false); });
+  });
+  document.addEventListener('pointermove', onPointerMove);
+  document.addEventListener('pointerup', onPointerUp);
+
+  // 마커가 아닌 빈 곳 클릭 → 그 지점으로 재생 위치 이동(구간 청취용, 시간을 바꾸진 않음)
+  timeline.addEventListener('click', e => {
+    if (e.target.classList.contains('lsync-marker')) return;
+    const box = timeline.getBoundingClientRect();
+    state.audioEl.currentTime = clamp((e.clientX - box.left) / PXPS, 0, duration);
+  });
+
+  // 선택된 줄의 가사 텍스트 수정 — workTimes(타임라인 위치)는 전혀 건드리지 않는다.
+  // 오타·가사 오인식을 여기서 바로 고칠 수 있게, 텍스트만 별도로 workTexts에 초안 보관.
+  selectedTextInput.addEventListener('input', e => {
+    workTexts[selected] = e.target.value;
+    markers[selected].title = `${selected + 1}. ${workTexts[selected]}`;
+    renderOutput();
+  });
+
+  const tapNow = () => {
+    workTimes[selected] = state.audioEl.currentTime;
+    positionMarker(selected);
+    renderSelected();
+    scrollMarkerIntoView(selected);
+    if (selected < lines.length - 1) selectLine(selected + 1);
+  };
+  const nudge = delta => {
+    workTimes[selected] = clamp(workTimes[selected] + delta, 0, duration);
+    positionMarker(selected);
+    renderSelected();
+    scrollMarkerIntoView(selected);
+  };
+
   const updatePlayBtn = () => {
     $l('#lsync-playpause').textContent = state.audioEl.paused ? '▶ 재생' : '❚❚ 일시정지';
   };
+  const onKey = e => {
+    if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if (e.code === 'Space') { e.preventDefault(); tapNow(); }
+    else if (e.key === 'Escape') cancel();
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); nudge(e.shiftKey ? -0.5 : -0.05); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); nudge(e.shiftKey ? 0.5 : 0.05); }
+  };
   const cleanup = () => {
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
     state.audioEl.removeEventListener('play', updatePlayBtn);
     state.audioEl.removeEventListener('pause', updatePlayBtn);
+    state.audioEl.removeEventListener('timeupdate', updatePlayhead);
     overlay.remove();
   };
   const cancel = () => { cleanup(); if (wasPlaying) state.audioEl.play(); };
   const finish = () => {
-    const appliedCount = idx;
-    for (let i = 0; i < idx; i++) {
-      if (newTimes[i] != null) lines[i].time = newTimes[i];
-    }
+    lines.forEach((l, i) => { l.time = workTimes[i]; l.text = workTexts[i]; });
     lines.sort((a, b) => a.time - b.time);
     const rebuilt = lines.map(l => `${lrcTimestamp(l.time)}${l.text}`).join('\n');
     state.lyrics.rawText = rebuilt;
@@ -1278,11 +1408,14 @@ function openLyricSyncTool() {
     refreshLyricsStats();
     debouncedSave();
     cleanup();
-    if (appliedCount) alert(`✅ ${appliedCount}줄 싱크가 재조정됐습니다.`);
+    alert(`✅ ${lines.length}줄 싱크가 적용됐습니다.`);
   };
 
-  $l('#lsync-tap').addEventListener('click', tap);
-  $l('#lsync-undo').addEventListener('click', undo);
+  $l('#lsync-tap').addEventListener('click', tapNow);
+  $l('#lsync-prev').addEventListener('click', () => selectLine(selected - 1));
+  $l('#lsync-next').addEventListener('click', () => selectLine(selected + 1));
+  $l('#lsync-nudge-back').addEventListener('click', () => nudge(-0.1));
+  $l('#lsync-nudge-fwd').addEventListener('click', () => nudge(0.1));
   $l('#lsync-finish').addEventListener('click', finish);
   $l('#lsync-cancel').addEventListener('click', cancel);
   $l('#lsync-playpause').addEventListener('click', () => {
@@ -1290,6 +1423,7 @@ function openLyricSyncTool() {
   });
   state.audioEl.addEventListener('play', updatePlayBtn);
   state.audioEl.addEventListener('pause', updatePlayBtn);
+  state.audioEl.addEventListener('timeupdate', updatePlayhead);
   document.addEventListener('keydown', onKey);
 }
 
@@ -3898,6 +4032,104 @@ function getAudioDuration(file) {
   });
 }
 
+// ====================================================================
+// 업로드 가사 텍스트 + Whisper 타이밍 자동 믹스
+// 사용자가 직접 올린(또는 입력한) 가사는 "내용"을 신뢰하고, 시간 정보만 없을 때
+// Whisper 인식 결과에서 가장 비슷한 구간을 찾아 그 타임스탬프를 붙인다.
+// (Whisper가 실제로 인식한 텍스트는 버리고 타이밍만 참고 — 고유명사 오인식 등으로
+// 업로드 텍스트보다 부정확할 수 있기 때문)
+// ====================================================================
+function getUploadedLyricsState() {
+  const raw = (state.lyrics?.rawText || '').trim();
+  if (!raw) return { raw: '', hasTimestamps: false, plainLines: [] };
+  const hasTimestamps = /\[\d{1,2}:\d{1,2}/.test(raw) || /-->/.test(raw);
+  const plainLines = hasTimestamps
+    ? []
+    : raw.split(/\r?\n/).map(l => stripDirectionNotes(l.trim())).filter(l => l && !isNonLyricLine(l));
+  return { raw, hasTimestamps, plainLines };
+}
+function normalizeForMatch(s) {
+  return String(s || '').replace(/[\s.,!?~…"'“”‘’·\-–—]/g, '');
+}
+function levenshteinDistance(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prevRow = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prevRow[j] = j;
+  for (let i = 1; i <= m; i++) {
+    const curRow = new Array(n + 1);
+    curRow[0] = i;
+    for (let j = 1; j <= n; j++) {
+      curRow[j] = a[i - 1] === b[j - 1]
+        ? prevRow[j - 1]
+        : 1 + Math.min(prevRow[j - 1], prevRow[j], curRow[j - 1]);
+    }
+    prevRow = curRow;
+  }
+  return prevRow[n];
+}
+function lineSimilarity(a, b) {
+  const na = normalizeForMatch(a), nb = normalizeForMatch(b);
+  if (!na && !nb) return 1;
+  if (!na || !nb) return 0;
+  return 1 - levenshteinDistance(na, nb) / Math.max(na.length, nb.length);
+}
+// Needleman-Wunsch 스타일 전역 정렬: userLines(믿을 텍스트, 시간 없음) ↔
+// whisperSegs(Whisper 인식 텍스트+시간). 대각선(매칭) 점수=텍스트 유사도(0~1),
+// 한쪽만 건너뛰는 갭에는 고정 패널티를 줘서 순서를 유지한 채 가장 그럴듯한
+// 대응만 앵커로 채택한다. 매칭 안 된 userLines는 null로 남겨 이후 보간한다.
+const LYRIC_ALIGN_GAP_PENALTY = 0.6;
+function alignUserLinesToWhisperSegs(userLines, whisperSegs) {
+  const m = userLines.length, n = whisperSegs.length;
+  const anchorTime = new Array(m).fill(null);
+  if (!m || !n) return anchorTime;
+  const score = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) score[i][0] = score[i - 1][0] - LYRIC_ALIGN_GAP_PENALTY;
+  for (let j = 1; j <= n; j++) score[0][j] = score[0][j - 1] - LYRIC_ALIGN_GAP_PENALTY;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const matchScore = score[i - 1][j - 1] + lineSimilarity(userLines[i - 1], whisperSegs[j - 1].text);
+      const skipUser = score[i - 1][j] - LYRIC_ALIGN_GAP_PENALTY;
+      const skipSeg = score[i][j - 1] - LYRIC_ALIGN_GAP_PENALTY;
+      score[i][j] = Math.max(matchScore, skipUser, skipSeg);
+    }
+  }
+  let i = m, j = n;
+  while (i > 0 && j > 0) {
+    const cur = score[i][j];
+    const matchScore = score[i - 1][j - 1] + lineSimilarity(userLines[i - 1], whisperSegs[j - 1].text);
+    if (Math.abs(cur - matchScore) < 1e-9) {
+      anchorTime[i - 1] = whisperSegs[j - 1].start;
+      i--; j--;
+    } else if (Math.abs(cur - (score[i - 1][j] - LYRIC_ALIGN_GAP_PENALTY)) < 1e-9) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+  return anchorTime;
+}
+// 앵커(매칭된 시간) 사이에 낀 미매칭 줄들은 앞뒤 앵커 구간을 균등 분배해서 채운다.
+// 맨 앞은 0~첫 앵커, 맨 뒤는 마지막 앵커~전체 길이 구간을 사용.
+function fillInterpolatedTimes(anchorTime, totalDuration) {
+  const n = anchorTime.length;
+  const times = anchorTime.slice();
+  let i = 0;
+  while (i < n) {
+    if (times[i] != null) { i++; continue; }
+    let j = i;
+    while (j < n && times[j] == null) j++;
+    const startT = i === 0 ? 0 : times[i - 1];
+    const endT = j === n ? Math.max(startT, totalDuration || startT) : times[j];
+    const span = Math.max(0, endT - startT);
+    const count = j - i;
+    for (let k = 0; k < count; k++) times[i + k] = startT + (span * (k + 1)) / (count + 1);
+    i = j;
+  }
+  return times;
+}
+
 async function transcribeCurrentAudio(opts = {}) {
   const btn = $('lg-transcribe-btn');
   const setStatus = t => { const el = $('lg-transcribe-status'); if (el) el.textContent = t; };
@@ -3981,6 +4213,22 @@ async function transcribeCurrentAudio(opts = {}) {
       return s;
     });
 
+    // Whisper의 또 다른 환각 패턴: 인식이 불확실한 구간(특히 보컬이 불분명한 초반부)에서
+    // 정확도 향상을 위해 넘긴 promptBias 속 등장인물 이름 힌트를, 실제로 들은 가사인 것처럼
+    // 이름들을 나열해서 그대로 "받아적어" 돌려주는 경우가 있다(Whisper가 문구를 그대로 베끼는
+    // 게 아니라 힌트에서 단어를 뽑아 재조합하는 방식이라 단순 문자열 포함 검사로는 못 잡음).
+    // 실제 가사는 한 줄에 서로 다른 성경 인물 이름을 3명 이상 나열하는 일이 거의 없으므로
+    // (반해, 이 힌트 자체는 인물 이름 나열이 핵심이라 echo되면 반드시 여러 명이 한 번에 나온다),
+    // 한 세그먼트 안에 알려진 인물 이름이 3개 이상 등장하면 힌트 echo로 간주해 "(간주중)" 처리.
+    if (isBiblicalTheme) {
+      const knownNames = Object.keys(BIBLE_CHARACTER_GLOSSARY).concat(['하나님', '여호와']);
+      segs = segs.map(s => {
+        if (s.text === '(간주중)') return s;
+        const hitCount = knownNames.filter(n => s.text.includes(n)).length;
+        return hitCount >= 3 ? { start: s.start, end: s.end, text: '(간주중)' } : s;
+      });
+    }
+
     // 앞/뒤 여백 보정: Whisper가 곡 맨 앞(보컬 시작 전)·맨 뒤(아웃트로) 구간을
     // 세그먼트로 아예 안 주는 경우가 많아, 그 구간이 "간주중" 없이 비거나 다음 가사에 붙어버린다.
     // 첫 세그먼트 시작 전 / 마지막 세그먼트 끝 이후 여백을 명시적으로 "(간주중)"으로 채운다.
@@ -3999,12 +4247,36 @@ async function transcribeCurrentAudio(opts = {}) {
       acc.push({ ...s }); return acc;
     }, []);
 
-    // 문맥 기반 교정: 발음이 비슷해 잘못 인식된 고유명사 등을 GPT로 보정 (실패해도 원본 텍스트 유지)
-    setStatus('🧠 가사 문맥 교정 중… (오인식 고유명사 등)');
-    segs = await correctLyricsWithContext(key, segs, themeVal).catch(() => segs);
+    let finalLrc, finalSrt, lineCount;
+    if (opts.mergeWithUserText && opts.userLines && opts.userLines.length) {
+      // 업로드(또는 직접 입력)한 가사 "텍스트"는 그대로 두고, 시간 정보만 Whisper 인식
+      // 결과에서 가장 비슷한 구간을 찾아 매칭한다 — 오인식될 수 있는 Whisper 텍스트 대신
+      // 사용자가 신뢰하는 원문 그대로를 정확한 타이밍으로 표시하기 위함.
+      setStatus('🔗 업로드한 가사에 타이밍 자동 매칭 중…');
+      const textSegs = segs.filter(s => s.text !== '(간주중)');
+      const anchors = alignUserLinesToWhisperSegs(opts.userLines, textSegs);
+      const dur = await getAudioDuration(file).catch(() => 0);
+      const fallbackEnd = segs[segs.length - 1]?.end || 0;
+      const times = fillInterpolatedTimes(anchors, dur || fallbackEnd);
+      const merged = opts.userLines.map((text, idx) => ({
+        start: times[idx],
+        end: idx + 1 < times.length ? times[idx + 1] : Math.max(times[idx], dur || fallbackEnd),
+        text,
+      }));
+      finalLrc = segmentsToLrc(merged);
+      finalSrt = segmentsToSrt(merged);
+      lineCount = merged.length;
+    } else {
+      // 문맥 기반 교정: 발음이 비슷해 잘못 인식된 고유명사 등을 GPT로 보정 (실패해도 원본 텍스트 유지)
+      setStatus('🧠 가사 문맥 교정 중… (오인식 고유명사 등)');
+      segs = await correctLyricsWithContext(key, segs, themeVal).catch(() => segs);
+      finalLrc = segmentsToLrc(segs);
+      finalSrt = segmentsToSrt(segs);
+      lineCount = segs.length;
+    }
 
     const base = (file.name || 'lyrics').replace(/\.[^.]+$/, '');
-    _lgTranscript = { lrc: segmentsToLrc(segs), srt: segmentsToSrt(segs), base };
+    _lgTranscript = { lrc: finalLrc, srt: finalSrt, base };
 
     // 가사 통합 파이프라인 등록 (전 단계 동기화 + 자동 한/영 번역)
     if (applyLyricsTextGlobal) await applyLyricsTextGlobal(_lgTranscript.lrc);
@@ -4012,7 +4284,9 @@ async function transcribeCurrentAudio(opts = {}) {
 
     $('lg-dl-lrc')?.classList.remove('hidden');
     $('lg-dl-srt')?.classList.remove('hidden');
-    setStatus(`✅ 가사 ${segs.length}줄 자동 생성 완료 — 전 단계 등록됨 · 아래 버튼으로 LRC/SRT 저장 가능`);
+    setStatus(opts.mergeWithUserText
+      ? `✅ 업로드한 가사 ${lineCount}줄 + Whisper 타이밍 자동 매칭 완료 — 전 단계 등록됨 · 아래 버튼으로 LRC/SRT 저장 가능`
+      : `✅ 가사 ${lineCount}줄 자동 생성 완료 — 전 단계 등록됨 · 아래 버튼으로 LRC/SRT 저장 가능`);
   } catch (err) {
     console.error('[transcribe]', err);
     setStatus(`❌ 자동 생성 실패: ${err.message} → [가사 자동 생성] 버튼으로 다시 시도하세요`);
@@ -4037,9 +4311,19 @@ function bindStage1AudioTranscribe() {
     _lgTranscript = null;
     $('lg-dl-lrc')?.classList.add('hidden');
     $('lg-dl-srt')?.classList.add('hidden');
-    setStatus(`🎵 "${file.name}" 등록됨 (미디어 준비에도 자동 등록) — 가사 자동 생성 시작...`);
+
+    // 이미 업로드/입력된 가사가 있으면: 시간싱크가 이미 있으면 건드리지 않고,
+    // 시간싱크가 없으면(평문) 가사 "내용"은 그대로 두고 Whisper로 타이밍만 자동 매칭한다.
+    // 가사가 아예 없을 때만 기존처럼 Whisper가 텍스트+타이밍을 전부 생성한다.
+    const { hasTimestamps, plainLines } = getUploadedLyricsState();
+    if (hasTimestamps) {
+      setStatus(`🎵 "${file.name}" 등록됨 — 이미 시간싱크가 있는 가사가 있어 자동 생성은 건너뜁니다`);
+      try { await handleAudioFile(file); } catch (err) { console.error(err); }
+      return;
+    }
+    setStatus(`🎵 "${file.name}" 등록됨 (미디어 준비에도 자동 등록) — ${plainLines.length ? '업로드한 가사에 타이밍 자동 매칭 시작...' : '가사 자동 생성 시작...'}`);
     try { await handleAudioFile(file); } catch (err) { console.error(err); }
-    await transcribeCurrentAudio({ auto: true });
+    await transcribeCurrentAudio({ auto: true, mergeWithUserText: plainLines.length > 0, userLines: plainLines });
   };
 
   drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
@@ -4053,7 +4337,15 @@ function bindStage1AudioTranscribe() {
     e.target.value = '';   // 같은 파일 재선택 허용
   });
 
-  if (btn) btn.addEventListener('click', () => transcribeCurrentAudio({ auto: false }));
+  if (btn) btn.addEventListener('click', () => {
+    const { hasTimestamps, plainLines } = getUploadedLyricsState();
+    if (hasTimestamps) {
+      if (!confirm('이미 시간싱크가 있는 가사입니다.\nWhisper로 처음부터 다시 생성하면 지금 있는 타이밍이 대체됩니다. 계속할까요?')) return;
+      transcribeCurrentAudio({ auto: false });
+      return;
+    }
+    transcribeCurrentAudio({ auto: false, mergeWithUserText: plainLines.length > 0, userLines: plainLines });
+  });
   $('lg-dl-lrc')?.addEventListener('click', () => {
     if (_lgTranscript) downloadTextFile(_lgTranscript.lrc, `${_lgTranscript.base}.lrc`);
   });
