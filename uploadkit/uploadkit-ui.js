@@ -383,14 +383,23 @@ function init() {
         <div class="hint-text" style="margin-top:8px;">💡 TikTok·Instagram 캡션은 <b>✨ 감성 다듬기</b>로 <b>노래하는 다윗(ha19)</b>이 더 감성적으로 고쳐줍니다. (첫 사용 시 대화 비밀번호 1회 입력 · 코딩/사이트 문의는 하21 담당)</div>
       </div>
       <div class="uk-result" id="uk-result">
-        <div class="hint-text" style="padding:24px;text-align:center;">왼쪽에 곡 정보를 입력하고 <b>전체 생성</b>을 누르세요.<br>유튜브·틱톡·인스타 업로드용 텍스트가 플랫폼별로 나옵니다.</div>
+        <div class="hint-text" style="padding:24px;text-align:center;">곡 제목·본문 출처·주제(<span class="uk-req">*</span> 표시)를 입력하면<br><b>YouTube · TikTok · Instagram · Facebook</b> 4채널 텍스트가 자동으로 생성됩니다.<br>(직접 누르려면 <b>🚀 전체 생성</b>)</div>
       </div>
     </div>`;
 
-  // 입력 바인딩 (자동 저장)
+  // 필수값(제목·본문출처·주제)이 다 채워지면 자동 생성 (디바운스) — "버튼 안 눌러서 안 보임" 방지
+  let _autoGenTimer = null;
+  function scheduleAutoGenerate() {
+    clearTimeout(_autoGenTimer);
+    _autoGenTimer = setTimeout(() => {
+      if ((d.title || '').trim() && (d.scriptureRef || '').trim() && (d.themes || '').trim()) generate(d);
+    }, 600);
+  }
+
+  // 입력 바인딩 (자동 저장 + 자동 생성)
   mount.querySelectorAll('[data-uk]').forEach(inp => {
     const ev = (inp.tagName === 'SELECT') ? 'change' : 'input';
-    inp.addEventListener(ev, () => { d[inp.dataset.uk] = inp.value; saveDraft(d); });
+    inp.addEventListener(ev, () => { d[inp.dataset.uk] = inp.value; saveDraft(d); scheduleAutoGenerate(); });
   });
 
   el('uk-autofill').addEventListener('click', () => {
@@ -401,8 +410,11 @@ function init() {
       if (val !== undefined && val !== null) inp.value = Array.isArray(val) ? val.join(', ') : val;
     });
     toast('앱 정보 불러옴 ✓');
+    scheduleAutoGenerate();
   });
   el('uk-generate').addEventListener('click', () => generate(d));
+  // 페이지 로드 시 이미 저장된 초안에 필수값이 있으면 바로 생성 (새로고침 복원)
+  scheduleAutoGenerate();
   el('uk-reroll').addEventListener('click', () => generate(d, true));
   el('uk-export-json').addEventListener('click', () => {
     if (!_lastKit) return;
