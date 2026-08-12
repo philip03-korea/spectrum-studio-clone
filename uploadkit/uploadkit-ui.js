@@ -1,7 +1,7 @@
 // uploadkit-ui.js — STEP2 "업로드 킷" 탭 렌더링·복사·내보내기 (DOM 담당)
 // 순수 엔진(uploadkit.js)을 호출만 한다. 기존 styles.css 톤 승계 + uploadkit.css.
 
-import { buildUploadKit, byteLen, utf16Len, visualLen } from './uploadkit.js';
+import { buildUploadKit, byteLen, utf16Len, visualLen, stripSunoTags } from './uploadkit.js';
 import { PLATFORM_LIMITS, CHANNEL } from './uploadkit-data.js';
 
 const DRAFT_KEY = 'uploadkit:draft';
@@ -70,6 +70,58 @@ async function askDavid(message) {
   throw new Error('응답이 너무 오래 걸립니다');
 }
 
+// ha19에게 제목·가사를 보여주고 본문출처/정서/주제 등 "이해가 필요한" 빈칸을 채우게 함.
+// 빈칸만 채움(이미 입력한 값은 보존) — 응답이 이상하면 사용자가 폼에서 직접 고치면 됨.
+async function aiFillForm(d, mount, scheduleAutoGenerate) {
+  const title = (d.title || '').trim(), lyrics = (d.lyrics || '').trim();
+  if (!title && !lyrics) { toast('먼저 제목이나 가사를 채워주세요 (↻ 앱에서 자동 채우기 먼저 눌러보세요)'); return; }
+  const btn = el('uk-ai-fill');
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '🕊️ 가사 읽는 중… (최대 1분)';
+  toast('노래하는 다윗이 가사를 분석하고 있어요…');
+  const prompt =
+    `아래는 한국어 찬양(CCM) 곡의 제목과 가사입니다. 이 곡과 어울리는 성경 본문과 정서를 분석해서, ` +
+    `설명 없이 아래 형식 그대로만 답해 주세요. 라벨명을 정확히 지키고, 각 값은 줄바꿈 없이 한 줄로 압축하세요. ` +
+    `모르거나 애매하면 빈 칸으로 두지 말고 가장 그럴듯한 값을 추정해서 채우세요.\n\n` +
+    `SCRIPTURE_REF: (예: 요나 2:1-9)\n` +
+    `SCRIPTURE_VERSION: (예: 개역개정)\n` +
+    `SCRIPTURE_TEXT: (관련 본문 한두 문장 인용)\n` +
+    `THEMES: (쉼표로 구분한 주제 키워드 3~5개)\n` +
+    `EMOTIONS: (쉼표로 구분한 정서 키워드 2~3개)\n` +
+    `PIVOT_LINE: ("그러나"처럼 전환되는 한 줄 — 가사에 있으면 그대로, 없으면 지어냄)\n` +
+    `HOOK_LINE: (가장 강한 후렴 한 줄)\n` +
+    `GENRE: (예: Korean modern worship ballad)\n\n` +
+    `제목: ${title || '(없음)'}\n가사:\n${lyrics || '(없음)'}`;
+  try {
+    const reply = await askDavid(prompt);
+    const get = (label2) => {
+      const m = reply.match(new RegExp(`^${label2}:\\s*(.+)$`, 'mi'));
+      return m ? m[1].trim() : '';
+    };
+    const map = {
+      scriptureRef: get('SCRIPTURE_REF'), scriptureVersion: get('SCRIPTURE_VERSION'),
+      scriptureText: get('SCRIPTURE_TEXT'), themes: get('THEMES'), emotions: get('EMOTIONS'),
+      pivotLine: get('PIVOT_LINE'), hookLine: get('HOOK_LINE'), genre: get('GENRE'),
+    };
+    let filled = 0;
+    Object.entries(map).forEach(([k, v]) => {
+      if (v && !(d[k] || '').trim()) { d[k] = v; filled++; }
+    });
+    if (!filled) { toast('채울 빈칸이 없거나 분석에 실패했습니다'); return; }
+    saveDraft(d);
+    mount.querySelectorAll('[data-uk]').forEach(inp => {
+      const val = d[inp.dataset.uk];
+      if (val !== undefined && val !== null && inp.value !== val) inp.value = Array.isArray(val) ? val.join(', ') : val;
+    });
+    toast(`${filled}개 항목 자동 채움 ✓ — 이상하면 직접 수정하세요`);
+    scheduleAutoGenerate();
+  } catch (e) {
+    toast('AI 자동 채우기 실패: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); toast('복사됨 ✓'); return; }
   catch {
@@ -112,6 +164,24 @@ function draftChannel(d) {
   return { contactEmail: d.contactEmail || '', tiktokHandle: d.tiktokHandle || '', instagramHandle: d.instagramHandle || '' };
 }
 
+// ── 가사에서 즉시 뽑는 로컬 휴리스틱 (네트워크 없음, 순간적) ──
+// Suno [Chorus] 블록의 첫 줄 = 후렴 한 줄
+function extractChorusLine(lyrics) {
+  if (!lyrics) return '';
+  const m = lyrics.match(/\[chorus\]\s*\n([^\[]+)/i);
+  if (!m) return '';
+  const line = m[1].split('\n').map(l => l.trim()).find(Boolean);
+  return line || '';
+}
+// "그러나/허나/그런데/이제는" 전환 문장 = 전환 한 줄
+function extractPivotLine(lyrics) {
+  const clean = stripSunoTags(lyrics);
+  if (!clean) return '';
+  const line = clean.split('\n').map(l => l.trim())
+    .find(l => /그러나|허나|그런데|이제는|이제야|하지만/.test(l));
+  return line || '';
+}
+
 // ── 앱에서 자동 채우기 ────────────────────────────────
 function autoFillFromApp(d) {
   const title = el('title-text')?.value || el('lg-title')?.value || '';
@@ -122,6 +192,12 @@ function autoFillFromApp(d) {
   if (seg?.dataset.aspect) d.aspect = seg.dataset.aspect;
   const au = document.querySelector('audio');
   if (au && au.duration && isFinite(au.duration)) d.durationSec = Math.round(au.duration);
+  // 가사에서 즉시 뽑을 수 있는 것들 (빈칸일 때만 채움 — 이미 쓴 값은 안 건드림)
+  if (lyr) {
+    if (!(d.hookLine || '').trim()) { const h = extractChorusLine(lyr); if (h) d.hookLine = h; }
+    if (!(d.pivotLine || '').trim()) { const p = extractPivotLine(lyr); if (p) d.pivotLine = p; }
+  }
+  if (!(d.scriptureVersion || '').trim()) d.scriptureVersion = '개역개정';
   return d;
 }
 
@@ -365,8 +441,11 @@ function init() {
       <div class="uk-form">
         <div class="uk-form-actions">
           <button class="btn-mini" id="uk-autofill">↻ 앱에서 자동 채우기</button>
-          <span class="hint-text">STEP1·3의 제목·가사·비율·길이를 불러옵니다</span>
+          <button class="btn-mini uk-ai-btn" id="uk-ai-fill">🪄 AI로 나머지 채우기</button>
         </div>
+        <div class="hint-text" style="margin-bottom:8px;">↻ 는 STEP1·3의 제목·가사·비율·길이 + 후렴·전환문장을 즉시 불러오고,
+          🪄 는 가사를 읽고 <b>본문 출처·정서·주제</b> 등 비어있는 나머지를 <b>노래하는 다윗(ha19)</b>이 채웁니다.
+          둘 다 <b>빈칸만</b> 채우고 이미 입력한 값은 안 건드립니다 — 이상하면 직접 고치세요.</div>
         <div class="uk-fields">${FIELDS.map(f => fieldHtml(f, d)).join('')}</div>
         <details class="uk-settings">
           <summary>채널 설정 (선택 · 비우면 해당 줄 생략)</summary>
@@ -412,6 +491,7 @@ function init() {
     toast('앱 정보 불러옴 ✓');
     scheduleAutoGenerate();
   });
+  el('uk-ai-fill').addEventListener('click', () => aiFillForm(d, mount, scheduleAutoGenerate));
   el('uk-generate').addEventListener('click', () => generate(d));
   // 페이지 로드 시 이미 저장된 초안에 필수값이 있으면 바로 생성 (새로고침 복원)
   scheduleAutoGenerate();

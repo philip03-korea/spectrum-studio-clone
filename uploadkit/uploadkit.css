@@ -3,6 +3,9 @@
 @media (max-width: 820px) { .uk-wrap { grid-template-columns: 1fr; } }
 
 .uk-form-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.uk-ai-btn { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-hover); font-weight: 700; }
+.uk-ai-btn:hover { background: var(--accent); color: #fff; }
+.uk-ai-btn:disabled { opacity: 0.6; cursor: wait; }
 .uk-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
 .uk-field { display: flex; flex-direction: column; gap: 3px; grid-column: 1 / -1; }
 .uk-field.uk-half { grid-column: span 1; }
