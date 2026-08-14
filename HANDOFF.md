@@ -1,7 +1,28 @@
 # 🤝 HANDOFF — 벼량끝 On the Brink Studio PRO V2.1
 
 > 다른 컴퓨터에서 이어서 작업하기 위한 인수인계 문서.
-> 마지막 업데이트: 2026-08-11
+> 마지막 업데이트: 2026-08-14
+
+---
+
+## ⭐ 2026-08-14 (정정) — Higgsfield 토큰 자동갱신 방식이 바뀜 (아래 7/5 항목은 낡은 정보)
+
+아래 "2026-07-05 — 이미지 백엔드 완전 복구"에 적힌 **`hf_token_cron.sh` + crontab 6시간 갱신은
+더 이상 쓰이지 않음.** 헤르메스 에이전트 인프라가 `widace-hermes-agents` repo로 이관되며,
+**모든 프로필의 MCP 토큰(Higgsfield 포함)을 한 번에 관리하는 통합 시스템으로 교체됨**:
+
+- **현재 정본 갱신 메커니즘**: `/home/admin/widace-hermes-agents/scripts/mcp_token_refresh.py`,
+  crontab `17 * * * *`(매시간)으로 실행. 로그: `/home/admin/mcp_token_refresh.log`.
+  스펙트럼 백엔드가 쓰는 `ha4/higgsfield`도 이 안에서 매시간 감시·자동갱신됨 (확인 시점 기준 19~20시간
+  여유 유지 중, 정상).
+- **`hf_token_cron.sh`는 죽은 스크립트**: crontab에서 이미 빠졌고, 이 스크립트가 의존하던
+  `/home/admin/.config/higgsfield/credentials.json`도 삭제되어(`.bak`만 남음) **지금 실행하면 무조건
+  실패**한다. 2026-08-14 새벽 05:41에 이 스크립트가 (수동/외부 트리거로) 한 번 돌아 실패했고, 그
+  실패가 "spectrum-studio-token-watch" 알림(claude.ai 노티) 2건으로 표시된 것 — **실제 서비스 장애는
+  아니었음**(진짜 토큰은 새 시스템이 정상 관리 중이었음).
+- **결론**: 이런 알림이 다시 뜨면 `curl https://suno.theziller.com/health`로 실제 토큰 상태부터
+  확인할 것. `token_expires_in`이 정상 범위(수만 초)면 옛 스크립트발 오탐이니 무시 가능.
+  `hf_token_cron.sh`는 참고용으로만 남겨두고 재실행하지 말 것(고칠 필요 없음 — 이미 새 시스템으로 대체됨).
 
 ---
 
