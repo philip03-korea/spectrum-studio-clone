@@ -5833,6 +5833,283 @@ const _lg = {
   bgAdded: false,             // addFramesToBackgrounds() 실행 여부 — "→ 배경에 추가" 누르는 걸 잊고 바로 다음 단계로 넘어가는 걸 방지
 };
 
+// ====================================================================
+// 🎼 곡 만들기 (YuE2) — 이 PC의 음악용 ComfyUI(8189)로 찬양을 직접 생성
+//   브라우저 → proxy.cjs(/yue2/*) → ComfyUI 8189 → flac
+//   완성된 곡은 기존 "음원 업로드" 경로로 흘려보내 가사 싱크·영상 렌더까지 그대로 탄다.
+// ====================================================================
+function getYue2ProxyUrl() {
+  return (localStorage.getItem('ssc-yue2-proxy-url') || 'http://localhost:8766/yue2').trim();
+}
+
+// ha19(노래하는 다윗)에게 한 번 묻고 답을 받아온다. (uploadkit의 askDavid와 동일한 규약)
+async function askDavidOnce(message) {
+  let pass = sessionStorage.getItem(DAVID_PASS_KEY) || '';
+  if (!pass) {
+    pass = (window.prompt('🕊️ 노래하는 다윗(ha19) 대화 비밀번호를 입력하세요') || '').trim();
+    if (!pass) throw new Error('비밀번호가 필요합니다');
+    sessionStorage.setItem(DAVID_PASS_KEY, pass);
+  }
+  const res = await fetch(DAVID_CHAT_API, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, thread: getDavidThreadId(), pass }),
+  });
+  if (res.status === 401) { sessionStorage.removeItem(DAVID_PASS_KEY); throw new Error('비밀번호가 틀렸습니다'); }
+  if (res.status === 429) throw new Error('요청이 너무 잦습니다. 잠시 후 다시');
+  const data = await res.json().catch(() => null);
+  if (!data || data.ok === false || !data.job) throw new Error(data?.error || '전송 실패');
+  for (let i = 0; i < DAVID_POLL_MAX_TRIES; i++) {
+    await new Promise(r => setTimeout(r, DAVID_POLL_INTERVAL_MS));
+    let r2, d2;
+    try {
+      r2 = await fetch(`${DAVID_CHAT_API}/result?job=${encodeURIComponent(data.job)}&pass=${encodeURIComponent(pass)}`);
+      d2 = await r2.json();
+    } catch { throw new Error('연결 오류'); }
+    if (r2.status === 401) { sessionStorage.removeItem(DAVID_PASS_KEY); throw new Error('비밀번호 오류'); }
+    if (!d2 || d2.ok === false) throw new Error(d2?.error || '응답 오류');
+    if (d2.done) return (d2.reply || '').trim();
+  }
+  throw new Error('응답이 너무 오래 걸립니다');
+}
+
+const YUE2_SECTION_RE = /^\s*\[(Intro|Verse|Pre-Chorus|Chorus|Bridge|Outro|Instrumental)\]\s*$/i;
+const yue2Syllables = s => (String(s || '').match(/[가-힣]/g) || []).length;
+
+// 붙여넣은 "다윗의 노래" 텍스트에서 제목/스타일/가사/피할 것을 뽑아낸다.
+// 라벨이 있으면 라벨로, 없으면 [Verse] 같은 섹션 태그 위치를 기준으로 가른다.
+function parseYue2Paste(text) {
+  const out = { title: '', style: '', lyrics: '', avoid: '' };
+  const grab = (names) => {
+    const re = new RegExp(`^\\s*(?:${names})\\s*[:：]\\s*(.+)$`, 'mi');
+    const m = text.match(re);
+    return m ? m[1].trim() : '';
+  };
+  out.title = grab('제목|title|곡명');
+  out.style = grab('스타일|style|장르');
+  out.avoid = grab('피할\\s*것|피해야\\s*할\\s*것|금지|avoid');
+
+  const lyricLabel = text.match(/^\s*(?:가사|lyrics)\s*[:：]\s*$/mi);
+  if (lyricLabel) {
+    out.lyrics = text.slice(text.indexOf(lyricLabel[0]) + lyricLabel[0].length).trim();
+  } else {
+    const first = text.search(/^\s*\[(Intro|Verse|Pre-Chorus|Chorus|Bridge|Outro)\]/mi);
+    if (first >= 0) out.lyrics = text.slice(first).trim();
+  }
+  // 가사 뒤에 다른 라벨이 이어 붙은 경우 잘라낸다
+  if (out.lyrics) {
+    const tail = out.lyrics.search(/^\s*(?:스타일|style|피할\s*것|금지|avoid)\s*[:：]/mi);
+    if (tail > 0) out.lyrics = out.lyrics.slice(0, tail).trim();
+  }
+  return out;
+}
+
+function bindYue2Panel() {
+  const ids = ['yue2-title','yue2-style','yue2-lyrics','yue2-avoid','yue2-extra',
+               'yue2-dur','yue2-seeds','yue2-go','yue2-status','yue2-takes','yue2-lint'];
+  const el = {};
+  ids.forEach(id => { el[id.replace('yue2-','')] = $(id); });
+  if (!el.go) return;
+
+  const setStatus = t => { if (el.status) el.status.textContent = t; };
+
+  // ── 검사 + 길이 권장 ──
+  // ⚠️ YuE2에는 네거티브 프롬프트 칸이 아예 없다(공식). 그래서 "피해야 할 것"은
+  //    모델로 보내지 않고, ①다윗에게 작사 지시로 넘기고 ②아래 자체 검사로만 쓴다.
+  const lint = () => {
+    const style = (el.style?.value || '').trim();
+    const lyrics = el.lyrics?.value || '';
+    const avoid = (el.avoid?.value || '').trim();
+    const msgs = [];
+    const isInst = /no vocals|instrumental/i.test(style);
+
+    if (style && !/^(Korean|English|Japanese|Chinese|instrumental)/i.test(style))
+      msgs.push('스타일은 언어부터 (예: Korean, …)');
+    if (style && !isInst && !/clear \w+ diction/i.test(style))
+      msgs.push('스타일 끝에 clear Korean diction 권장');
+    // \b 없이 /male/ 로 검사하면 female 에도 걸린다 (오탐)
+    if (style && /\bmale\b/i.test(style) && !/sung by a man/i.test(style))
+      msgs.push('남성 보컬은 실측 27%만 성공 — "sung by a man, deep masculine male voice, no female vocals" 권장');
+    if (isInst && /[가-힣]/.test(lyrics))
+      msgs.push('⚠️ 연주곡 스타일인데 가사가 있다 — 스타일로는 못 막는다. 가사를 [Instrumental]만으로');
+
+    const lyricLines = lyrics.split('\n').filter(l => l.trim() && !YUE2_SECTION_RE.test(l));
+    if (lyricLines.some(l => yue2Syllables(l) > 13)) msgs.push('13음절 넘는 줄이 있다 — 뒤를 흘린다');
+    if (/[0-9]/.test(lyrics)) msgs.push('가사에 숫자 — 한글로 풀어 써라');
+    if (/[A-Za-z]{2,}/.test(lyrics.replace(/\[[^\]]*\]/g, ''))) msgs.push('가사에 영어 단어 — 영어 발음으로 부른다');
+
+    // 피해야 할 것 자체 검사
+    const terms = avoid.split(/[,·\n]/).map(s => s.trim()).filter(s => s.length >= 2);
+    const hit = terms.filter(t => lyrics.includes(t) || style.includes(t));
+    if (hit.length) msgs.push('🚫 피해야 할 것이 들어 있다: ' + hit.join(', '));
+
+    // 길이 권장 — 실측상 한국어 발라드는 대략 1음절 ≈ 1초
+    const syl = yue2Syllables(lyrics.replace(/\[[^\]]*\]/g, ''));
+    if (syl > 0 && el.dur) {
+      const lo = Math.max(20, Math.round(syl * 1.0 / 5) * 5);
+      const hi = Math.max(30, Math.round(syl * 1.4 / 5) * 5);
+      const d = +el.dur.value;
+      msgs.unshift(`가사 ${syl}음절 → 권장 ${lo}~${hi}초` +
+        (d < lo ? ' (지금 값은 짧다 · 뒤가 잘린다)' : d > hi ? ' (지금 값은 길다 · 후렴을 반복해 채운다)' : ' ✓'));
+    }
+    if (el.lint) el.lint.innerHTML = msgs.length ? msgs.join(' · ') : '검사 통과';
+  };
+  ['style','lyrics','avoid','dur'].forEach(k => el[k]?.addEventListener('input', lint));
+
+  // ── 붙여넣기 → 칸 채우기 ──
+  $('yue2-paste-toggle')?.addEventListener('click', () => $('yue2-paste-box')?.classList.toggle('hidden'));
+  $('yue2-paste-apply')?.addEventListener('click', () => {
+    const raw = $('yue2-paste')?.value || '';
+    if (!raw.trim()) { setStatus('붙여넣은 내용이 없습니다'); return; }
+    const p = parseYue2Paste(raw);
+    let filled = [];
+    if (p.title && el.title)   { el.title.value = p.title; filled.push('제목'); }
+    if (p.style && el.style)   { el.style.value = p.style; filled.push('스타일'); }
+    if (p.lyrics && el.lyrics) { el.lyrics.value = p.lyrics; filled.push('가사'); }
+    if (p.avoid && el.avoid)   { el.avoid.value = p.avoid; filled.push('피할 것'); }
+    setStatus(filled.length ? `채웠습니다: ${filled.join(', ')} — 확인하고 고치세요`
+                            : '라벨(제목:/스타일:/가사:)이나 [Verse] 태그를 못 찾았습니다');
+    lint();
+  });
+
+  // ── 앱에서 제목 가져오기 ──
+  $('yue2-from-app')?.addEventListener('click', () => {
+    const t = ($('lg-title')?.value || '').trim();
+    const theme = ($('lg-theme')?.value || '').trim();
+    if (t && el.title) el.title.value = t;
+    if (theme && el.extra && !el.extra.value.trim()) el.extra.value = `주제: ${theme}`;
+    setStatus(t ? `제목을 가져왔습니다: ${t}` : '기본 정보에 제목이 비어 있습니다');
+  });
+
+  // ── 다윗에게 가사 받기 ──
+  $('yue2-ask-david')?.addEventListener('click', async () => {
+    const btn = $('yue2-ask-david');
+    const title = (el.title?.value || $('lg-title')?.value || '').trim();
+    const theme = ($('lg-theme')?.value || '').trim();
+    const avoid = (el.avoid?.value || '').trim();
+    const extra = (el.extra?.value || '').trim();
+    if (!title && !theme && !extra) {
+      setStatus('제목이나 주제, 추가 지시 중 하나는 적어 주세요'); return;
+    }
+    btn.disabled = true; const label = btn.textContent;
+    btn.textContent = '🕊️ 다윗이 쓰는 중… (최대 5분)';
+    setStatus('노래하는 다윗(ha19)에게 작사를 요청했습니다…');
+    const prompt =
+      `한국어 찬양(CCM) 한 곡의 가사와 음악 스타일을 써 주세요. 설명 없이 아래 형식 그대로만 답하세요.\n\n` +
+      `TITLE: (곡 제목 한 줄)\n` +
+      `STYLE: (영어 한 줄. 반드시 이 순서: 언어, 보컬 성격, 장르, 숫자 BPM, 악기 3~5개, 분위기, clear Korean diction)\n` +
+      `LYRICS:\n(여기부터 끝까지 가사. [Verse] [Pre-Chorus] [Chorus] [Bridge] [Outro] 태그 사용)\n\n` +
+      `작사 규칙(AI 음악 모델 YuE2에 그대로 넣을 것이라 꼭 지켜야 합니다):\n` +
+      `- 한 줄 7~13음절, 네 줄이 한 절. 13음절 넘으면 모델이 뒷말을 흘립니다\n` +
+      `- 후렴 첫 줄이 제목이 되게, 후렴은 글자 하나 안 바꾸고 그대로 반복\n` +
+      `- 영어 단어 금지(영어 발음으로 불러버립니다), 숫자는 한글로 풀어 쓰기(스무 곡)\n` +
+      `- 연출 지시문·괄호 설명 금지. 실제로 부를 말만\n` +
+      (title ? `\n제목(또는 방향): ${title}` : '') +
+      (theme ? `\n주제/본문: ${theme}` : '') +
+      (avoid ? `\n피해야 할 것: ${avoid}` : '') +
+      (extra ? `\n추가 요청: ${extra}` : '');
+    try {
+      const reply = await askDavidOnce(prompt);
+      const g = (name) => { const m = reply.match(new RegExp(`^${name}:\\s*(.+)$`, 'mi')); return m ? m[1].trim() : ''; };
+      const t = g('TITLE'), s = g('STYLE');
+      const li = reply.search(/^LYRICS:\s*$/mi);
+      const ly = li >= 0 ? reply.slice(reply.indexOf('\n', li) + 1).trim() : '';
+      if (t && el.title) el.title.value = t;
+      if (s && el.style) el.style.value = s;
+      if (ly && el.lyrics) el.lyrics.value = ly;
+      setStatus(ly ? '다윗이 가사를 써 왔습니다 — 확인하고 고친 뒤 [🎼 곡 만들기]'
+                   : '응답을 형식대로 못 읽었습니다. 붙여넣기 칸에 넣어 직접 파싱해 보세요');
+      if (!ly) { $('yue2-paste-box')?.classList.remove('hidden'); const p = $('yue2-paste'); if (p) p.value = reply; }
+      lint();
+    } catch (e) {
+      setStatus('⚠️ ' + (e.message || '실패'));
+    } finally {
+      btn.disabled = false; btn.textContent = label;
+    }
+  });
+
+  // ── 생성 ──
+  const addTake = (seed, blob, wanted, meta) => {
+    const url = URL.createObjectURL(blob);
+    const box = document.createElement('div');
+    box.className = 'yue2-take';
+    box.innerHTML =
+      `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;">
+         <b>시드 ${seed}</b><span data-len class="hint-text" style="margin:0;">길이 확인 중…</span>
+       </div>
+       <audio controls preload="metadata" src="${url}" style="width:100%;margin-top:4px;"></audio>
+       <div style="margin-top:4px;"><button class="btn-mini" data-use>✅ 이 곡 사용 (음원+가사 등록)</button>
+       <a class="btn-mini" href="${url}" download="${meta.id}_s${seed}.flac" style="margin-left:6px;">⬇ 저장</a></div>`;
+    el.takes.prepend(box);
+    const audio = box.querySelector('audio'), lenEl = box.querySelector('[data-len]');
+    audio.addEventListener('loadedmetadata', () => {
+      const cut = Math.abs(audio.duration - wanted) < 0.15;
+      lenEl.textContent = audio.duration.toFixed(1) + '초 · ' + (cut ? '⚠️ 잘림! 길이를 늘려 다시' : '완곡');
+    });
+    box.querySelector('[data-use]').addEventListener('click', async () => {
+      setStatus('음원과 가사를 앱에 등록하는 중…');
+      if (meta.title && $('lg-title')) $('lg-title').value = meta.title;
+      // 가사를 먼저 등록해야, 음원을 올릴 때 Whisper가 텍스트를 덮어쓰지 않고
+      // "타이밍만" 우리 가사에 맞춰 매칭한다 (커밋 0c79aa8 경로).
+      if (meta.lyrics && typeof applyLyricsTextGlobal === 'function') {
+        try { await applyLyricsTextGlobal(meta.lyrics); } catch (e) { console.error(e); }
+      }
+      const file = new File([blob], `${meta.id}_s${seed}.flac`, { type: 'audio/flac' });
+      const input = $('file-audio-ig');
+      if (input) {
+        const dt = new DataTransfer(); dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        setStatus('✅ 등록했습니다 — 아래 음원/가사 영역과 미디어 준비에 반영됩니다');
+      } else {
+        setStatus('⚠️ 음원 입력 칸을 찾지 못했습니다');
+      }
+    });
+  };
+
+  el.go.addEventListener('click', async () => {
+    const style = (el.style?.value || '').trim();
+    const lyrics = el.lyrics?.value || '';
+    if (!style || !lyrics.trim()) { setStatus('스타일과 가사를 먼저 채워 주세요'); return; }
+    const seeds = (el.seeds?.value || '7').split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
+    if (!seeds.length) { setStatus('시드를 하나 이상 적어 주세요'); return; }
+    const wanted = +(el.dur?.value || 105);
+    const id = (el.title?.value || 'song').trim().replace(/[^\w가-힣-]/g, '_').slice(0, 24) || 'song';
+    const base = getYue2ProxyUrl();
+
+    el.go.disabled = true;
+    for (const seed of seeds) {
+      const t0 = Date.now();
+      try {
+        setStatus(`시드 ${seed} 제출 중…`);
+        const r = await fetch(base + '/generate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, style, lyrics, seed, mode: 'full', maxDuration: wanted }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const { jobId } = await r.json();
+        // 폴링 — 곡 하나에 8~10분
+        for (;;) {
+          await new Promise(x => setTimeout(x, 5000));
+          const s = await (await fetch(`${base}/status?id=${encodeURIComponent(jobId)}`)).json();
+          if (s.status === 'error') throw new Error(s.error || '생성 실패');
+          if (s.status === 'done') break;
+          setStatus(`시드 ${seed} · ${s.stage || s.status} · ${Math.round((Date.now() - t0) / 1000)}초 경과`);
+        }
+        const blob = await (await fetch(`${base}/result?id=${encodeURIComponent(jobId)}`)).blob();
+        addTake(seed, blob, wanted, { id, title: (el.title?.value || '').trim(), lyrics });
+        setStatus(`시드 ${seed} 완료 (${Math.round((Date.now() - t0) / 1000)}초) — 들어 보고 [이 곡 사용]`);
+      } catch (e) {
+        const m = String(e.message || e);
+        setStatus('⚠️ 시드 ' + seed + ' 실패: ' +
+          (/Failed to fetch/i.test(m) ? 'proxy.cjs가 꺼져 있습니다 (폴더에서 node proxy.cjs 실행)' : m));
+      }
+    }
+    el.go.disabled = false;
+  });
+
+  lint();
+}
+
 function bindLyricImageGen() {
   const $L = id => document.getElementById(id);
   if (!$L('lg-apikey')) return;
@@ -7092,6 +7369,7 @@ async function init() {
   bindStage1Lyrics();
   bindStage1AudioTranscribe();
   bindLyricImageGen();
+  bindYue2Panel();
   bindImg2Vid();
   bindThumbnailGen();
   bindCanvasDragEdit();

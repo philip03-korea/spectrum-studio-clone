@@ -243,6 +243,195 @@ async function handleComfyRoute(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// YuE2 곡 생성 브릿지 (음악용 ComfyUI — 영상용 8188과 별개의 설치/포트다)
+//
+//   D:\ComfyUI        v0.28  포트 8188  영상화(Wan2.2 I2V)   ← 위 /comfy/*
+//   D:\ComfyUI-YuE2   v0.37  포트 8189  노래 생성(YuE2-3B)   ← 여기 /yue2/*
+//
+// YuE2 노드는 ComfyUI v0.36+ 기본 노드라 0.28에서는 돌지 않는다. 그래서 영상용을
+// 업그레이드하지 않고 별도 설치를 뒀다. 기동 플래그 2개는 이 PC(RTX 2070)에서 실측으로
+// 필수임이 확인된 것이다 — 빼면 ComfyUI 프로세스가 통째로 죽는다:
+//   --disable-dynamic-vram : 없으면 KSampler에서 hostbuf_file_reader_read failed
+//   --disable-cuda-malloc  : 없으면 CUDA unknown error / ConditioningZeroOut access violation
+// ---------------------------------------------------------------------------
+const YUE2_ROOT = 'D:\\ComfyUI-YuE2';
+const YUE2_PYTHON = path.join(YUE2_ROOT, 'python_embeded', 'python.exe');
+const YUE2_BASE = 'http://127.0.0.1:8189';
+const YUE2_CKPT = 'yue2_3b_int8_convrot.safetensors';
+const YUE2_ARGS = [
+  '-s', 'ComfyUI\\main.py', '--listen', '127.0.0.1', '--port', '8189',
+  '--disable-dynamic-vram', '--disable-cuda-malloc',
+];
+
+// jobId -> { status, stage, error?, buffer?, filename? }
+const yue2Jobs = new Map();
+let yue2EnsurePromise = null;
+
+async function yue2IsUp() {
+  for (let i = 0; i < 2; i++) {
+    try {
+      const r = await fetch(YUE2_BASE + '/system_stats', { signal: AbortSignal.timeout(8000) });
+      if (r.ok) return true;
+    } catch (_) {}
+  }
+  return false;
+}
+
+async function ensureYue2Running() {
+  if (await yue2IsUp()) return;
+  if (yue2EnsurePromise) return yue2EnsurePromise;
+  yue2EnsurePromise = (async () => {
+    if (!fs.existsSync(YUE2_PYTHON)) {
+      throw new Error(`음악용 ComfyUI를 찾을 수 없습니다: ${YUE2_PYTHON}`);
+    }
+    console.log('[proxy] 음악용 ComfyUI(8189) 기동 중…');
+    const child = spawn(YUE2_PYTHON, YUE2_ARGS, {
+      cwd: YUE2_ROOT,
+      detached: true,
+      stdio: ['ignore',
+        fs.openSync(path.join(YUE2_ROOT, 'yue2-stdout.log'), 'a'),
+        fs.openSync(path.join(YUE2_ROOT, 'yue2-stderr.log'), 'a')],
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    });
+    child.unref();
+    const deadline = Date.now() + 300_000;   // 5분 (콜드 스타트 여유)
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 4000));
+      if (await yue2IsUp()) { console.log('[proxy] 음악용 ComfyUI 준비 완료'); return; }
+    }
+    throw new Error('음악용 ComfyUI가 5분 내에 기동되지 않았습니다 (D:\\ComfyUI-YuE2 확인)');
+  })();
+  try { await yue2EnsurePromise; } finally { yue2EnsurePromise = null; }
+}
+
+// vendor 키트(yue2_run.py) 및 ComfyUI 공식 템플릿과 동일한 배선
+function buildYue2Graph({ style, lyrics, seed, mode, maxDuration, prefix }) {
+  return {
+    '1': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: YUE2_CKPT } },
+    '2': { class_type: 'YuE2GenerateABC', inputs: {
+      clip: ['1', 1], style, lyrics, seed, mode, max_abc_tokens: 8192,
+      temperature: 0.7, top_p: 0.9, top_k: 30, repetition_penalty: 1.005, penalty_window: 100 } },
+    '3': { class_type: 'YuE2GenerateMusic', inputs: {
+      clip: ['1', 1], style, lyrics, abc: ['2', 0], seed, mode, max_duration: maxDuration,
+      temperature: 1.0, top_p: 0.95, top_k: 100, repetition_penalty: 1.2 } },
+    '4': { class_type: 'ConditioningZeroOut', inputs: { conditioning: ['3', 0] } },
+    '5': { class_type: 'EmptyYuE2LatentAudio', inputs: { seconds: ['3', 1], batch_size: 1 } },
+    '6': { class_type: 'KSampler', inputs: {
+      model: ['1', 0], positive: ['3', 0], negative: ['4', 0], latent_image: ['5', 0],
+      seed, steps: 32, cfg: 1.0, sampler_name: 'dpm_2', scheduler: 'sgm_uniform', denoise: 1.0 } },
+    '7': { class_type: 'VAEDecodeAudio', inputs: { samples: ['6', 0], vae: ['1', 2] } },
+    '8': { class_type: 'SaveAudio', inputs: { audio: ['7', 0], filename_prefix: prefix } },
+  };
+}
+
+async function submitYue2(graph) {
+  const res = await fetch(YUE2_BASE + '/prompt', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: graph, client_id: crypto.randomUUID() }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.error) throw new Error('YuE2 워크플로우 거부: ' + JSON.stringify(body.error || body));
+  return body.prompt_id;
+}
+
+// 결과는 파일 경로 대신 ComfyUI /view 로 받아온다 — 출력 폴더 위치를 몰라도 되고,
+// 곡 하나가 8~10분이라 완료 후 한 번만 받으면 된다.
+async function fetchYue2Audio(entry) {
+  for (const node of Object.values(entry.outputs || {})) {
+    for (const a of (node.audio || [])) {
+      const q = new URLSearchParams({
+        filename: a.filename, subfolder: a.subfolder || '', type: a.type || 'output' });
+      const r = await fetch(`${YUE2_BASE}/view?${q}`);
+      if (!r.ok) throw new Error('결과 오디오 다운로드 실패: ' + r.status);
+      return { buffer: Buffer.from(await r.arrayBuffer()), filename: a.filename };
+    }
+  }
+  throw new Error('출력 오디오를 찾지 못했습니다');
+}
+
+async function runYue2Job(jobId, p) {
+  const job = yue2Jobs.get(jobId);
+  try {
+    job.status = 'starting'; job.stage = '음악용 ComfyUI 준비 중';
+    await ensureYue2Running();
+    const graph = buildYue2Graph({
+      style: p.style, lyrics: p.lyrics, seed: p.seed,
+      mode: p.mode || 'full', maxDuration: p.maxDuration || 105,
+      prefix: 'yue2/' + (p.id || 'ssc') + '_s' + p.seed,
+    });
+    job.status = 'queued'; job.stage = '대기열 제출';
+    const promptId = await submitYue2(graph);
+    job.status = 'running'; job.stage = '악보 쓰는 중 → 노래 부르는 중 (8~10분)';
+    const deadline = Date.now() + 60 * 60 * 1000;
+    let entry = null;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 4000));
+      const hist = await (await fetch(YUE2_BASE + '/history/' + promptId)).json();
+      const e = hist[promptId];
+      if (!e) continue;
+      const st = e.status || {};
+      if (st.status_str === 'error') {
+        const msg = (st.messages || []).filter(m => m[0] === 'execution_error')
+          .map(m => m[1].exception_message).join(' / ');
+        throw new Error('YuE2 실행 오류: ' + (msg || JSON.stringify(st)));
+      }
+      if (st.completed === true || st.status_str === 'success') { entry = e; break; }
+    }
+    if (!entry) throw new Error('제한 시간 내에 곡 생성이 끝나지 않았습니다');
+    job.stage = '결과 받는 중';
+    const { buffer, filename } = await fetchYue2Audio(entry);
+    job.buffer = buffer; job.filename = filename;
+    job.status = 'done'; job.stage = '완료';
+  } catch (err) {
+    job.status = 'error';
+    job.error = err && err.message ? err.message : String(err);
+  }
+}
+
+async function handleYue2Route(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+
+  if (req.method === 'POST' && url.pathname === '/yue2/generate') {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    let body;
+    try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch (_) { res.statusCode = 400; res.end('잘못된 JSON'); return; }
+    if (!body.style || !body.lyrics) { res.statusCode = 400; res.end('style, lyrics 필요'); return; }
+    const jobId = crypto.randomUUID();
+    yue2Jobs.set(jobId, { status: 'starting', stage: '준비 중' });
+    runYue2Job(jobId, body);
+    res.statusCode = 202;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ jobId }));
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/yue2/status') {
+    const job = yue2Jobs.get(url.searchParams.get('id'));
+    res.setHeader('Content-Type', 'application/json');
+    if (!job) { res.statusCode = 404; res.end(JSON.stringify({ error: '알 수 없는 작업 id' })); return; }
+    res.end(JSON.stringify({ status: job.status, stage: job.stage, error: job.error }));
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/yue2/result') {
+    const job = yue2Jobs.get(url.searchParams.get('id'));
+    if (!job || job.status !== 'done' || !job.buffer) { res.statusCode = 425; res.end('아직 준비되지 않음'); return; }
+    res.setHeader('Content-Type', 'audio/flac');
+    res.setHeader('Content-Length', job.buffer.length);
+    // HTTP 헤더에는 비ASCII를 넣을 수 없다. 곡 제목이 한글이면 파일명도 한글이라
+    // 그대로 넣으면 ERR_INVALID_CHAR 로 프록시가 죽는다 (2026-09-26 실측).
+    res.setHeader('X-Filename', encodeURIComponent(job.filename || 'yue2.flac'));
+    res.end(job.buffer);
+    return;
+  }
+
+  res.statusCode = 404;
+  res.end('Use POST /yue2/generate, GET /yue2/status?id=, GET /yue2/result?id=');
+}
+
+// ---------------------------------------------------------------------------
 // Higgsfield 패스스루 프록시 (기존)
 // ---------------------------------------------------------------------------
 async function handleHfRoute(req, res) {
@@ -287,15 +476,29 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
 
-  if (req.url.startsWith('/hf')) return handleHfRoute(req, res);
-  if (req.url.startsWith('/comfy')) return handleComfyRoute(req, res);
+  // 라우트 하나에서 난 예외가 프로세스를 통째로 죽이지 않게 감싼다.
+  // (한글 파일명을 헤더에 넣다가 ERR_INVALID_CHAR 로 프록시가 죽어, 브라우저에는
+  //  "proxy.cjs가 꺼져 있습니다"로만 보였던 일이 있었다 — 2026-09-26)
+  try {
+    if (req.url.startsWith('/hf')) return await handleHfRoute(req, res);
+    if (req.url.startsWith('/comfy')) return await handleComfyRoute(req, res);
+    if (req.url.startsWith('/yue2')) return await handleYue2Route(req, res);
 
-  res.statusCode = 404;
-  res.end('Use /hf/<path> (Higgsfield) or /comfy/<path> (로컬 ComfyUI 영상화)');
+    res.statusCode = 404;
+    res.end('Use /hf/<path> (Higgsfield), /comfy/<path> (영상화) or /yue2/<path> (곡 생성)');
+  } catch (err) {
+    console.error('[proxy] 처리 중 오류:', err && err.stack ? err.stack : err);
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    }
+    if (!res.writableEnded) res.end('프록시 내부 오류: ' + (err && err.message ? err.message : String(err)));
+  }
 });
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[proxy] http://localhost:${PORT}/hf/*     →  ${HF_BASE}/*`);
-  console.log(`[proxy] http://localhost:${PORT}/comfy/*   →  ${COMFY_BASE}/* (로컬 ComfyUI, 필요시 자동 기동)`);
+  console.log(`[proxy] http://localhost:${PORT}/comfy/*   →  ${COMFY_BASE}/* (영상용 ComfyUI, 필요시 자동 기동)`);
+  console.log(`[proxy] http://localhost:${PORT}/yue2/*    →  ${YUE2_BASE}/* (음악용 ComfyUI/YuE2, 필요시 자동 기동)`);
   console.log(`        (Ctrl+C to stop)`);
 });

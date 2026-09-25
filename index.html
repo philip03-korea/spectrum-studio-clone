@@ -162,7 +162,46 @@
             <input type="text" class="text-input" id="lg-title" placeholder="곡 제목" style="margin-bottom: 6px;" />
             <input type="text" class="text-input" id="lg-theme" placeholder="성경 인물/주제 (예: 아브라함의 연대기)" />
 
-            <div class="sub-title">🎵 음원 업로드 (Suno MP3)</div>
+            <div class="sub-title">🎼 곡 만들기 (YuE2 · 이 PC에서 무료 생성)</div>
+            <div class="hint-text" style="margin-bottom:6px;">
+              수노 대신 이 PC의 ComfyUI(YuE2)로 찬양을 직접 만듭니다 ·
+              곡당 8~10분 · <code>node proxy.cjs</code> 가 켜져 있어야 합니다
+            </div>
+
+            <div class="lyrics-mode" style="flex-wrap:wrap; gap:6px; margin-bottom:6px;">
+              <button class="btn-key-save" id="yue2-ask-david">🕊️ 다윗에게 가사 받기</button>
+              <button class="btn-mini" id="yue2-paste-toggle">📥 다윗의 노래 붙여넣기</button>
+              <button class="btn-mini" id="yue2-from-app">↻ 앱에서 제목 가져오기</button>
+            </div>
+
+            <div id="yue2-paste-box" class="hidden" style="margin-bottom:8px;">
+              <textarea class="text-area" id="yue2-paste" rows="5"
+                placeholder="클로드 프로젝트의 '다윗의 노래' 내용을 그대로 붙여넣으세요.&#10;제목: / 스타일: / 가사: / 피할 것: 같은 라벨이 있으면 알아서 칸을 채웁니다.&#10;라벨이 없으면 [Verse] 같은 섹션 태그를 찾아 가사로 넣습니다."></textarea>
+              <button class="btn-mini" id="yue2-paste-apply" style="margin-top:4px;">칸에 채우기</button>
+            </div>
+
+            <input type="text" class="text-input" id="yue2-title" placeholder="제목 (예: 벼랑 끝에서)" style="margin-bottom:6px;" />
+            <textarea class="text-area" id="yue2-style" rows="3"
+              placeholder="스타일 — 언어, 보컬, 장르, BPM, 악기, 분위기 (영어, 쉼표로)&#10;예: Korean, sung by a man, deep masculine male voice, no female vocals, reverent worship ballad, 72 BPM, piano, warm strings, clear Korean diction"></textarea>
+            <textarea class="text-area" id="yue2-lyrics" rows="8" style="margin-top:6px;"
+              placeholder="가사 — [Verse] [Chorus] 태그 + 실제로 부를 말 (한 줄 7~13음절)"></textarea>
+            <textarea class="text-area" id="yue2-avoid" rows="2" style="margin-top:6px;"
+              placeholder="피해야 할 것 (예: 영어 단어, 숫자, 신파조 표현, 특정 단어…)"></textarea>
+            <textarea class="text-area" id="yue2-extra" rows="2" style="margin-top:6px;"
+              placeholder="추가로 넣을 지시 (다윗에게 전달됩니다 — 예: 2절까지, 후렴은 떼창으로, 시편 42편 느낌)"></textarea>
+
+            <div class="lyrics-mode" style="margin-top:6px; flex-wrap:wrap; gap:6px; align-items:center;">
+              <label class="hint-text" style="margin:0;">길이(초)</label>
+              <input type="number" class="text-input" id="yue2-dur" value="105" min="20" max="300" step="5" style="width:80px;" />
+              <label class="hint-text" style="margin:0;">시드</label>
+              <input type="text" class="text-input" id="yue2-seeds" value="7,21" style="width:110px;" />
+              <button class="btn-key-save" id="yue2-go">🎼 곡 만들기</button>
+            </div>
+            <div class="hint-text" id="yue2-lint" style="margin-top:4px;"></div>
+            <div class="hint-text" id="yue2-status" style="margin-top:4px;">대기 중</div>
+            <div id="yue2-takes" style="margin-top:6px;"></div>
+
+            <div class="sub-title">🎵 음원 업로드 (Suno MP3 · 또는 위에서 만든 곡)</div>
             <div class="drop-area drop-mini" id="audio-drop-ig">
               <input type="file" id="file-audio-ig" accept="audio/*" hidden />
               <label for="file-audio-ig" class="drop-label">
@@ -1331,7 +1370,7 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v4_46_david_domain_fix"></script>
+  <script type="module" src="app.js?v=v5_0_yue2_song_panel"></script>
   <script type="module" src="uploadkit/uploadkit-ui.js?v=v1_4_aifill"></script>
 </body>
 </html>
