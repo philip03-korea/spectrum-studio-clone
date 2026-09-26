@@ -5834,6 +5834,122 @@ const _lg = {
 };
 
 // ====================================================================
+// 🔌 연결 상태 — env 파일에서 키 불러오기 + 한 번에 접속 확인
+//   env 파일은 브라우저(FileReader)가 직접 읽는다. 값은 이 PC localStorage 에만
+//   들어가고 어디로도 전송되지 않는다.
+// ====================================================================
+function parseEnvText(text) {
+  const out = {};
+  // 1) JSON 형태
+  try {
+    const j = JSON.parse(text);
+    if (j && typeof j === 'object') Object.assign(out, j);
+  } catch (_) {
+    // 2) KEY=VALUE / KEY: VALUE 한 줄씩
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z0-9_.-]+)\s*[=:]\s*(.+?)\s*$/);
+      if (!m) continue;
+      let v = m[2].trim().replace(/^["']|["']$/g, '');
+      if (v && !v.startsWith('#')) out[m[1].toUpperCase()] = v;
+    }
+  }
+  const pick = (...names) => {
+    for (const n of names) {
+      for (const k of Object.keys(out)) {
+        if (k.toUpperCase() === n) return String(out[k]).trim();
+      }
+    }
+    return '';
+  };
+  let openai = pick('OPENAI_API_KEY', 'OPENAI_KEY', 'OPENAI', 'SSC_OPENAI_KEY');
+  let hfProxy = pick('HF_PROXY_URL', 'HIGGSFIELD_PROXY', 'SSC_HF_PROXY_URL', 'WORKER_URL');
+  // 라벨을 못 찾으면 본문에서 형태로 추정
+  if (!openai) { const m = text.match(/\bsk-[A-Za-z0-9_\-]{20,}/); if (m) openai = m[0]; }
+  if (!hfProxy) { const m = text.match(/https:\/\/[^\s"']*workers\.dev[^\s"']*/); if (m) hfProxy = m[0]; }
+  return { openai, hfProxy };
+}
+
+function bindEnvAndHealth() {
+  const fileInput = $('env-file'), loadBtn = $('env-load'), checkBtn = $('conn-check'), out = $('conn-result');
+  if (!loadBtn || !checkBtn) return;
+
+  loadBtn.addEventListener('click', () => fileInput?.click());
+  fileInput?.addEventListener('change', async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    const text = await f.text();
+    const { openai, hfProxy } = parseEnvText(text);
+    const got = [];
+    if (openai && $('lg-apikey')) {
+      $('lg-apikey').value = openai;
+      $('lg-apikey').dispatchEvent(new Event('input', { bubbles: true }));
+      got.push('OpenAI 키');
+    }
+    if (hfProxy && $('lg-hf-proxy')) {
+      $('lg-hf-proxy').value = hfProxy;
+      $('lg-hf-proxy').dispatchEvent(new Event('input', { bubbles: true }));
+      got.push('Higgsfield 프록시');
+    }
+    out.innerHTML = got.length
+      ? `✅ <b>${f.name}</b> 에서 ${got.join(' · ')} 를 불러와 저장했습니다 — [🔌 접속 확인]으로 검증하세요`
+      : `⚠️ <b>${f.name}</b> 에서 키를 못 찾았습니다. OPENAI_API_KEY / HF_PROXY_URL 형식인지 확인하거나 아래 칸에 직접 넣어 주세요`;
+  });
+
+  checkBtn.addEventListener('click', async () => {
+    checkBtn.disabled = true;
+    const rows = [];
+    const paint = () => { out.innerHTML = rows.join('<br>'); };
+    const add = (name, ok, msg) => { rows.push(`${ok === null ? '⏳' : ok ? '✅' : '❌'} <b>${name}</b> — ${msg}`); paint(); };
+    rows.length = 0; out.innerHTML = '확인 중…';
+
+    // 1) 로컬 프록시 + 음악용 ComfyUI
+    const yBase = getYue2ProxyUrl();
+    try {
+      const r = await fetch(yBase + '/health', { signal: AbortSignal.timeout(12000) });
+      const j = await r.json();
+      add('proxy.cjs (8766)', true, '연결됨');
+      add('음악용 ComfyUI (8189)', !!j.comfyui,
+        j.comfyui ? 'YuE2 준비됨' : '꺼져 있음 — [🎼 곡 만들기] 누르면 자동 기동(첫 기동 몇 분)');
+    } catch (_) {
+      add('proxy.cjs (8766)', false, '연결 안 됨 — 저장소 폴더에서 <code>node proxy.cjs</code> 실행');
+      add('음악용 ComfyUI (8189)', false, '프록시가 없어 확인 불가');
+    }
+
+    // 2) 영상용 ComfyUI (8188) — 기존 영상화 기능용
+    try {
+      const r = await fetch(getComfyProxyUrl() + '/status?id=ping', { signal: AbortSignal.timeout(8000) });
+      add('영상용 ComfyUI 경로 (8188)', r.status === 404 || r.ok, '프록시 라우트 응답 OK (기동은 영상화 누를 때)');
+    } catch (_) {
+      add('영상용 ComfyUI 경로 (8188)', false, '프록시 없음');
+    }
+
+    // 3) Higgsfield 프록시 (Cloudflare Worker)
+    const hf = (localStorage.getItem('ssc-hf-proxy-url') || $('lg-hf-proxy')?.value || '').trim();
+    if (!hf) add('Higgsfield 프록시', false, '미설정 — 이미지 생성 시 필요');
+    else {
+      try {
+        const r = await fetch(hf.replace(/\/+$/, ''), { signal: AbortSignal.timeout(12000) });
+        const t = (await r.text()).slice(0, 80);
+        add('Higgsfield 프록시', r.ok, r.ok ? `응답 OK ${t}` : `HTTP ${r.status}`);
+      } catch (_) { add('Higgsfield 프록시', false, '연결 실패 (URL 확인)'); }
+    }
+
+    // 4) OpenAI 키 — Whisper 가사 타이밍 매칭·장면 분석에 쓰인다
+    const key = (localStorage.getItem('ssc-openai-key') || $('lg-apikey')?.value || '').trim();
+    if (!key) add('OpenAI 키', false, '미설정 — 가사 자동 싱크(Whisper)·장면 분석에 필요');
+    else {
+      try {
+        const r = await fetch('https://api.openai.com/v1/models', {
+          headers: { Authorization: 'Bearer ' + key }, signal: AbortSignal.timeout(12000) });
+        add('OpenAI 키', r.ok, r.ok ? '유효' : (r.status === 401 ? '인증 실패 (키 확인)' : 'HTTP ' + r.status));
+      } catch (_) { add('OpenAI 키', false, '연결 실패'); }
+    }
+    checkBtn.disabled = false;
+  });
+}
+
+// ====================================================================
 // 🎼 곡 만들기 (YuE2) — 이 PC의 음악용 ComfyUI(8189)로 찬양을 직접 생성
 //   브라우저 → proxy.cjs(/yue2/*) → ComfyUI 8189 → flac
 //   완성된 곡은 기존 "음원 업로드" 경로로 흘려보내 가사 싱크·영상 렌더까지 그대로 탄다.
@@ -7369,6 +7485,7 @@ async function init() {
   bindStage1Lyrics();
   bindStage1AudioTranscribe();
   bindLyricImageGen();
+  bindEnvAndHealth();
   bindYue2Panel();
   bindImg2Vid();
   bindThumbnailGen();

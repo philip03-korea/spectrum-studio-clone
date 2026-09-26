@@ -132,6 +132,19 @@
             <h2 class="panel-title">🎨 가사 맞춤 이미지 생성</h2>
             <p class="panel-desc">가사를 분석해서 장면별 이미지를 자동 생성합니다. (필요한 경우만 사용 — Stage 2로 바로 이동해도 됩니다)</p>
 
+            <div class="sub-title">🔌 연결 상태</div>
+            <div class="lyrics-mode" style="flex-wrap:wrap; gap:6px;">
+              <input type="file" id="env-file" accept=".env,.txt,.json,.cfg,.ini" hidden />
+              <button class="btn-mini" id="env-load">🔑 env 파일에서 키 불러오기</button>
+              <button class="btn-key-save" id="conn-check">🔌 접속 확인</button>
+            </div>
+            <div class="hint-text" id="conn-result" style="margin-top:4px; line-height:1.9;">
+              [접속 확인]을 누르면 프록시·ComfyUI·Higgsfield·OpenAI 를 한 번에 점검합니다
+            </div>
+            <div class="hint-text" style="margin-top:2px;">
+              env 파일은 <b>브라우저가 직접 읽어</b> 이 PC의 localStorage에만 저장합니다 (서버로 전송되지 않음)
+            </div>
+
             <div class="sub-title">🔑 OpenAI API 키</div>
             <div class="apikey-row">
               <input type="password" class="text-input" id="lg-apikey" placeholder="sk-..." autocomplete="off" />
@@ -1370,7 +1383,7 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=v5_0_yue2_song_panel"></script>
+  <script type="module" src="app.js?v=v5_1_env_health"></script>
   <script type="module" src="uploadkit/uploadkit-ui.js?v=v1_4_aifill"></script>
 </body>
 </html>

@@ -407,6 +407,15 @@ async function handleYue2Route(req, res) {
     return;
   }
 
+  // 접속 확인용 — 프록시 자신과 음악용 ComfyUI(8189)가 살아 있는지 한 번에 알려준다.
+  // (ComfyUI를 기동시키지는 않는다 — 확인 버튼이 5분짜리 콜드 스타트를 유발하면 곤란하다)
+  if (req.method === 'GET' && url.pathname === '/yue2/health') {
+    const up = await yue2IsUp();
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ proxy: true, comfyui: up, base: YUE2_BASE }));
+    return;
+  }
+
   if (req.method === 'GET' && url.pathname === '/yue2/status') {
     const job = yue2Jobs.get(url.searchParams.get('id'));
     res.setHeader('Content-Type', 'application/json');
